@@ -8,11 +8,12 @@ import { z } from "zod";
 import { clientCommandSchema, PROTOCOL_VERSION } from "@tableloom/core";
 import { contextKey } from "@tableloom/core/campaigns";
 import type { Member } from "@tableloom/core/access";
-import type { TableState, ServerMessage } from "@tableloom/core";
+import type { ServerMessage } from "@tableloom/core";
 import { applyCommand, projectTable } from "@tableloom/core/server";
 import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
+import { OutboundChannel } from "./outbound.js";
 import { CommandBindings } from "./command-bindings.js";
 import { transaction } from "./database.js";
 import { RollHistoryStore } from "./roll-history.js";
@@ -76,10 +77,16 @@ export async function createApp(options: {
   type Client = { credential: string; campaignId: string };
   const clients = new Map<WebSocket, Client>();
   const sentVersions = new Map<WebSocket, string>();
+  const outbound = new Map<WebSocket, OutboundChannel>();
   const authenticate = (socket: WebSocket): Member | null => {
     const context = clients.get(socket);
     const member = access.authenticate(context?.credential ?? "");
     return member && member.tableId === context?.campaignId ? member : null;
+  };
+  const closeClient = (socket: WebSocket, code: number, reason: string) => {
+    const channel = outbound.get(socket);
+    if (channel) channel.close(code, reason);
+    else socket.close(code, reason);
   };
   const participants = (campaignId: string) =>
     [...clients].filter(
@@ -88,35 +95,24 @@ export async function createApp(options: {
         socket.readyState === 1 &&
         authenticate(socket),
     ).length;
-  const send = (socket: WebSocket, message: ServerMessage) => {
-    if (socket.readyState !== 1) return;
-    if (!authenticate(socket)) {
-      socket.close(4001, "Sign in to the table again.");
-      return;
-    }
-    if (socket.bufferedAmount > 4 * 1024 * 1024) {
-      socket.close(1013, "Connection is too slow; reconnect.");
-      return;
-    }
-    socket.send(JSON.stringify(message));
+  const send = (
+    socket: WebSocket,
+    message: Extract<ServerMessage, { type: "ack" | "error" }>,
+  ) => {
+    outbound.get(socket)?.control(message);
   };
   const broadcastPresence = (campaignId: string) => {
-    const message: ServerMessage = {
-      type: "presence",
-      participants: participants(campaignId),
-    };
     for (const [socket, context] of clients)
-      if (context.campaignId === campaignId) send(socket, message);
+      if (context.campaignId === campaignId) outbound.get(socket)?.presence();
   };
-  const sendSnapshot = (
+  const buildSnapshot = (
     socket: WebSocket,
-    force = false,
-    loaded?: TableState,
-  ) => {
+    force: boolean,
+  ): Extract<ServerMessage, { type: "snapshot" }> | null => {
     const member = authenticate(socket);
     if (!member) {
-      socket.close(4001, "Sign in again.");
-      return;
+      closeClient(socket, 4001, "Sign in again.");
+      return null;
     }
     const campaign = store.getCampaign(member.tableId);
     const context = {
@@ -125,10 +121,11 @@ export async function createApp(options: {
       generation: campaign.version,
     };
     const scene = store.getScene(campaign.id, campaign.activeSceneId);
-    const view = projectTable(loaded ?? store.load(member.tableId), member);
+    const view = projectTable(store.load(member.tableId), member);
     const fingerprint = `${contextKey(context)}:${view.version}`;
-    if (!force && sentVersions.get(socket) === fingerprint) return;
-    send(socket, {
+    if (!force && sentVersions.get(socket) === fingerprint) return null;
+    sentVersions.set(socket, fingerprint);
+    return {
       type: "snapshot",
       protocolVersion: PROTOCOL_VERSION,
       state: view,
@@ -136,20 +133,18 @@ export async function createApp(options: {
       campaignName: campaign.name,
       sceneName: scene.name,
       participants: participants(member.tableId),
-    });
-    sentVersions.set(socket, fingerprint);
+    };
   };
-  const refreshCampaign = (
-    campaignId: string,
-    state = store.load(campaignId),
-  ) => {
+  const sendSnapshot = (socket: WebSocket, force = false) =>
+    outbound.get(socket)?.snapshot(force);
+  const refreshCampaign = (campaignId: string) => {
     for (const [socket, context] of clients)
-      if (context.campaignId === campaignId) sendSnapshot(socket, false, state);
+      if (context.campaignId === campaignId) sendSnapshot(socket);
   };
   const disconnectInvalid = () => {
     for (const socket of clients.keys())
       if (!authenticate(socket))
-        socket.close(4001, "Your table access changed. Sign in again.");
+        closeClient(socket, 4001, "Your table access changed. Sign in again.");
   };
   const queryContext = (request: { query: unknown }, member: Member) => {
     const query = z
@@ -182,7 +177,7 @@ export async function createApp(options: {
     disconnect: (token) => {
       for (const [socket, context] of clients)
         if (context.credential === token)
-          socket.close(4001, "You signed out of the table.");
+          closeClient(socket, 4001, "You signed out of the table.");
     },
     disconnectInvalid,
   });
@@ -236,7 +231,7 @@ export async function createApp(options: {
       const credential = sessionToken(request.headers.cookie);
       const initial = access.authenticate(credential);
       if (!initial) {
-        socket.close(4001, "Sign in again.");
+        closeClient(socket, 4001, "Sign in again.");
         return;
       }
       store.getCampaign(initial.tableId);
@@ -244,10 +239,26 @@ export async function createApp(options: {
         credential,
         campaignId: initial.tableId,
       });
+      outbound.set(
+        socket,
+        new OutboundChannel(socket, {
+          authorized: () => Boolean(authenticate(socket)),
+          snapshot: (force) => buildSnapshot(socket, force),
+          presence: () => ({
+            type: "presence",
+            participants: participants(initial.tableId),
+          }),
+          schedule: (action, delay) => {
+            const timer = setTimeout(action, delay);
+            timer.unref();
+            return () => clearTimeout(timer);
+          },
+        }),
+      );
       try {
         sendSnapshot(socket, true);
       } catch {
-        socket.close(1011, "Unable to open this campaign.");
+        closeClient(socket, 1011, "Unable to open this campaign.");
       }
       broadcastPresence(initial.tableId);
       let windowStart = Date.now();
@@ -258,7 +269,7 @@ export async function createApp(options: {
       });
       const heartbeat = setInterval(() => {
         if (!authenticate(socket)) {
-          socket.close(4001, "Sign in again.");
+          closeClient(socket, 4001, "Sign in again.");
           return;
         }
         if (!alive) {
@@ -269,9 +280,10 @@ export async function createApp(options: {
         socket.ping();
       }, 30000);
       socket.on("message", (raw, isBinary) => {
+        if (socket.readyState !== 1) return;
         const member = authenticate(socket);
         if (!member) {
-          socket.close(4001, "Sign in again.");
+          closeClient(socket, 4001, "Sign in again.");
           return;
         }
         if (Date.now() - windowStart > 10000) {
@@ -279,7 +291,7 @@ export async function createApp(options: {
           count = 0;
         }
         if (++count > 120) {
-          socket.close(1008, "Too many commands.");
+          closeClient(socket, 1008, "Too many commands.");
           return;
         }
         let commandId: string | undefined;
@@ -335,7 +347,7 @@ export async function createApp(options: {
           committed = outcome.kind === "saved" || outcome.kind === "retry";
           // No outbound acknowledgement precedes the transaction's commit.
           if (outcome.kind === "unauthorized")
-            socket.close(4001, "Sign in again.");
+            closeClient(socket, 4001, "Sign in again.");
           else if (outcome.kind === "stale") {
             send(socket, {
               type: "error",
@@ -347,12 +359,13 @@ export async function createApp(options: {
           } else {
             send(socket, { type: "ack", commandId });
             if (outcome.kind === "retry") sendSnapshot(socket, true);
-            else refreshCampaign(member.tableId, outcome.state);
+            else refreshCampaign(member.tableId);
           }
         } catch (error) {
           app.log.debug({ err: error }, "Rejected table command");
           if (committed) {
-            socket.close(
+            closeClient(
+              socket,
               1011,
               "The change was saved but the view could not refresh.",
             );
@@ -373,7 +386,7 @@ export async function createApp(options: {
             try {
               sendSnapshot(socket, true);
             } catch {
-              socket.close(1011, "Unable to reload this campaign.");
+              closeClient(socket, 1011, "Unable to reload this campaign.");
             }
           }
         }
@@ -385,6 +398,8 @@ export async function createApp(options: {
         clearInterval(heartbeat);
         clients.delete(socket);
         sentVersions.delete(socket);
+        outbound.get(socket)?.dispose();
+        outbound.delete(socket);
         broadcastPresence(initial.tableId);
       });
     },
@@ -393,6 +408,8 @@ export async function createApp(options: {
     await app.register(fastifyStatic, { root: options.webRoot });
   }
   app.addHook("onClose", async () => {
+    for (const channel of outbound.values()) channel.dispose();
+    outbound.clear();
     for (const socket of clients.keys()) socket.terminate();
     store.close();
     access.close();
