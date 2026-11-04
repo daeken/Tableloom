@@ -47,6 +47,16 @@ export interface InstalledCatalog {
 const json = (value: unknown): unknown => JSON.parse(z.string().parse(value));
 const version = z.number().int().positive();
 
+export class StoreError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: 400 | 404 | 409,
+  ) {
+    super(message);
+    this.name = "StoreError";
+  }
+}
+
 /** Trusted persistence boundary. Public campaign routes must authorize membership
  * and bind commands to a campaign/scene before calling these methods. */
 export class TableStore {
@@ -180,7 +190,7 @@ export class TableStore {
         "SELECT id, active_scene_id, json FROM campaign_records WHERE id = ?",
       )
       .get(id);
-    if (!row) throw new Error("That campaign is unavailable.");
+    if (!row) throw new StoreError("That campaign is unavailable.", 404);
     const campaign = campaignSchema.parse(json(row.json));
     if (
       campaign.id !== row.id ||
@@ -201,7 +211,10 @@ export class TableStore {
             .get()?.count,
         ) >= MAX_CAMPAIGNS
       )
-        throw new Error("This server has reached its campaign limit.");
+        throw new StoreError(
+          "This server has reached its campaign limit.",
+          409,
+        );
       return this.insertCampaign(
         settings,
         { ...createTable(), systemId: settings.system.id },
@@ -221,7 +234,10 @@ export class TableStore {
     return this.transaction(() => {
       const current = this.getCampaign(id);
       if (current.version !== expectedVersion)
-        throw new Error("Campaign settings changed. Reload before saving.");
+        throw new StoreError(
+          "Campaign settings changed. Reload before saving.",
+          409,
+        );
       const next = campaignSchema.parse({
         ...current,
         ...settings,
@@ -455,7 +471,7 @@ export class TableStore {
     const row = this.db
       .prepare("SELECT state_json FROM campaign_records WHERE id = ?")
       .get(id);
-    if (!row) throw new Error("That campaign is unavailable.");
+    if (!row) throw new StoreError("That campaign is unavailable.", 404);
     return campaignDataSchema.parse(json(row.state_json));
   }
   private writeCampaign(metadata: Campaign, data: CampaignData) {
@@ -473,7 +489,7 @@ export class TableStore {
   private pinFor(id: string) {
     const installed = this.catalog.systems.find((system) => system.id === id);
     if (!installed)
-      throw new Error(`Install the required system package: ${id}.`);
+      throw new StoreError(`Install the required system package: ${id}.`, 400);
     return { id: installed.id, version: installed.version };
   }
   private validatePins(
@@ -485,8 +501,9 @@ export class TableStore {
         system.version === settings.system.version,
     );
     if (!system)
-      throw new Error(
+      throw new StoreError(
         `Install the required system package: ${settings.system.id}@${settings.system.version}.`,
+        400,
       );
     for (const pin of settings.contentPacks) {
       if (
@@ -497,8 +514,9 @@ export class TableStore {
             pack.systemId === system.id,
         )
       )
-        throw new Error(
+        throw new StoreError(
           `Install a compatible content pack: ${pin.id}@${pin.version}.`,
+          400,
         );
     }
   }

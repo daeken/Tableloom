@@ -80,7 +80,7 @@ export function App() {
   const [rollError, setRollError] = useState("");
   const [tab, setTab] = useState<"rolls" | "game" | "notes">("rolls");
   const [copied, setCopied] = useState(false);
-  const table = useTable(viewerKey, refresh);
+  const table = useTable(viewerKey, refresh, member?.tableId ?? null);
   const { status, participants, error, clearError, send } = table;
   const state = member ? table.state : null;
   const connected = status === "connected";

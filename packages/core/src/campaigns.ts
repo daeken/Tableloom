@@ -45,3 +45,15 @@ export const installedPackSchema = versionPinSchema
 export type Campaign = z.infer<typeof campaignSchema>;
 export type CampaignSettings = z.infer<typeof campaignSettingsSchema>;
 export type Scene = z.infer<typeof sceneSchema>;
+export const campaignMembershipSchema = campaignSchema
+  .extend({ role: z.enum(["gm", "player"]) })
+  .strict();
+export const campaignListSchema = z
+  .array(campaignMembershipSchema)
+  .max(MAX_CAMPAIGNS);
+export const campaignUpdateSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    settings: campaignSettingsSchema,
+  })
+  .strict();

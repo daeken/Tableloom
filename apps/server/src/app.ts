@@ -3,13 +3,14 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { DEFAULT_CAMPAIGN_ID } from "@tableloom/core/campaigns";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { commandSchema } from "@tableloom/core";
-import type { ServerMessage } from "@tableloom/core";
+import type { Member } from "@tableloom/core/access";
+import type { TableState, ServerMessage } from "@tableloom/core";
 import { applyCommand, projectTable } from "@tableloom/core/server";
-import { TableStore } from "./store.js";
+import { StoreError, TableStore } from "./store.js";
+import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
 import { AccessStore } from "./access.js";
 import {
@@ -51,26 +52,32 @@ export async function createApp(options: {
   const database = new DatabaseSync(options.databasePath);
   let store: TableStore;
   let access: AccessStore;
-  let state: ReturnType<TableStore["load"]>;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
-    state = store.load();
+    store.load();
   } catch (error) {
     database.close();
     throw error;
   }
-  // Campaign selection is not exposed yet: never project the default table
-  // using a credential for a different campaign.
-  const authenticate = (token: string) => {
-    const member = access.authenticate(token);
-    return member?.tableId === DEFAULT_CAMPAIGN_ID ? member : null;
-  };
-  const clients = new Map<WebSocket, string>();
+  type Client = { credential: string; campaignId: string; sceneId: string };
+  const clients = new Map<WebSocket, Client>();
   const sentVersions = new Map<WebSocket, string>();
+  const authenticate = (socket: WebSocket): Member | null => {
+    const context = clients.get(socket);
+    const member = access.authenticate(context?.credential ?? "");
+    return member && member.tableId === context?.campaignId ? member : null;
+  };
+  const participants = (campaignId: string) =>
+    [...clients].filter(
+      ([socket, context]) =>
+        context.campaignId === campaignId &&
+        socket.readyState === 1 &&
+        authenticate(socket),
+    ).length;
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState !== 1) return;
-    if (!authenticate(clients.get(socket) ?? "")) {
+    if (!authenticate(socket)) {
       socket.close(4001, "Sign in to the table again.");
       return;
     }
@@ -80,19 +87,59 @@ export async function createApp(options: {
     }
     socket.send(JSON.stringify(message));
   };
-  const broadcast = (message: ServerMessage) => {
-    for (const socket of clients.keys()) send(socket, message);
+  const broadcastPresence = (campaignId: string) => {
+    const message: ServerMessage = {
+      type: "presence",
+      participants: participants(campaignId),
+    };
+    for (const [socket, context] of clients)
+      if (context.campaignId === campaignId) send(socket, message);
   };
-  const sendSnapshot = (socket: WebSocket, force = false) => {
-    const member = authenticate(clients.get(socket) ?? "");
+  const sendSnapshot = (
+    socket: WebSocket,
+    force = false,
+    loaded?: TableState,
+  ) => {
+    const member = authenticate(socket);
     if (!member) {
       socket.close(4001, "Sign in again.");
       return;
     }
-    const view = projectTable(state, member);
+    const campaign = store.getCampaign(member.tableId);
+    if (campaign.activeSceneId !== clients.get(socket)?.sceneId) {
+      socket.close(4002, "The scene changed. Reconnect to continue.");
+      return;
+    }
+    const view = projectTable(loaded ?? store.load(member.tableId), member);
     if (!force && sentVersions.get(socket) === view.version) return;
-    send(socket, { type: "snapshot", state: view, participants: clients.size });
+    send(socket, {
+      type: "snapshot",
+      state: view,
+      participants: participants(member.tableId),
+    });
     sentVersions.set(socket, view.version);
+  };
+  const refreshCampaign = (
+    campaignId: string,
+    state = store.load(campaignId),
+  ) => {
+    for (const [socket, context] of clients)
+      if (context.campaignId === campaignId) sendSnapshot(socket, false, state);
+  };
+  const disconnectInvalid = () => {
+    for (const socket of clients.keys())
+      if (!authenticate(socket))
+        socket.close(4001, "Your table access changed. Sign in again.");
+  };
+  const queryContext = (request: { query: unknown }, member: Member) => {
+    const query = z
+      .object({ campaignId: z.uuid().optional() })
+      .parse(request.query);
+    if (query.campaignId !== undefined && query.campaignId !== member.tableId)
+      throw new StoreError(
+        "Your active campaign changed. Refresh before reconnecting.",
+        409,
+      );
   };
   await app.register(websocket, {
     options: { maxPayload: 256 * 1024 },
@@ -103,28 +150,35 @@ export async function createApp(options: {
       this.websocketServer.close(done);
     },
   });
-  registerAccessRoutes(app, access, {
+  const accessHttp = registerAccessRoutes(app, access, {
     ...(publicOrigin ? { publicOrigin } : {}),
+    database,
+    validateCampaign: (id) => {
+      store.load(id);
+    },
     secureCookies:
       options.secureCookies ?? publicOrigin?.startsWith("https:") ?? false,
     now,
     disconnect: (token) => {
-      for (const [socket, credential] of clients)
-        if (credential === token)
+      for (const [socket, context] of clients)
+        if (context.credential === token)
           socket.close(4001, "You signed out of the table.");
     },
-    disconnectInvalid: () => {
-      for (const [socket, credential] of clients)
-        if (!authenticate(credential))
-          socket.close(4001, "Your table access changed. Sign in again.");
-    },
+    disconnectInvalid,
+  });
+  registerCampaignRoutes(app, store, access, {
+    database,
+    setSession: accessHttp.setSession,
+    disconnectInvalid,
+    refreshCampaign,
   });
   app.get("/api/health", async () => ({ status: "ok", protocolVersion: 4 }));
   app.get("/api/table", async (request, reply) => {
-    const member = authenticate(sessionToken(request.headers.cookie));
+    const member = access.authenticate(sessionToken(request.headers.cookie));
     if (!member)
       return reply.code(401).send({ error: "Sign in to the table first." });
-    return projectTable(state, member);
+    queryContext(request, member);
+    return projectTable(store.load(member.tableId), member);
   });
   app.get(
     "/api/live",
@@ -133,19 +187,34 @@ export async function createApp(options: {
       preValidation: async (request, reply) => {
         if (!sameOrigin(request, publicOrigin))
           return reply.code(403).send({ error: "Origin is not allowed." });
-        if (!authenticate(sessionToken(request.headers.cookie)))
+        const member = access.authenticate(
+          sessionToken(request.headers.cookie),
+        );
+        if (!member)
           return reply.code(401).send({ error: "Sign in to the table first." });
+        queryContext(request, member);
+        store.getCampaign(member.tableId);
       },
     },
     (socket, request) => {
       const credential = sessionToken(request.headers.cookie);
-      if (!authenticate(credential)) {
+      const initial = access.authenticate(credential);
+      if (!initial) {
         socket.close(4001, "Sign in again.");
         return;
       }
-      clients.set(socket, credential);
-      sendSnapshot(socket, true);
-      broadcast({ type: "presence", participants: clients.size });
+      const campaign = store.getCampaign(initial.tableId);
+      clients.set(socket, {
+        credential,
+        campaignId: initial.tableId,
+        sceneId: campaign.activeSceneId,
+      });
+      try {
+        sendSnapshot(socket, true);
+      } catch {
+        socket.close(1011, "Unable to open this campaign.");
+      }
+      broadcastPresence(initial.tableId);
       let windowStart = Date.now();
       let count = 0;
       let alive = true;
@@ -153,7 +222,7 @@ export async function createApp(options: {
         alive = true;
       });
       const heartbeat = setInterval(() => {
-        if (!authenticate(credential)) {
+        if (!authenticate(socket)) {
           socket.close(4001, "Sign in again.");
           return;
         }
@@ -165,7 +234,7 @@ export async function createApp(options: {
         socket.ping();
       }, 30000);
       socket.on("message", (raw, isBinary) => {
-        const member = authenticate(credential);
+        const member = authenticate(socket);
         if (!member) {
           socket.close(4001, "Sign in again.");
           return;
@@ -179,6 +248,13 @@ export async function createApp(options: {
           return;
         }
         try {
+          if (
+            store.getCampaign(member.tableId).activeSceneId !==
+            clients.get(socket)?.sceneId
+          ) {
+            socket.close(4002, "The scene changed. Reconnect to continue.");
+            return;
+          }
           if (isBinary) throw new Error("Commands must be JSON text.");
           const parsed = commandSchema.safeParse(JSON.parse(raw.toString()));
           if (!parsed.success)
@@ -189,18 +265,22 @@ export async function createApp(options: {
             !installedSystems.has(command.systemId)
           )
             throw new Error("That system is not installed.");
-          if (store.hasCommand(command.id)) {
+          if (store.hasCommand(command.id, member.tableId)) {
             sendSnapshot(socket, true);
             return;
           }
           const recipient =
             command.type === "object.assign" || command.type === "note.assign"
-              ? access.getMember(command.ownerId)
+              ? access.getMember(command.ownerId, member.tableId)
               : undefined;
-          const next = applyCommand(state, command, member, recipient);
-          store.save(next, command.id);
-          state = next;
-          for (const client of clients.keys()) sendSnapshot(client);
+          const next = applyCommand(
+            store.load(member.tableId),
+            command,
+            member,
+            recipient,
+          );
+          store.save(next, command.id, member.tableId);
+          refreshCampaign(member.tableId, next);
         } catch (error) {
           app.log.debug({ err: error }, "Rejected table command");
           const message =
@@ -219,7 +299,7 @@ export async function createApp(options: {
         clearInterval(heartbeat);
         clients.delete(socket);
         sentVersions.delete(socket);
-        broadcast({ type: "presence", participants: clients.size });
+        broadcastPresence(initial.tableId);
       });
     },
   );

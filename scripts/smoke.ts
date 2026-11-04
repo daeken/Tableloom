@@ -4,6 +4,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
+import {
+  campaignListSchema,
+  campaignMembershipSchema,
+} from "@tableloom/core/campaigns";
+import { accessStatusSchema } from "@tableloom/core/access";
+import { tableViewSchema } from "@tableloom/core";
 
 // Exercise the actual distribution: source tests cannot catch broken bundle imports.
 const directory = await mkdtemp(join(tmpdir(), "tableloom-smoke-"));
@@ -73,6 +79,56 @@ try {
   });
   assert.equal(table.status, 200);
   await table.json();
+  const campaigns = await fetch(`${url}/api/campaigns`, {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(campaigns.status, 200);
+  assert.equal(campaignListSchema.parse(await campaigns.json()).length, 1);
+  const created = await fetch(`${url}/api/campaigns`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      Origin: url,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: "Smoke campaign",
+      description: "",
+      system: { id: "kids-on-brooms", version: "0.1.0" },
+      contentPacks: [],
+    }),
+  });
+  assert.equal(created.status, 201);
+  const campaign = campaignMembershipSchema.parse(await created.json());
+  const selected = await fetch(`${url}/api/campaigns/${campaign.id}/select`, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      Origin: url,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  assert.equal(selected.status, 200);
+  assert.equal(
+    accessStatusSchema.parse(await selected.json()).member?.tableId,
+    campaign.id,
+  );
+  const nextCookie = selected.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(nextCookie);
+  const selectedTable = await fetch(`${url}/api/table`, {
+    headers: { Cookie: nextCookie },
+  });
+  assert.equal(selectedTable.status, 200);
+  assert.equal(
+    tableViewSchema.parse(await selectedTable.json()).systemId,
+    "kids-on-brooms",
+  );
+  const previousTable = await fetch(`${url}/api/table`, {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(previousTable.status, 401);
+  await previousTable.text();
 } finally {
   if (child.exitCode === null && child.signalCode === null) {
     const timeout = setTimeout(() => child.kill("SIGKILL"), 5000);
@@ -87,5 +143,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server, frontend/assets, health, authenticated table access, and clean shutdown.",
+  "Production smoke check passed: built server, frontend/assets, health, authenticated table access, campaign creation/selection, and clean shutdown.",
 );

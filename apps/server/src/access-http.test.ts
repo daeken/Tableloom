@@ -608,7 +608,7 @@ test("GM member management restores ownership/private notes, revokes codes, and 
   }
 });
 
-test("default HTTP/live endpoints reject other-campaign credentials and recheck rotated sessions before broadcasting", async () => {
+test("HTTP/live endpoints bind campaign context and recheck rotated sessions before broadcasting", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -693,33 +693,33 @@ test("default HTTP/live endpoints reject other-campaign credentials and recheck 
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     const otherCookie = `tableloom_session=${otherPlayer.token}`;
-    for (const route of [
-      "/api/table",
-      `/api/table?campaignId=${DEFAULT_CAMPAIGN_ID}`,
-    ]) {
+    for (const [route, status] of [
+      ["/api/table", 200],
+      [`/api/table?campaignId=${DEFAULT_CAMPAIGN_ID}`, 409],
+    ] as const) {
       const denied = await app.inject({
         url: route,
         headers: { cookie: otherCookie },
       });
-      assert.equal(denied.statusCode, 401);
+      assert.equal(denied.statusCode, status);
       assert.ok(!denied.body.includes("Must stay in default campaign"));
       assert.ok(!denied.body.includes(noteId));
     }
     assert.equal(
       (
         await app.inject({
-          url: "/api/live",
+          url: `/api/live?campaignId=${DEFAULT_CAMPAIGN_ID}`,
           headers: { origin: "http://localhost", cookie: otherCookie },
         })
       ).statusCode,
-      401,
+      409,
     );
     const current = await app.inject({
       url: `/api/table?campaignId=${other.id}`,
       headers: { cookie: original.cookie },
     });
-    assert.equal(current.statusCode, 200);
-    assert.ok(current.body.includes("Must stay in default campaign"));
+    assert.equal(current.statusCode, 409);
+    assert.ok(!current.body.includes("Must stay in default campaign"));
     assert.ok(!current.body.includes("Must stay in other campaign"));
     assert.ok(
       !JSON.stringify(joined.messages).includes("Other campaign public clue"),
@@ -732,14 +732,14 @@ test("default HTTP/live endpoints reject other-campaign credentials and recheck 
     assert.equal(
       (
         await post(app, "join", {
-          name: "Not enabled yet",
+          name: "Another room player",
           code: restricted.token,
         })
       ).statusCode,
-      400,
+      200,
     );
     assert.ok(
-      access
+      !access
         .listInvitations(otherHost.token)
         .some((item) => item.id === restricted.id),
     );
@@ -785,7 +785,7 @@ test("default HTTP/live endpoints reject other-campaign credentials and recheck 
           headers: { cookie: `tableloom_session=${switched.token}` },
         })
       ).statusCode,
-      401,
+      200,
     );
     assert.equal(
       (await app.inject({ url: "/api/table", headers: { cookie: gmCookie } }))

@@ -157,11 +157,7 @@ export class AccessStore {
   registerCampaign(sessionToken: string, campaignId: string): Member {
     z.uuid().parse(campaignId);
     return this.transaction(() => {
-      const host = this.requireHost(sessionToken);
-      const owner = this.db
-        .prepare("SELECT user_id FROM access_host WHERE id = 1")
-        .get();
-      if (host.id !== owner?.user_id) throw new AccessError("host_required");
+      const host = this.requireServerHost(sessionToken);
       if (
         this.db
           .prepare("SELECT id FROM access_campaigns WHERE id = ?")
@@ -181,6 +177,15 @@ export class AccessStore {
         .run(campaignId);
       return this.addMembership(host.id, campaignId, "gm");
     });
+  }
+
+  requireServerHost(sessionToken: string): Member {
+    const host = this.requireHost(sessionToken);
+    const owner = this.db
+      .prepare("SELECT user_id FROM access_host WHERE id = 1")
+      .get();
+    if (host.id !== owner?.user_id) throw new AccessError("host_required");
+    return host;
   }
 
   listMemberships(sessionToken: string): Member[] {

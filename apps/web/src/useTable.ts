@@ -5,6 +5,7 @@ import type { CommandInput, TableView } from "@tableloom/core";
 export function useTable(
   viewerKey: string | null,
   onUnauthorized: () => Promise<void>,
+  campaignId: string | null,
 ) {
   const [snapshot, setSnapshot] = useState<{
     viewerKey: string;
@@ -31,6 +32,7 @@ export function useTable(
       setStatus("connecting");
       const url = new URL("/api/live", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      if (campaignId) url.searchParams.set("campaignId", campaignId);
       const ws = new WebSocket(url);
       socketViewer.current = viewerKey;
       socket.current = ws;
@@ -57,7 +59,7 @@ export function useTable(
         if (stopped) return;
         ready.current = false;
         setStatus("offline");
-        if (event.code === 4001) {
+        if (event.code === 4001 || event.code === 4002) {
           setSnapshot(null);
           setParticipants(0);
         }
@@ -77,7 +79,7 @@ export function useTable(
       clearTimeout(retry);
       socket.current?.close();
     };
-  }, [viewerKey, onUnauthorized]);
+  }, [viewerKey, onUnauthorized, campaignId]);
 
   const send = useCallback(
     (command: CommandInput) => {

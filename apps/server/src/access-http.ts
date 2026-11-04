@@ -2,7 +2,9 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AccessError, AccessStore } from "./access.js";
 import type { SessionGrant } from "./access.js";
-import { DEFAULT_CAMPAIGN_ID } from "@tableloom/core/campaigns";
+import type { DatabaseSync } from "node:sqlite";
+import { transaction } from "./database.js";
+import { StoreError } from "./store.js";
 
 const COOKIE = "tableloom_session";
 export function sessionToken(cookie: string | undefined): string {
@@ -44,6 +46,8 @@ export function registerAccessRoutes(
   access: AccessStore,
   options: {
     publicOrigin?: string;
+    database: DatabaseSync;
+    validateCampaign: (campaignId: string) => void;
     secureCookies: boolean;
     now: () => number;
     disconnect: (token: string) => void;
@@ -94,14 +98,23 @@ export function registerAccessRoutes(
           ? 403
           : error.code === "sign_in_required" || error.code === "invalid_key"
             ? 401
-            : error.code === "setup_complete"
-              ? 409
-              : 400;
+            : error.code === "campaign_unavailable"
+              ? 404
+              : [
+                    "setup_complete",
+                    "campaign_exists",
+                    "member_exists",
+                    "campaign_limit",
+                  ].includes(error.code)
+                ? 409
+                : 400;
       return reply.code(status).send({ error: error.message });
     }
+    if (error instanceof StoreError)
+      return reply.code(error.statusCode).send({ error: error.message });
     if (error instanceof z.ZodError)
       return reply.code(400).send({
-        error: "Check the name, key, or invitation code and try again.",
+        error: "Check the request fields and try again.",
       });
     const parsed = z
       .object({ statusCode: z.number().int().min(400).max(599) })
@@ -140,10 +153,24 @@ export function registerAccessRoutes(
   });
   app.post("/api/access/join", async (request, reply) => {
     const body = z
-      .object({ name, code: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })
+      .object({
+        name,
+        code: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+        keepIdentity: z.boolean().optional(),
+      })
       .parse(request.body);
-    const grant = access.redeemInvitation(body.code, body.name, {
-      campaignId: DEFAULT_CAMPAIGN_ID,
+    const token = sessionToken(request.headers.cookie);
+    const grant = transaction(options.database, () => {
+      if (body.keepIdentity && !token)
+        throw new AccessError("sign_in_required");
+      const joined = access.redeemInvitation(
+        body.code,
+        body.name,
+        body.keepIdentity ? { sessionToken: token } : {},
+      );
+      options.validateCampaign(joined.member.tableId);
+      access.revokeSession(token);
+      return joined;
     });
     options.disconnectInvalid();
     reply.header("Set-Cookie", setSession(grant));
@@ -188,4 +215,5 @@ export function registerAccessRoutes(
     );
     return { ok: true };
   });
+  return { setSession };
 }
