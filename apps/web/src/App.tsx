@@ -93,6 +93,22 @@ export function App() {
   const { status, participants, error, clearError, send } = table;
   const state = member ? table.state : null;
   const connected = status === "connected";
+  const sceneEditPending = table.deliveries.some(
+    (item) =>
+      item.status === "pending" &&
+      [
+        "token.add",
+        "drawing.add",
+        "token.move",
+        "tokens.move",
+        "objects.move",
+        "object.delete",
+        "objects.delete",
+        "object.assign",
+        "scene.undo",
+        "scene.redo",
+      ].includes(item.type),
+  );
   const currentModule =
     modules.find((m) => m.id === state?.systemId) ?? cyberpunk;
   const Panel = panels[currentModule.id as keyof typeof panels];
@@ -352,7 +368,7 @@ export function App() {
           <SceneHistoryControls
             history={table.history}
             enabled={connected}
-            deliveries={table.deliveries}
+            pending={sceneEditPending}
             send={send}
           />
           <CommandStatus deliveries={table.deliveries} />
@@ -370,6 +386,7 @@ export function App() {
                 color={color}
                 tokenName={tokenName}
                 enabled={connected}
+                pending={sceneEditPending}
                 send={send}
               />
             ) : (

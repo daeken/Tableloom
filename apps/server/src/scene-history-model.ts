@@ -21,7 +21,20 @@ const originalGeometrySchema = z.union([
     })
     .strict(),
 ]);
+const deletedObjectSchema = z.union([
+  z.object({ objectType: z.literal("token"), object: tokenSchema }).strict(),
+  z
+    .object({ objectType: z.literal("drawing"), object: drawingSchema })
+    .strict(),
+]);
 export const payloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal("delete-many"),
+      objectType: z.enum(["token", "drawing", "mixed"]),
+      objects: z.array(deletedObjectSchema).min(1).max(100),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("translate"),
@@ -109,7 +122,25 @@ export function entryOf(row: unknown): Entry {
   const entry = rowSchema.parse(row),
     payload = payloadSchema.parse(JSON.parse(entry.payload_json)),
     targets = targetsSchema.parse(JSON.parse(entry.targets_json));
-  if (payload.kind === "translate") {
+  if (payload.kind === "delete-many") {
+    if (
+      payload.objects.length !== targets.length ||
+      new Set(payload.objects.map((saved) => saved.object.id)).size !==
+        targets.length ||
+      payload.objects.some(
+        (saved) =>
+          !targets.some((target) => target.objectId === saved.object.id),
+      )
+    )
+      throw new Error("Deleted history targets are inconsistent.");
+    const kind = payload.objects.every((saved) => saved.objectType === "token")
+      ? "token"
+      : payload.objects.every((saved) => saved.objectType === "drawing")
+        ? "drawing"
+        : "mixed";
+    if (kind !== payload.objectType)
+      throw new Error("Deleted history types are inconsistent.");
+  } else if (payload.kind === "translate") {
     if (
       payload.originals.length !== targets.length ||
       new Set(payload.originals.map((original) => original.objectId)).size !==

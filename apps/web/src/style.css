@@ -1612,3 +1612,45 @@ p {
   text-decoration: underline;
   cursor: pointer;
 }
+
+.selection-delete-dialog {
+  width: min(460px, 90vw);
+  text-align: left;
+}
+.selection-delete-dialog h1 {
+  font-size: 30px;
+  line-height: 1.15;
+}
+.selection-delete-list {
+  max-height: 220px;
+  overflow: auto;
+  padding-left: 22px;
+  margin: 18px 0;
+  color: #405f4d;
+}
+.selection-delete-list li {
+  margin: 5px 0;
+}
+.selection-delete-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.selection-delete-actions button {
+  padding: 9px 14px;
+  border: 1px solid #d8ddcd;
+  border-radius: 6px;
+  color: #405f4d;
+  font: inherit;
+  cursor: pointer;
+}
+.selection-delete-actions .selection-delete-confirm {
+  background: #9b5146;
+  border-color: #9b5146;
+  color: #fffaf0;
+}
+.selection-delete-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

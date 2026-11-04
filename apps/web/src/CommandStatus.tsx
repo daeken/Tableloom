@@ -5,6 +5,7 @@ const names: Record<CommandDelivery["type"], string> = {
   "dice.roll": "Roll dice",
   "drawing.add": "Add drawing",
   "token.add": "Place token",
+  "objects.delete": "Delete objects",
   "objects.move": "Move objects",
   "tokens.move": "Move tokens",
   "token.move": "Move token",

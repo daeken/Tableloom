@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 4;
+          ?.version === 5;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -125,6 +125,14 @@ export class SceneHistoryStore {
                   ? "position" in object
                   : "points" in object),
             )) &&
+          (payload.kind !== "delete-many" ||
+            payload.objects.some(
+              (saved) =>
+                saved.object.id === target.objectId &&
+                (saved.objectType === "token"
+                  ? "position" in object
+                  : "points" in object),
+            )) &&
           canEditObject(member, object) &&
           object.version === target.expectedVersion
         );
@@ -135,6 +143,22 @@ export class SceneHistoryStore {
       payload.kind === "translate"
     )
       return false;
+    if (payload.kind === "delete-many") {
+      const tokens = payload.objects.filter(
+          (saved) => saved.objectType === "token",
+        ).length,
+        drawings = payload.objects.length - tokens;
+      return (
+        state.tokens.length + tokens <= 200 &&
+        state.drawings.length + drawings <= 2000 &&
+        payload.objects.every(
+          (saved) =>
+            !objectOf(state, saved.object.id) &&
+            !state.notes.some((note) => note.id === saved.object.id) &&
+            canEditObject(member, saved.object),
+        )
+      );
+    }
     const target = entry.targets[0]!;
     return (
       !objectOf(state, target.objectId) &&
@@ -160,25 +184,35 @@ export class SceneHistoryStore {
           objectId: target.objectId,
           objectCount: entry.targets.length,
           action:
-            payload.kind === "move-many" || payload.kind === "translate"
-              ? "move"
-              : payload.kind,
+            payload.kind === "delete-many"
+              ? "delete"
+              : payload.kind === "move-many" || payload.kind === "translate"
+                ? "move"
+                : payload.kind,
           objectType: payload.objectType,
           name:
-            payload.kind === "translate"
+            payload.kind === "delete-many"
               ? entry.targets.length > 1
                 ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
-                : payload.objectType === "drawing"
+                : payload.objects[0]!.objectType === "drawing"
                   ? "Drawing"
-                  : ((objectOf(state, target.objectId) as Token | undefined)
-                      ?.name ?? "Token")
-              : payload.kind === "move-many"
-                ? `${entry.targets.length} tokens`
-                : payload.objectType === "drawing"
-                  ? "Drawing"
-                  : ((objectOf(state, target.objectId) as Token | undefined)
-                      ?.name ??
-                    (payload.kind === "move" ? "Token" : payload.object.name)),
+                  : (payload.objects[0]!.object as Token).name
+              : payload.kind === "translate"
+                ? entry.targets.length > 1
+                  ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
+                  : payload.objectType === "drawing"
+                    ? "Drawing"
+                    : ((objectOf(state, target.objectId) as Token | undefined)
+                        ?.name ?? "Token")
+                : payload.kind === "move-many"
+                  ? `${entry.targets.length} tokens`
+                  : payload.objectType === "drawing"
+                    ? "Drawing"
+                    : ((objectOf(state, target.objectId) as Token | undefined)
+                        ?.name ??
+                      (payload.kind === "move"
+                        ? "Token"
+                        : payload.object.name)),
           available: this.available(entry, state, member),
         };
       };
@@ -221,6 +255,7 @@ export class SceneHistoryStore {
         "token.move",
         "tokens.move",
         "objects.move",
+        "objects.delete",
         "object.delete",
         "note.add",
       ].includes(command.type)
@@ -243,7 +278,26 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "objects.move") {
+      if (command.type === "objects.delete") {
+        ids = command.objects.map((target) => target.objectId);
+        const objects = ids.map((id) => {
+          const object = objectOf(before, id);
+          if (!object || objectOf(after, id))
+            throw new Error("Invalid group deletion transition.");
+          return "position" in object
+            ? { objectType: "token" as const, object }
+            : { objectType: "drawing" as const, object };
+        });
+        payload = {
+          kind: "delete-many",
+          objectType: objects.every((saved) => saved.objectType === "token")
+            ? "token"
+            : objects.every((saved) => saved.objectType === "drawing")
+              ? "drawing"
+              : "mixed",
+          objects,
+        };
+      } else if (command.type === "objects.move") {
         ids = command.objects.map((object) => object.objectId);
         const kinds = ids.map((id) => {
           const from = objectOf(before, id),
@@ -355,7 +409,9 @@ export class SceneHistoryStore {
         return {
           objectId,
           expectedVersion:
-            payload.kind === "delete" ? original!.version + 1 : next!.version,
+            payload.kind === "delete" || payload.kind === "delete-many"
+              ? original!.version + 1
+              : next!.version,
           previousId:
             preceding &&
             original &&
@@ -415,7 +471,35 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "translate") {
+      if (payload.kind === "delete-many") {
+        if (expectsPresent(entry))
+          next = applyCommand(
+            state,
+            {
+              id: command.id,
+              type: "objects.delete",
+              objects: entry.targets.map((target) => ({
+                objectId: target.objectId,
+                expectedVersion: target.expectedVersion,
+              })),
+            },
+            member,
+          );
+        else {
+          next = structuredClone(state);
+          for (const saved of payload.objects) {
+            const version =
+              entry.targets.find(
+                (target) => target.objectId === saved.object.id,
+              )!.expectedVersion + 1;
+            if (saved.objectType === "token")
+              next.tokens.push({ ...saved.object, version });
+            else next.drawings.push({ ...saved.object, version });
+          }
+          next.revision += 1;
+          next = tableSchema.parse(next);
+        }
+      } else if (payload.kind === "translate") {
         // Restore exact originals; redo repeats the original addition rather than
         // subtracting from rounded coordinates. Ownership/style remain untouched.
         next = structuredClone(state);

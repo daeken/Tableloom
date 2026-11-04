@@ -85,6 +85,12 @@ export function applyCommand(
   }
   const next = structuredClone(state);
   switch (command.type) {
+    case "objects.delete": {
+      const ids = new Set(command.objects.map((object) => object.objectId));
+      next.tokens = next.tokens.filter((object) => !ids.has(object.id));
+      next.drawings = next.drawings.filter((object) => !ids.has(object.id));
+      break;
+    }
     case "objects.move": {
       const ids = new Set(command.objects.map((object) => object.objectId));
       const translate = (point: { x: number; y: number }) => ({

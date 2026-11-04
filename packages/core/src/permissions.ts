@@ -45,6 +45,15 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "objects.delete": {
+      for (const target of objectMoveTargetsSchema.parse(command.objects))
+        authorizeCommand(
+          state,
+          { id: command.id, type: "object.delete", ...target },
+          member,
+        );
+      return;
+    }
     case "objects.move": {
       const objects = objectMoveTargetsSchema.parse(command.objects),
         delta = translationSchema.parse(command.delta);

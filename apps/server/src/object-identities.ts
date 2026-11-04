@@ -31,7 +31,7 @@ export class ObjectIdentities {
         throw new Error("Object identity storage is missing its version.");
       if (
         exists("scene_history_version") &&
-        [2, 3, 4].includes(
+        [2, 3, 4, 5].includes(
           Number(
             db
               .prepare("SELECT version FROM scene_history_version WHERE id=1")

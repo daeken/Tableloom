@@ -1278,3 +1278,415 @@ test("a full-size stroke moves with a token through compact commands and history
     f.db.close();
   }
 });
+
+test("mixed group deletion is one revision and restores complete causal move/create histories with increasing versions", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID(),
+      points = [
+        { x: 0.1, y: 0.2 },
+        { x: 40.3, y: 50.4 },
+      ];
+    f.run({
+      type: "drawing.add",
+      drawing: { id: drawingId, kind: "rectangle", points, color: "#405f4d" },
+    });
+    f.run({
+      type: "objects.move",
+      objects: [
+        { objectId: tokenId, expectedVersion: 1 },
+        { objectId: drawingId, expectedVersion: 1 },
+      ],
+      delta: { x: 10, y: 20 },
+    });
+    const before = f.tables.load(),
+      count = f.db
+        .prepare("SELECT count(*) AS n FROM scene_history_entries")
+        .get()!.n;
+    f.run({
+      type: "objects.delete",
+      objects: [
+        { objectId: tokenId, expectedVersion: 2 },
+        { objectId: drawingId, expectedVersion: 2 },
+      ],
+    });
+    assert.equal(f.tables.load().revision, before.revision + 1);
+    assert.equal(
+      f.tables.load().tokens.length + f.tables.load().drawings.length,
+      0,
+    );
+    assert.equal(
+      f.db.prepare("SELECT count(*) AS n FROM scene_history_entries").get()!.n,
+      Number(count) + 1,
+    );
+    const cursor = f.history.status(f.player.member).undo!;
+    assert.equal(cursor.action, "delete");
+    assert.equal(cursor.objectType, "mixed");
+    assert.equal(cursor.objectCount, 2);
+    assert.equal(cursor.available, true);
+    assert.ok(!JSON.stringify(cursor).includes("points"));
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens[0]!.version, 4);
+    assert.equal(f.tables.load().drawings[0]!.ownerId, f.player.member.id);
+    f.action("scene.undo");
+    assert.deepEqual(f.tables.load().drawings[0]!.points, points);
+    assert.deepEqual(f.tables.load().tokens[0]!.position, { x: 0, y: 0 });
+    f.action("scene.undo");
+    f.action("scene.undo");
+    assert.equal(
+      f.tables.load().tokens.length + f.tables.load().drawings.length,
+      0,
+    );
+    for (let n = 0; n < 4; n++) f.action("scene.redo");
+    assert.equal(
+      f.tables.load().tokens.length + f.tables.load().drawings.length,
+      0,
+    );
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens[0]!.version, 10);
+    assert.equal(f.tables.load().drawings[0]!.version, 10);
+    assert.deepEqual(
+      f.tables.load().drawings[0]!.points,
+      before.drawings[0]!.points,
+    );
+    assert.equal(f.tables.load().drawings[0]!.kind, "rectangle");
+    assert.equal(f.tables.load().drawings[0]!.color, "#405f4d");
+  } finally {
+    f.db.close();
+  }
+});
+
+test("batch deletion rejects stale, unauthorized, missing, duplicate, invalid and forged selections without partial changes", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID(),
+      other = f.add(f.gm.member);
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: drawingId,
+        kind: "stroke",
+        points: [
+          { x: 0, y: 0 },
+          { x: 10, y: 10 },
+        ],
+        color: "#405f4d",
+      },
+    });
+    const target = { objectId: tokenId, expectedVersion: 1 },
+      drawing = { objectId: drawingId, expectedVersion: 1 };
+    for (const objects of [
+      [target, { ...drawing, expectedVersion: 2 }],
+      [target, { ...drawing, objectId: other }],
+      [target, { ...drawing, objectId: randomUUID() }],
+      [target, target],
+      [target, { ...drawing, expectedVersion: 0 }],
+    ]) {
+      const before = f.tables.load(),
+        rows = f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all();
+      assert.throws(() => f.run({ type: "objects.delete", objects }));
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        rows,
+      );
+    }
+    for (const objects of [
+      [],
+      Array.from({ length: 101 }, () => ({
+        ...target,
+        objectId: randomUUID(),
+      })),
+      [{ ...target, ownerId: f.gm.member.id }],
+      [{ ...drawing, object: {} }],
+    ])
+      assert.equal(
+        commandSchema.safeParse({
+          id: randomUUID(),
+          type: "objects.delete",
+          objects,
+        }).success,
+        false,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("restoration requires aggregate token and drawing capacity and never restores only part of a group", () => {
+  const f = fixture();
+  try {
+    const ids = [f.add(), f.add()],
+      drawings = [randomUUID(), randomUUID()];
+    for (const id of drawings)
+      f.run({
+        type: "drawing.add",
+        drawing: {
+          id,
+          kind: "rectangle",
+          points: [
+            { x: 0, y: 0 },
+            { x: 1, y: 1 },
+          ],
+          color: "#405f4d",
+        },
+      });
+    f.run({
+      type: "objects.delete",
+      objects: [...ids, ...drawings].map((objectId) => ({
+        objectId,
+        expectedVersion: 1,
+      })),
+    });
+    const state = f.tables.load();
+    f.tables.save(
+      {
+        ...state,
+        revision: state.revision + 1,
+        tokens: Array.from({ length: 199 }, () => ({
+          id: randomUUID(),
+          name: "Filler",
+          position: { x: 0, y: 0 },
+          color: "#405f4d",
+          ownerId: f.gm.member.id,
+          version: 1,
+        })),
+        drawings: Array.from({ length: 1999 }, () => ({
+          id: randomUUID(),
+          kind: "rectangle" as const,
+          points: [
+            { x: 0, y: 0 },
+            { x: 1, y: 1 },
+          ],
+          color: "#405f4d",
+          ownerId: f.gm.member.id,
+          version: 1,
+        })),
+      },
+      randomUUID(),
+    );
+    const reject = () => {
+      const before = f.tables.load(),
+        history = f.history.status(f.player.member);
+      assert.equal(history.undo!.available, false);
+      assert.throws(() => f.action("scene.undo"), /full scene/);
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(f.history.status(f.player.member), history);
+    };
+    reject();
+    let current = f.tables.load();
+    f.tables.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        tokens: current.tokens.slice(1),
+      },
+      randomUUID(),
+    );
+    reject();
+    current = f.tables.load();
+    f.tables.save(
+      {
+        ...current,
+        revision: current.revision + 1,
+        drawings: current.drawings.slice(1),
+      },
+      randomUUID(),
+    );
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens.length, 200);
+    assert.equal(f.tables.load().drawings.length, 2000);
+    assert.ok(
+      f.tables
+        .load()
+        .tokens.filter((token) => (ids as string[]).includes(token.id))
+        .every((token) => token.version === 3),
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("GM group restoration retains removed owners and current roles/versions gate the entire inverse", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: drawingId,
+        kind: "stroke",
+        points: [
+          { x: 0, y: 0 },
+          { x: 2, y: 3 },
+        ],
+        color: "#405f4d",
+      },
+    });
+    f.run(
+      {
+        type: "objects.delete",
+        objects: [
+          { objectId: tokenId, expectedVersion: 1 },
+          { objectId: drawingId, expectedVersion: 1 },
+        ],
+      },
+      f.gm.member,
+    );
+    f.db
+      .prepare(
+        "UPDATE access_memberships SET role='player' WHERE user_id=? AND table_id=?",
+      )
+      .run(f.gm.member.id, f.gm.member.tableId);
+    assert.equal(
+      f.history.status({ ...f.gm.member, role: "gm" }).undo!.available,
+      false,
+    );
+    assert.throws(
+      () => f.action("scene.undo", { ...f.gm.member, role: "gm" }),
+      /ownership changes/,
+    );
+    f.db
+      .prepare(
+        "UPDATE access_memberships SET role='gm' WHERE user_id=? AND table_id=?",
+      )
+      .run(f.gm.member.id, f.gm.member.tableId);
+    f.access.removeMember(f.gm.token, f.player.member.id);
+    f.action("scene.undo", f.gm.member);
+    assert.equal(f.tables.load().tokens[0]!.ownerId, f.player.member.id);
+    assert.equal(f.tables.load().drawings[0]!.ownerId, f.player.member.id);
+    f.run(
+      {
+        type: "object.assign",
+        objectId: drawingId,
+        expectedVersion: 3,
+        expectedOwnerId: f.player.member.id,
+        ownerId: f.gm.member.id,
+      },
+      f.gm.member,
+    );
+    const before = f.tables.load();
+    assert.equal(f.history.status(f.gm.member).redo!.available, false);
+    assert.throws(() => f.action("scene.redo", f.gm.member), /entire edit/);
+    assert.deepEqual(f.tables.load(), before);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("group deletion and restoration roll back all objects and neighboring history when receipt persistence fails", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: drawingId,
+        kind: "rectangle",
+        points: [
+          { x: 0, y: 0 },
+          { x: 20, y: 30 },
+        ],
+        color: "#405f4d",
+      },
+    });
+    const command = {
+      type: "objects.delete" as const,
+      objects: [
+        { objectId: tokenId, expectedVersion: 1 },
+        { objectId: drawingId, expectedVersion: 1 },
+      ],
+    };
+    const fail = () =>
+      f.db.exec(
+        "CREATE TRIGGER reject_delete_receipt BEFORE INSERT ON campaign_receipts BEGIN SELECT RAISE(ABORT,'fixture batch receipt'); END;",
+      );
+    let before = f.tables.load(),
+      rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+    fail();
+    assert.throws(() => f.run(command), /fixture batch receipt/);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    f.db.exec("DROP TRIGGER reject_delete_receipt");
+    f.run(command);
+    before = f.tables.load();
+    rows = f.db
+      .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+      .all();
+    fail();
+    assert.throws(() => f.action("scene.undo"), /fixture batch receipt/);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    f.db.exec("DROP TRIGGER reject_delete_receipt");
+    const cursor = f.history.status(f.player.member).undo!,
+      payload = JSON.parse(
+        String(
+          f.db
+            .prepare(
+              "SELECT payload_json FROM scene_history_entries WHERE id=?",
+            )
+            .get(cursor.id)!.payload_json,
+        ),
+      );
+    payload.objects[0].object.id = randomUUID();
+    f.db
+      .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+      .run(JSON.stringify(payload), cursor.id);
+    assert.throws(() => f.history.status(f.player.member));
+  } finally {
+    f.db.close();
+  }
+});
+
+test("one hundred deleted objects restore as one retained edit, even after older create histories expire", () => {
+  const f = fixture();
+  try {
+    const ids = Array.from({ length: 100 }, () => f.add());
+    f.run({
+      type: "objects.delete",
+      objects: ids.map((objectId) => ({ objectId, expectedVersion: 1 })),
+    });
+    assert.equal(f.tables.load().tokens.length, 0);
+    assert.equal(f.history.status(f.player.member).undo!.objectCount, 100);
+    assert.ok(
+      Number(
+        f.db.prepare("SELECT count(*) AS n FROM scene_history_entries").get()!
+          .n,
+      ) <= 100,
+    );
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens.length, 100);
+    assert.ok(
+      f.tables
+        .load()
+        .tokens.every(
+          (token) =>
+            token.version === 3 && (ids as string[]).includes(token.id),
+        ),
+    );
+    f.action("scene.redo");
+    assert.equal(f.tables.load().tokens.length, 0);
+  } finally {
+    f.db.close();
+  }
+});

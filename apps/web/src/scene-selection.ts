@@ -1,3 +1,6 @@
+import type { Member } from "@tableloom/core/access";
+import type { TableView } from "@tableloom/core";
+import { canEditObject } from "@tableloom/core/permissions";
 import { MAX_SCENE_MOVE_OBJECTS } from "@tableloom/core";
 import type { Point, Token, Drawing } from "@tableloom/core";
 export type SceneObject = Token | Drawing;
@@ -112,4 +115,54 @@ export function selectObjects(
 ): string[] | null {
   const ids = [...new Set([...base, ...added])];
   return ids.length <= MAX_SCENE_MOVE_OBJECTS ? ids : null;
+}
+
+export interface DeletionReviewItem {
+  id: string;
+  version: number;
+  ownerId: string | null;
+  objectType: "token" | "drawing";
+  label: string;
+}
+export function captureDeletionReview(
+  objects: readonly SceneObject[],
+): DeletionReviewItem[] {
+  return objects.map((object) => ({
+    id: object.id,
+    version: object.version,
+    ownerId: object.ownerId,
+    objectType: "position" in object ? "token" : "drawing",
+    label:
+      "position" in object
+        ? `Token: ${object.name}`
+        : object.kind === "rectangle"
+          ? "Room drawing"
+          : "Freehand drawing",
+  }));
+}
+
+/** The review keeps its original targets; it never silently shrinks after a remote edit. */
+export function deletionReviewCurrent(
+  review: readonly DeletionReviewItem[],
+  state: Pick<TableView, "tokens" | "drawings">,
+  member: Member | null,
+): boolean {
+  if (
+    !review.length ||
+    review.length > MAX_SCENE_MOVE_OBJECTS ||
+    new Set(review.map((item) => item.id)).size !== review.length
+  )
+    return false;
+  return review.every((item) => {
+    const object =
+      item.objectType === "token"
+        ? state.tokens.find((object) => object.id === item.id)
+        : state.drawings.find((object) => object.id === item.id);
+    return Boolean(
+      object &&
+      object.version === item.version &&
+      object.ownerId === item.ownerId &&
+      canEditObject(member, object),
+    );
+  });
 }

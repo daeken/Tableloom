@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { DeleteSelectionDialog } from "./DeleteSelectionDialog.js";
+import { captureDeletionReview } from "./scene-selection.js";
+import type { DeletionReviewItem } from "./scene-selection.js";
 import { Application, Container, Graphics, Text } from "pixi.js";
 import type {
   CommandInput,
@@ -33,6 +36,7 @@ interface Props {
   color: string;
   tokenName: string;
   enabled: boolean;
+  pending: boolean;
   send: (command: CommandInput) => boolean;
 }
 
@@ -44,6 +48,7 @@ export function Tabletop({
   color,
   tokenName,
   enabled,
+  pending,
   send,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
@@ -55,6 +60,9 @@ export function Tabletop({
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionError, setSelectionError] = useState("");
+  const [deleteReview, setDeleteReview] = useState<DeletionReviewItem[] | null>(
+    null,
+  );
   useEffect(() => {
     setSelected((previous) =>
       previous.filter((id) =>
@@ -480,7 +488,27 @@ export function Tabletop({
           >
             Clear selection
           </button>
+          <button
+            disabled={!enabled || pending || !selectedObjects.length}
+            onClick={() => {
+              setGesture(null);
+              setDeleteReview(captureDeletionReview(selectedObjects));
+            }}
+          >
+            Delete selection…
+          </button>
         </div>
+      )}
+      {deleteReview && (
+        <DeleteSelectionDialog
+          review={deleteReview}
+          state={state}
+          member={member}
+          enabled={enabled}
+          pending={pending}
+          send={send}
+          close={() => setDeleteReview(null)}
+        />
       )}
       <div
         className="zoom-controls"

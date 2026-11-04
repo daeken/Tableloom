@@ -1,33 +1,18 @@
 import { Undo2, Redo2 } from "lucide-react";
 import type { CommandInput } from "@tableloom/core";
 import type { SceneHistory } from "@tableloom/core/scene-history";
-import type { CommandDelivery } from "./table-connection.js";
 
 export function SceneHistoryControls({
   history,
   enabled,
-  deliveries,
+  pending,
   send,
 }: {
   history: SceneHistory | null;
   enabled: boolean;
-  deliveries: CommandDelivery[];
+  pending: boolean;
   send: (command: CommandInput) => boolean;
 }) {
-  const pending = deliveries.some(
-    (item) =>
-      item.status === "pending" &&
-      [
-        "token.move",
-        "tokens.move",
-        "objects.move",
-        "token.add",
-        "drawing.add",
-        "object.delete",
-        "scene.undo",
-        "scene.redo",
-      ].includes(item.type),
-  );
   const blocked = [history?.undo, history?.redo].some(
     (item) => item && !item.available,
   );

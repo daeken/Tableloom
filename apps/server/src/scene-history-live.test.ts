@@ -661,3 +661,199 @@ test("live mixed movement is atomic, private in history, conflict-safe, retryabl
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("live group deletion is atomic, exactly retryable, private in history, and restores as a group after restart", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-live-delete-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, body: Record<string, unknown>, cookie = "") =>
+    app.inject({
+      method: "POST",
+      url: `/api/access/${route}`,
+      headers: { origin: "http://localhost", cookie },
+      payload: body,
+    });
+  const cookieOf = (response: { headers: Record<string, unknown> }) =>
+    String(response.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      player = cookieOf(
+        await post("join", {
+          name: "Player",
+          code: (await post("invitations", {}, gm)).json().token,
+        }),
+      );
+    let p = await connect(url, player);
+    const g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    const tokenId = randomUUID(),
+      drawingId = randomUUID(),
+      points = [
+        { x: 0.1, y: 0.2 },
+        { x: 20.3, y: 30.4 },
+      ];
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "token.add",
+          token: {
+            id: tokenId,
+            name: "Scout",
+            position: { x: 10, y: 20 },
+            color: "#405f4d",
+          },
+        })
+      ).type,
+      "ack",
+    );
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: {
+            id: drawingId,
+            kind: "rectangle",
+            points,
+            color: "#405f4d",
+          },
+        })
+      ).type,
+      "ack",
+    );
+    const prepared = {
+      id: randomUUID(),
+      type: "objects.delete",
+      objects: [
+        { objectId: tokenId, expectedVersion: 1 },
+        { objectId: drawingId, expectedVersion: 1 },
+      ],
+    };
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "token.move",
+          tokenId,
+          expectedVersion: 1,
+          position: { x: 50, y: 60 },
+        })
+      ).type,
+      "ack",
+    );
+    const changed = store.load();
+    assert.equal((await p.send(prepared)).type, "error");
+    assert.deepEqual(store.load(), changed);
+    assert.equal(store.hasCommand(prepared.id), false);
+    const command = {
+      ...prepared,
+      id: randomUUID(),
+      objects: [
+        { objectId: tokenId, expectedVersion: 2 },
+        { objectId: drawingId, expectedVersion: 1 },
+      ],
+    };
+    assert.equal((await p.send(command)).type, "ack");
+    await until(
+      () =>
+        p.latest().history.undo?.action === "delete" &&
+        p.latest().state.tokens.length === 0,
+    );
+    assert.equal(store.load().revision, changed.revision + 1);
+    assert.equal(store.load().drawings.length, 0);
+    const cursor = p.latest().history.undo!;
+    assert.equal(cursor.objectCount, 2);
+    assert.equal(cursor.objectType, "mixed");
+    assert.ok(!JSON.stringify(cursor).includes("points"));
+    assert.ok(!JSON.stringify(g.messages).includes(cursor.id));
+    const deleted = store.load();
+    assert.equal((await p.send(command)).type, "ack");
+    assert.deepEqual(store.load(), deleted);
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    sockets.push(p.ws);
+    assert.deepEqual(p.latest().history.undo, cursor);
+    const beforeFailure = store.load(),
+      rows = db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+    db.exec(
+      "CREATE TRIGGER reject_delete_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture delete binding'); END;",
+    );
+    const failed = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: cursor.id,
+      expectedVersion: cursor.version,
+    };
+    assert.equal((await p.send(failed)).type, "error");
+    assert.deepEqual(store.load(), beforeFailure);
+    assert.deepEqual(
+      db.prepare("SELECT * FROM scene_history_entries ORDER BY sequence").all(),
+      rows,
+    );
+    assert.equal(store.hasCommand(failed.id), false);
+    db.exec("DROP TRIGGER reject_delete_binding");
+    const undo = { ...failed, id: randomUUID() };
+    assert.equal((await p.send(undo)).type, "ack");
+    await until(
+      () =>
+        p.latest().state.tokens.length === 1 &&
+        p.latest().state.drawings.length === 1,
+    );
+    assert.equal(store.load().tokens[0]!.version, 4);
+    assert.equal(store.load().drawings[0]!.version, 3);
+    assert.deepEqual(store.load().drawings[0]!.points, points);
+    const restored = store.load();
+    assert.equal((await p.send(undo)).type, "ack");
+    assert.deepEqual(store.load(), restored);
+    const stale = { ...command, id: randomUUID() };
+    assert.equal((await p.send(stale)).type, "error");
+    assert.deepEqual(store.load(), restored);
+    assert.equal(store.hasCommand(stale.id), false);
+    const redo = p.latest().history.redo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(
+      () =>
+        p.latest().state.tokens.length === 0 &&
+        p.latest().state.drawings.length === 0,
+    );
+    const staleContext = randomUUID();
+    p.ws.sendRaw(
+      JSON.stringify({
+        context: { ...p.ws.context, generation: 999 },
+        command: { ...command, id: staleContext },
+      }),
+    );
+    await until(() =>
+      p.messages.some(
+        (message) =>
+          message.type === "error" && message.commandId === staleContext,
+      ),
+    );
+    assert.equal(store.hasCommand(staleContext), false);
+  } finally {
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

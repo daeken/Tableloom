@@ -105,3 +105,67 @@ test("mixed marquee selects token centers and fully enclosed drawing bounds, wit
   const ids = Array.from({ length: 100 }, () => crypto.randomUUID());
   assert.equal(selectObjects(ids, [room.id]), null);
 });
+
+test("deletion review freezes targets and blocks remote versions, ownership changes, removals and lost permissions", async () => {
+  const { captureDeletionReview, deletionReviewCurrent } =
+    await import("./scene-selection.js");
+  const scout = token(10, 10),
+    room = drawing("rectangle", [
+      { x: 0, y: 0 },
+      { x: 20, y: 20 },
+    ]);
+  room.ownerId = scout.ownerId;
+  const member = {
+      id: scout.ownerId!,
+      name: "Player",
+      role: "player" as const,
+      tableId: crypto.randomUUID(),
+    },
+    state = { tokens: [scout], drawings: [room] },
+    review = captureDeletionReview([scout, room]);
+  assert.equal(deletionReviewCurrent(review, state, member), true);
+  assert.equal(review.length, 2);
+  assert.ok(!JSON.stringify(review).includes("points"));
+  assert.equal(
+    deletionReviewCurrent(
+      review,
+      { ...state, tokens: [{ ...scout, version: 2 }] },
+      member,
+    ),
+    false,
+  );
+  assert.equal(
+    deletionReviewCurrent(
+      review,
+      { ...state, drawings: [{ ...room, ownerId: crypto.randomUUID() }] },
+      member,
+    ),
+    false,
+  );
+  assert.equal(
+    deletionReviewCurrent(review, { ...state, drawings: [] }, member),
+    false,
+  );
+  assert.equal(review.length, 2);
+  assert.equal(deletionReviewCurrent(review, state, null), false);
+  assert.equal(
+    deletionReviewCurrent(review, state, {
+      ...member,
+      id: crypto.randomUUID(),
+    }),
+    false,
+  );
+  assert.equal(deletionReviewCurrent([], state, member), false);
+  assert.equal(
+    deletionReviewCurrent([review[0]!, review[0]!], state, member),
+    false,
+  );
+  assert.equal(
+    deletionReviewCurrent(
+      review,
+      { ...state, tokens: [scout, token(50, 50)] },
+      member,
+    ),
+    true,
+  );
+});

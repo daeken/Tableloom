@@ -2,7 +2,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -242,6 +242,13 @@ export const objectMoveTargetsSchema = z
   );
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("objects.delete"),
+      objects: objectMoveTargetsSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

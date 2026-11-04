@@ -115,7 +115,7 @@ function legacy() {
   return { db, tables, access, host, bindings, first, context, a, b };
 }
 
-test("move-history 1 to scene-history 4 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
+test("move-history 1 to scene-history 5 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -125,7 +125,7 @@ test("move-history 1 to scene-history 4 preserves IDs, cursors, links, active/of
     const history = new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      4,
+      5,
     );
     assert.equal(
       f.db
@@ -233,7 +233,7 @@ test("history migration SQL failure rolls back the table replacement, copied row
     new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      4,
+      5,
     );
   } finally {
     f.db.close();
@@ -316,7 +316,7 @@ function toVersionTwo(f: ReturnType<typeof legacy>) {
   return { status, rows };
 }
 
-test("scene history 2 to 4 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
+test("scene history 2 to 5 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -341,7 +341,7 @@ test("scene history 2 to 4 preserves existing payloads, reservations and per-obj
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      4,
+      5,
     );
     assert.equal(
       f.db
@@ -419,20 +419,18 @@ function versionThree(f: ReturnType<typeof legacy>) {
   run({
     id: randomUUID(),
     type: "tokens.move",
-    moves: f.tables
-      .load()
-      .tokens.map((token) => ({
-        tokenId: token.id,
-        expectedVersion: token.version,
-        position: { x: token.position.x + 10, y: token.position.y + 20 },
-      })),
+    moves: f.tables.load().tokens.map((token) => ({
+      tokenId: token.id,
+      expectedVersion: token.version,
+      position: { x: token.position.x + 10, y: token.position.y + 20 },
+    })),
   });
   const status = history.status(f.host.member);
   f.db.exec("UPDATE scene_history_version SET version=3");
   return status;
 }
 
-test("scene history 3 to 4 preserves token groups, expired predecessor links, saved state and reservation IDs", () => {
+test("scene history 3 to 5 preserves token groups, expired predecessor links, saved state and reservation IDs", () => {
   const f = legacy();
   try {
     const status = versionThree(f),
@@ -471,7 +469,7 @@ test("scene history 3 to 4 preserves token groups, expired predecessor links, sa
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      4,
+      5,
     );
   } finally {
     f.db.close();
@@ -527,7 +525,148 @@ test("failed schema-3 marker writes and malformed causal links leave the old his
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          4,
+          5,
+        );
+      }
+    } finally {
+      f.db.close();
+    }
+  }
+});
+
+function versionFour(f: ReturnType<typeof legacy>) {
+  const history = new SceneHistoryStore(f.db, f.tables),
+    drawingId = randomUUID();
+  const run = (command: Command) =>
+    transaction(f.db, () => {
+      const before = f.tables.load(),
+        next = applyCommand(before, command, f.host.member);
+      history.record(f.host.member, before, next, command);
+      f.tables.save(next, command.id);
+    });
+  run({
+    id: randomUUID(),
+    type: "drawing.add",
+    drawing: {
+      id: drawingId,
+      kind: "stroke",
+      points: [
+        { x: 0.1, y: 0.2 },
+        { x: 10.3, y: 20.4 },
+      ],
+      color: "#405f4d",
+    },
+  });
+  const token = f.tables.load().tokens[0]!;
+  run({
+    id: randomUUID(),
+    type: "objects.move",
+    objects: [
+      { objectId: token.id, expectedVersion: token.version },
+      { objectId: drawingId, expectedVersion: 1 },
+    ],
+    delta: { x: 0.2, y: 0.3 },
+  });
+  const status = history.status(f.host.member);
+  f.db.exec("UPDATE scene_history_version SET version=4");
+  return status;
+}
+
+test("scene history 4 to 5 preserves exact mixed originals, cursors, state and reserved identities", () => {
+  const f = legacy();
+  try {
+    const status = versionFour(f),
+      before = f.tables.load(),
+      rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      ids = f.db
+        .prepare("SELECT * FROM object_id_reservations ORDER BY campaign_id,id")
+        .all();
+    const history = new SceneHistoryStore(f.db, f.tables);
+    assert.deepEqual(history.status(f.host.member), status);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM object_id_reservations ORDER BY campaign_id,id")
+        .all(),
+      ids,
+    );
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      5,
+    );
+    transaction(f.db, () => {
+      const edge = history.status(f.host.member).undo!,
+        command = {
+          id: randomUUID(),
+          type: "scene.undo" as const,
+          historyId: edge.id,
+          expectedVersion: edge.version,
+        };
+      f.tables.save(
+        history.apply(f.host.member, f.tables.load(), command),
+        command.id,
+      );
+    });
+    assert.deepEqual(f.tables.load().drawings[0]!.points, [
+      { x: 0.1, y: 0.2 },
+      { x: 10.3, y: 20.4 },
+    ]);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("failed schema-4 marker writes and invalid original geometry leave the old history untouched", () => {
+  for (const failure of ["sql", "geometry"]) {
+    const f = legacy();
+    try {
+      versionFour(f);
+      if (failure === "sql")
+        f.db.exec(
+          "CREATE TRIGGER reject_v5 BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture v5 failure'); END;",
+        );
+      else {
+        const row = f.db
+            .prepare(
+              "SELECT id,payload_json FROM scene_history_entries ORDER BY sequence DESC LIMIT 1",
+            )
+            .get()!,
+          payload = JSON.parse(String(row.payload_json));
+        payload.originals[0].position.x = null;
+        f.db
+          .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+          .run(JSON.stringify(payload), row.id!);
+      }
+      const rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+      assert.throws(() => new SceneHistoryStore(f.db, f.tables));
+      assert.equal(
+        f.db.prepare("SELECT version FROM scene_history_version").get()!
+          .version,
+        4,
+      );
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        rows,
+      );
+      if (failure === "sql") {
+        f.db.exec("DROP TRIGGER reject_v5");
+        new SceneHistoryStore(f.db, f.tables);
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          5,
         );
       }
     } finally {

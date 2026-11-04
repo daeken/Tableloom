@@ -621,6 +621,73 @@ try {
       }),
     );
     await removed;
+    const batchDeleteId = randomUUID(),
+      batchDeleteAck = acknowledgement(live, batchDeleteId);
+    const batchDeletedView = snapshot(
+      live,
+      (message) =>
+        message.state.tokens.length === 0 &&
+        message.state.drawings.length === 0 &&
+        message.history.undo?.objectCount === 2 &&
+        message.history.undo.action === "delete",
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: batchDeleteId,
+          type: "objects.delete",
+          objects: [
+            { objectId: secondToken, expectedVersion: 4 },
+            { objectId: roomId, expectedVersion: 4 },
+          ],
+        },
+      }),
+    );
+    await batchDeleteAck;
+    let batchState = await batchDeletedView;
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+          type === "scene.undo"
+            ? batchState.history.undo!
+            : batchState.history.redo!,
+        id = randomUUID(),
+        ack = acknowledgement(live, id);
+      const view = snapshot(live, (message) =>
+        type === "scene.undo"
+          ? message.state.tokens.some(
+              (token) => token.id === secondToken && token.version === 6,
+            ) &&
+            message.state.drawings.some(
+              (drawing) => drawing.id === roomId && drawing.version === 6,
+            )
+          : message.state.tokens.length === 0 &&
+            message.state.drawings.length === 0,
+      );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      await ack;
+      batchState = await view;
+      if (type === "scene.undo") {
+        assert.deepEqual(
+          batchState.state.drawings[0]?.points,
+          roomPoints.map((point) => ({ x: point.x + 10, y: point.y + 20 })),
+        );
+        assert.deepEqual(batchState.state.tokens[0]?.position, {
+          x: 130,
+          y: 80,
+        });
+      }
+    }
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -661,5 +728,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion history, roll archive/cleanup, and clean shutdown.",
 );

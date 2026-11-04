@@ -18,28 +18,37 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
   const marked = exists("scene_history_version");
   const version = marked
     ? z
-        .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
+        .union([
+          z.literal(1),
+          z.literal(2),
+          z.literal(3),
+          z.literal(4),
+          z.literal(5),
+        ])
         .parse(
           db
             .prepare("SELECT version FROM scene_history_version WHERE id=1")
             .get()?.version,
         )
     : 0;
-  if (version === 3 || version === 4) {
+  if (version === 3 || version === 4 || version === 5) {
     if (
       !exists("scene_history_entries") ||
       exists("scene_edit_history") ||
       exists("scene_move_history")
     )
       throw new Error("Scene history storage is incomplete or inconsistent.");
-    if (version === 3) {
+    if (version === 3 || version === 4) {
       const entries = db
           .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
           .all()
           .map(entryOf),
         byId = new Map(entries.map((entry) => [entry.id, entry]));
       for (const entry of entries) {
-        if (entry.payload.kind === "translate")
+        if (
+          entry.payload.kind === "delete-many" ||
+          (version === 3 && entry.payload.kind === "translate")
+        )
           throw new Error("Unexpected translated history in old storage.");
         for (const target of entry.targets) {
           const previous = target.previousId
@@ -63,7 +72,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
           .length
       )
         throw new Error("Scene history references unavailable data.");
-      db.exec("UPDATE scene_history_version SET version=4 WHERE id=1");
+      db.exec("UPDATE scene_history_version SET version=5 WHERE id=1");
     }
     return identities;
   }
@@ -134,7 +143,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
         }
         const row = v2.parse(raw),
           payload = payloadSchema.parse(JSON.parse(row.payload_json));
-        if (payload.kind === "move-many" || payload.kind === "translate")
+        if (
+          payload.kind === "move-many" ||
+          payload.kind === "translate" ||
+          payload.kind === "delete-many"
+        )
           throw new Error("Unexpected group history in old storage.");
         return row;
       });
@@ -185,11 +198,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
     )
       throw new Error("Scene history references unavailable data.");
     db.exec(
-      `DROP TABLE ${source}; UPDATE scene_history_version SET version=4 WHERE id=1;`,
+      `DROP TABLE ${source}; UPDATE scene_history_version SET version=5 WHERE id=1;`,
     );
   } else
     db.exec(
-      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,4);",
+      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,5);",
     );
   return identities;
 }
