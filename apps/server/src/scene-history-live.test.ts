@@ -98,7 +98,7 @@ test("live move history is requester-scoped, confirmed atomically, conflict-safe
       position: { x: 100, y: 200 },
     };
     assert.equal((await p.send(move)).type, "ack");
-    await until(() => Boolean(p.latest().history.undo));
+    await until(() => p.latest().history.undo?.action === "move");
     const cursor = p.latest().history.undo!;
     assert.equal(cursor.available, true);
     assert.equal(g.latest().history.undo, null);
@@ -121,7 +121,7 @@ test("live move history is requester-scoped, confirmed atomically, conflict-safe
     assert.deepEqual(store.load(), before);
     assert.equal(
       db
-        .prepare("SELECT state,version FROM scene_move_history WHERE id=?")
+        .prepare("SELECT state,version FROM scene_edit_history WHERE id=?")
         .get(cursor.id)!.state,
       "done",
     );
@@ -198,6 +198,78 @@ test("live move history is requester-scoped, confirmed atomically, conflict-safe
       ),
     );
     assert.equal(store.hasCommand(staleId), false);
+    const drawingId = randomUUID(),
+      drawing = {
+        id: drawingId,
+        kind: "stroke",
+        color: "#405f4d",
+        points: [
+          { x: 10, y: 20 },
+          { x: 40, y: 50 },
+        ],
+      };
+    assert.equal(
+      (await gmPeer.send({ id: randomUUID(), type: "drawing.add", drawing }))
+        .type,
+      "ack",
+    );
+    await until(() => gmPeer.latest().history.undo?.objectId === drawingId);
+    const edit = async (
+      peer: typeof gmPeer,
+      type: "scene.undo" | "scene.redo",
+    ) => {
+      const cursor =
+          peer.latest().history[type === "scene.undo" ? "undo" : "redo"]!,
+        start = peer.messages.length;
+      const command = {
+        id: randomUUID(),
+        type,
+        historyId: cursor.id,
+        expectedVersion: cursor.version,
+      };
+      assert.equal((await peer.send(command)).type, "ack");
+      await until(() =>
+        peer.messages.slice(start).some((m) => m.type === "snapshot"),
+      );
+      return command;
+    };
+    await edit(gmPeer, "scene.undo");
+    assert.equal(store.load().drawings.length, 0);
+    await edit(gmPeer, "scene.redo");
+    assert.equal(store.load().drawings[0]!.version, 3);
+    assert.equal(
+      (
+        await gmPeer.send({
+          id: randomUUID(),
+          type: "object.delete",
+          objectId: drawingId,
+          expectedVersion: 3,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => gmPeer.latest().history.undo?.action === "delete");
+    const deletedCursor = gmPeer.latest().history.undo!;
+    assert.ok(!JSON.stringify(deletedCursor).includes("points"));
+    assert.ok(!JSON.stringify(p.messages).includes(deletedCursor.id));
+    // Restart with a deleted object: its inverse, owner and cursor remain durable.
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const restoredGM = await connect(url, gm);
+    sockets.push(restoredGM.ws);
+    assert.deepEqual(restoredGM.latest().history.undo, deletedCursor);
+    const restored = await edit(restoredGM, "scene.undo");
+    assert.deepEqual(
+      { ...store.load().drawings[0], version: 1 },
+      { ...drawing, ownerId: store.load().drawings[0]!.ownerId, version: 1 },
+    );
+    assert.equal(store.load().drawings[0]!.version, 5);
+    assert.equal((await restoredGM.send(restored)).type, "ack");
+    assert.equal(store.load().drawings[0]!.version, 5);
+    await edit(restoredGM, "scene.redo");
+    assert.equal(store.load().drawings.length, 0);
   } finally {
     sockets.forEach((s) => s.terminate());
     await app.close();

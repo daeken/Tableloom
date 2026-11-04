@@ -17,7 +17,14 @@ export function SceneHistoryControls({
   const pending = deliveries.some(
     (item) =>
       item.status === "pending" &&
-      ["token.move", "scene.undo", "scene.redo"].includes(item.type),
+      [
+        "token.move",
+        "token.add",
+        "drawing.add",
+        "object.delete",
+        "scene.undo",
+        "scene.redo",
+      ].includes(item.type),
   );
   const blocked = [history?.undo, history?.redo].some(
     (item) => item && !item.available,
@@ -25,18 +32,22 @@ export function SceneHistoryControls({
   return (
     <div
       className="scene-history-controls"
-      aria-label="Your token move history"
+      aria-label="Your scene edit history"
     >
       {(["undo", "redo"] as const).map((action) => {
         const entry = history?.[action];
         const Icon = action === "undo" ? Undo2 : Redo2;
-        const label = action === "undo" ? "Undo last move" : "Redo last move";
+        const label = action === "undo" ? "Undo last edit" : "Redo last edit";
         return (
           <button
             key={action}
             className="history-button"
             disabled={!enabled || pending || !entry?.available}
-            title={entry ? `${label}: ${entry.name}` : `No move to ${action}`}
+            title={
+              entry
+                ? `${label}: ${entry.action} ${entry.objectType === "drawing" ? "drawing" : entry.name}`
+                : `No edit to ${action}`
+            }
             onClick={() =>
               entry &&
               send({
@@ -51,7 +62,9 @@ export function SceneHistoryControls({
         );
       })}
       {blocked && (
-        <small>A token changed. Its older move is unavailable.</small>
+        <small>
+          An object changed or is unavailable. Its older edit cannot be applied.
+        </small>
       )}
     </div>
   );

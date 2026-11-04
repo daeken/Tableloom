@@ -385,6 +385,10 @@ try {
     }
     const deleteId = randomUUID(),
       deleted = acknowledgement(live, deleteId);
+    const deletedView = snapshot(
+      live,
+      (message) => message.history.undo?.action === "delete",
+    );
     live.send(
       JSON.stringify({
         context: current.context,
@@ -397,6 +401,42 @@ try {
       }),
     );
     await deleted;
+    const deletion = (await deletedView).history.undo!;
+    const restoreId = randomUUID(),
+      restored = acknowledgement(live, restoreId);
+    const restoredView = snapshot(
+      live,
+      (message) => message.state.tokens[0]?.version === 6,
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: restoreId,
+          type: "scene.undo",
+          historyId: deletion.id,
+          expectedVersion: deletion.version,
+        },
+      }),
+    );
+    await restored;
+    const restoreSnapshot = await restoredView;
+    assert.equal(restoreSnapshot.state.tokens[0]?.id, tokenId);
+    const redoDeletion = restoreSnapshot.history.redo!;
+    const removeId = randomUUID(),
+      removed = acknowledgement(live, removeId);
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: removeId,
+          type: "scene.redo",
+          historyId: redoDeletion.id,
+          expectedVersion: redoDeletion.version,
+        },
+      }),
+    );
+    await removed;
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -437,5 +477,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move undo/redo, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete history, roll archive/cleanup, and clean shutdown.",
 );

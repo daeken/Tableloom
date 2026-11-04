@@ -1,0 +1,276 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { applyCommand } from "@tableloom/core/server";
+import type { Command } from "@tableloom/core";
+import { TableStore } from "./store.js";
+import { AccessStore } from "./access.js";
+import { CommandBindings } from "./command-bindings.js";
+import { SceneHistoryStore } from "./scene-history.js";
+import { transaction } from "./database.js";
+const KEY = "tableloom-history-migration-test-key";
+function legacy() {
+  const db = new DatabaseSync(":memory:"),
+    tables = new TableStore(db),
+    access = new AccessStore(db, KEY),
+    host = access.setupHost(KEY, "GM");
+  const bindings = new CommandBindings(db);
+  db.exec(`CREATE TABLE scene_move_history (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,campaign_id TEXT NOT NULL,scene_id TEXT NOT NULL,actor_id TEXT NOT NULL REFERENCES access_users(id),token_id TEXT NOT NULL,
+    previous_id TEXT REFERENCES scene_move_history(id) ON DELETE SET NULL,state TEXT NOT NULL CHECK(state IN ('done','undone')),version INTEGER NOT NULL CHECK(version>0),expected_token_version INTEGER NOT NULL CHECK(expected_token_version>0),from_json TEXT NOT NULL,to_json TEXT NOT NULL,
+    FOREIGN KEY(campaign_id,scene_id) REFERENCES scene_records(campaign_id,id));
+    CREATE INDEX scene_history_member ON scene_move_history(campaign_id,scene_id,actor_id,sequence);
+    CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,1);`);
+  const run = (command: Command) =>
+    tables.save(applyCommand(tables.load(), command, host.member), command.id);
+  const tokenId = randomUUID();
+  run({
+    id: randomUUID(),
+    type: "token.add",
+    token: {
+      id: tokenId,
+      name: "Migrated",
+      position: { x: 0, y: 0 },
+      color: "#405f4d",
+    },
+  });
+  const first: Command = {
+    id: randomUUID(),
+    type: "token.move",
+    tokenId,
+    expectedVersion: 1,
+    position: { x: 10, y: 0 },
+  };
+  run(first);
+  run({
+    ...first,
+    id: randomUUID(),
+    expectedVersion: 2,
+    position: { x: 20, y: 0 },
+  });
+  run({ ...first, id: randomUUID(), expectedVersion: 3 });
+  run({
+    id: randomUUID(),
+    type: "note.add",
+    note: {
+      id: randomUUID(),
+      title: "Private saved note",
+      body: "Preserved secret",
+      visibility: "gm",
+    },
+  });
+  run({
+    id: randomUUID(),
+    type: "dice.roll",
+    expression: "3d17",
+    visibility: "gm",
+  });
+  const campaign = tables.getCampaign(),
+    context = {
+      campaignId: campaign.id,
+      sceneId: campaign.activeSceneId,
+      generation: campaign.version,
+    };
+  bindings.bind(host.member.id, { context, command: first });
+  const a = randomUUID(),
+    b = randomUUID(),
+    insert = db.prepare(
+      "INSERT INTO scene_move_history(id,campaign_id,scene_id,actor_id,token_id,previous_id,state,version,expected_token_version,from_json,to_json) VALUES(?,?,?,?,?,?,?,2,4,?,?)",
+    );
+  insert.run(
+    a,
+    campaign.id,
+    campaign.activeSceneId,
+    host.member.id,
+    tokenId,
+    null,
+    "done",
+    '{"x":0,"y":0}',
+    '{"x":10,"y":0}',
+  );
+  insert.run(
+    b,
+    campaign.id,
+    campaign.activeSceneId,
+    host.member.id,
+    tokenId,
+    a,
+    "undone",
+    '{"x":10,"y":0}',
+    '{"x":20,"y":0}',
+  );
+  const hidden = tables.createScene(campaign.id, { name: "Hidden scene" });
+  insert.run(
+    randomUUID(),
+    campaign.id,
+    hidden.id,
+    host.member.id,
+    randomUUID(),
+    null,
+    "done",
+    '{"x":0,"y":0}',
+    '{"x":10,"y":0}',
+  );
+  return { db, tables, access, host, bindings, first, context, a, b };
+}
+
+test("move-history 1 to scene-history 2 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
+  const f = legacy();
+  try {
+    const before = f.tables.load(),
+      rows = f.db
+        .prepare("SELECT * FROM scene_move_history ORDER BY sequence")
+        .all();
+    const history = new SceneHistoryStore(f.db, f.tables);
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      2,
+    );
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name='scene_move_history'",
+        )
+        .get(),
+      undefined,
+    );
+    const migrated = f.db
+      .prepare("SELECT * FROM scene_edit_history ORDER BY sequence")
+      .all();
+    assert.equal(migrated.length, rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      const old = rows[i]!,
+        next = migrated[i]!;
+      for (const key of [
+        "id",
+        "sequence",
+        "campaign_id",
+        "scene_id",
+        "actor_id",
+        "previous_id",
+        "state",
+        "version",
+      ])
+        assert.equal(next[key], old[key]);
+      assert.equal(next.object_id, old.token_id);
+      assert.equal(next.expected_object_version, old.expected_token_version);
+      assert.deepEqual(JSON.parse(String(next.payload_json)), {
+        kind: "move",
+        objectType: "token",
+        before: JSON.parse(String(old.from_json)),
+        after: JSON.parse(String(old.to_json)),
+      });
+    }
+    assert.deepEqual(f.tables.load(), before);
+    assert.equal(f.access.authenticate(f.host.token)!.id, f.host.member.id);
+    assert.ok(
+      f.bindings.matches(f.host.member.id, {
+        context: f.context,
+        command: f.first,
+      }),
+    );
+    assert.ok(f.tables.hasCommand(f.first.id));
+    assert.equal(history.status(f.host.member).undo!.id, f.a);
+    assert.equal(history.status(f.host.member).redo!.id, f.b);
+    assert.deepEqual(
+      new SceneHistoryStore(f.db, f.tables).status(f.host.member),
+      history.status(f.host.member),
+    );
+    transaction(f.db, () => {
+      const cursor = history.status(f.host.member).redo!,
+        command = {
+          id: randomUUID(),
+          type: "scene.redo" as const,
+          historyId: cursor.id,
+          expectedVersion: cursor.version,
+        };
+      f.tables.save(
+        history.apply(f.host.member, f.tables.load(), command),
+        command.id,
+      );
+    });
+    assert.equal(f.tables.load().tokens[0]!.version, 5);
+    assert.equal(f.tables.load().tokens[0]!.position.x, 20);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("history migration SQL failure rolls back the table replacement, copied rows, and schema marker", () => {
+  const f = legacy();
+  try {
+    const rows = f.db
+        .prepare("SELECT * FROM scene_move_history ORDER BY sequence")
+        .all(),
+      before = f.tables.load();
+    f.db.exec(
+      "CREATE TRIGGER reject_history_upgrade BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture migration failure'); END;",
+    );
+    assert.throws(
+      () => new SceneHistoryStore(f.db, f.tables),
+      /fixture migration failure/,
+    );
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      1,
+    );
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name='scene_edit_history'",
+        )
+        .get(),
+      undefined,
+    );
+    assert.deepEqual(
+      f.db.prepare("SELECT * FROM scene_move_history ORDER BY sequence").all(),
+      rows,
+    );
+    assert.deepEqual(f.tables.load(), before);
+    f.db.exec("DROP TRIGGER reject_history_upgrade");
+    new SceneHistoryStore(f.db, f.tables);
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      2,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("malformed legacy inverse geometry or cross-object causal links abort migration without partial rows", () => {
+  for (const kind of ["geometry", "link"]) {
+    const f = legacy();
+    try {
+      if (kind === "geometry")
+        f.db
+          .prepare("UPDATE scene_move_history SET to_json=? WHERE id=?")
+          .run('{"x":50000,"y":0}', f.b);
+      else
+        f.db
+          .prepare("UPDATE scene_move_history SET token_id=? WHERE id=?")
+          .run(randomUUID(), f.b);
+      assert.throws(() => new SceneHistoryStore(f.db, f.tables));
+      assert.equal(
+        f.db.prepare("SELECT version FROM scene_history_version").get()!
+          .version,
+        1,
+      );
+      assert.equal(
+        f.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name='scene_edit_history'",
+          )
+          .get(),
+        undefined,
+      );
+      assert.equal(
+        f.db.prepare("SELECT count(*) AS n FROM scene_move_history").get()!.n,
+        3,
+      );
+    } finally {
+      f.db.close();
+    }
+  }
+});
