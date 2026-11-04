@@ -177,8 +177,9 @@ test("version 2 migration preserves object ownership and marks old dice public; 
     tokens: [token],
     rolls: [oldRoll],
   };
+  Reflect.deleteProperty(legacy, "notes");
   const migrated = restoreTable(legacy);
-  assert.equal(migrated.state.schemaVersion, 3);
+  assert.equal(migrated.state.schemaVersion, 4);
   assert.equal(migrated.state.revision, 42);
   assert.deepEqual(migrated.state.tokens, [token]);
   assert.deepEqual(migrated.state.rolls, [

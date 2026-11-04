@@ -7,6 +7,7 @@ import {
   Circle,
   Dice5,
   Eraser,
+  FileText,
   Hand,
   Layers2,
   MousePointer2,
@@ -30,6 +31,7 @@ import { useTable } from "./useTable.js";
 import { useAccess, accessRequest } from "./useAccess.js";
 import { AccessGate } from "./AccessGate.js";
 import { InviteDialog } from "./InviteDialog.js";
+import { NotesPanel } from "./NotesPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
 
@@ -72,7 +74,7 @@ export function App() {
   const setRollVisibility = (value: RollVisibility) =>
     setDraft({ ...currentDraft, visibility: value });
   const [rollError, setRollError] = useState("");
-  const [tab, setTab] = useState<"rolls" | "game">("rolls");
+  const [tab, setTab] = useState<"rolls" | "game" | "notes">("rolls");
   const [copied, setCopied] = useState(false);
   const table = useTable(viewerKey, refresh);
   const { status, participants, error, clearError, send } = table;
@@ -380,10 +382,26 @@ export function App() {
             >
               <Layers2 size={16} /> Your game
             </button>
+            <button
+              className={tab === "notes" ? "active" : ""}
+              onClick={() => setTab("notes")}
+            >
+              <FileText size={16} /> Notes
+            </button>
           </div>
+          {member && state && (
+            <NotesPanel
+              key={viewerKey}
+              active={tab === "notes"}
+              notes={state.notes}
+              member={member}
+              enabled={connected}
+              send={send}
+            />
+          )}
           {tab === "game" ? (
             <Panel />
-          ) : (
+          ) : tab === "rolls" ? (
             <>
               <section className="dice-section">
                 <span className="eyebrow">LET FATE HAVE A SAY</span>
@@ -498,7 +516,7 @@ export function App() {
                 table.
               </div>
             </>
-          )}
+          ) : null}
         </aside>
       </div>
       {error && (

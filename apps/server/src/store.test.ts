@@ -27,6 +27,7 @@ test("loading a version 1 database durably migrates ownership without adding rev
         },
       ],
     };
+    Reflect.deleteProperty(legacy, "notes");
     const receipt = randomUUID();
     db.prepare("INSERT INTO table_state (id, json) VALUES (1, ?)").run(
       JSON.stringify(legacy),
@@ -36,7 +37,7 @@ test("loading a version 1 database durably migrates ownership without adding rev
     );
     const state = store.load();
     assert.equal(state.tokens[0]?.ownerId, null);
-    assert.equal(state.schemaVersion, 3);
+    assert.equal(state.schemaVersion, 4);
     assert.equal(state.revision, 8);
     assert.deepEqual(
       JSON.parse(

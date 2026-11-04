@@ -1,13 +1,17 @@
 import type { Member } from "./access.js";
 import type { Command, Roll, TableState } from "./index.js";
 
-export function canSeeRoll(member: Member, roll: Roll): boolean {
+export function canSeeRoll(
+  member: Member,
+  roll: Pick<Roll, "visibility" | "ownerId">,
+): boolean {
   return (
     roll.visibility === "public" ||
     member.role === "gm" ||
     roll.ownerId === member.id
   );
 }
+export const canSeeNote = canSeeRoll;
 
 export function canEditObject(
   member: Member | null,
@@ -48,7 +52,19 @@ export function authorizeCommand(
     case "drawing.add":
     case "token.add":
     case "dice.roll":
+    case "note.add":
       return;
+    case "note.update":
+    case "note.delete": {
+      const note = state.notes.find((note) => note.id === command.noteId);
+      if (!note || !canSeeNote(member, note))
+        throw new Error("That note is unavailable.");
+      if (!canEditObject(member, note))
+        throw new Error("Only the owner or GM can change this note.");
+      if (note.version !== command.expectedVersion)
+        throw new Error("This note changed. Reload it before saving.");
+      return;
+    }
     default: {
       const unhandled: never = command;
       throw new Error(`Unsupported command: ${String(unhandled)}`);

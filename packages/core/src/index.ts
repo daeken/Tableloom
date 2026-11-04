@@ -40,7 +40,8 @@ export const diceResultSchema = z.object({
   at: z.iso.datetime(),
 });
 export type DiceResult = z.infer<typeof diceResultSchema>;
-export const rollVisibilitySchema = z.enum(["public", "gm"]);
+export const visibilitySchema = z.enum(["public", "gm"]);
+export const rollVisibilitySchema = visibilitySchema;
 export type RollVisibility = z.infer<typeof rollVisibilitySchema>;
 export const rollSchema = diceResultSchema
   .extend({
@@ -53,18 +54,33 @@ export const rollSchema = diceResultSchema
 export type Roll = z.infer<typeof rollSchema>;
 export const MAX_ROLL_HISTORY = 100;
 export const MAX_TOTAL_ROLLS = 1100;
+export const MAX_TABLE_NOTES = 100;
+export const noteInputSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string().trim().min(1).max(120),
+    body: z.string().max(10000),
+    visibility: visibilitySchema,
+  })
+  .strict();
+export const noteSchema = noteInputSchema.extend({
+  ownerId: z.uuid(),
+  version: z.number().int().positive(),
+});
+export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(3),
+  schemaVersion: z.literal(4),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
   tokens: z.array(tokenSchema).max(200),
   rolls: z.array(rollSchema).max(MAX_TOTAL_ROLLS),
+  notes: z.array(noteSchema).max(MAX_TABLE_NOTES),
 });
 export const tableSchema = tableDataSchema.superRefine((state, context) => {
   const ids = new Set<string>();
-  for (const object of [...state.tokens, ...state.drawings]) {
+  for (const object of [...state.tokens, ...state.drawings, ...state.notes]) {
     if (ids.has(object.id))
       context.addIssue({
         code: "custom",
@@ -92,15 +108,22 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
   tokens: [],
   rolls: [],
+  notes: [],
 });
 
-const version2TableSchema = tableDataSchema.extend({
+const version3TableSchema = tableDataSchema
+  .omit({ notes: true })
+  .extend({
+    schemaVersion: z.literal(3),
+  })
+  .strict();
+const version2TableSchema = version3TableSchema.extend({
   schemaVersion: z.literal(2),
   rolls: z.array(diceResultSchema.strict()).max(100),
 });
@@ -118,11 +141,12 @@ export function restoreTable(value: unknown): {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
   const legacy = z
-    .union([version1TableSchema, version2TableSchema])
+    .union([version1TableSchema, version2TableSchema, version3TableSchema])
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 3,
+    schemaVersion: 4,
+    notes: [],
     drawings:
       legacy.schemaVersion === 1
         ? legacy.drawings.map((drawing) => ({ ...drawing, ownerId: null }))
@@ -131,11 +155,14 @@ export function restoreTable(value: unknown): {
       legacy.schemaVersion === 1
         ? legacy.tokens.map((token) => ({ ...token, ownerId: null }))
         : legacy.tokens,
-    rolls: legacy.rolls.map((roll) => ({
-      ...roll,
-      ownerId: null,
-      visibility: "public",
-    })),
+    rolls:
+      legacy.schemaVersion === 3
+        ? legacy.rolls
+        : legacy.rolls.map((roll) => ({
+            ...roll,
+            ownerId: null,
+            visibility: "public",
+          })),
   });
   return { state, migrated: true };
 }
@@ -184,6 +211,26 @@ export const commandSchema = z.discriminatedUnion("type", [
       ...envelope,
       type: z.literal("system.set"),
       systemId: systemIdSchema,
+    })
+    .strict(),
+  z
+    .object({ ...envelope, type: z.literal("note.add"), note: noteInputSchema })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("note.update"),
+      noteId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      changes: noteInputSchema.omit({ id: true }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("note.delete"),
+      noteId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
     })
     .strict(),
 ]);

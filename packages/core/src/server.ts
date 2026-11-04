@@ -2,6 +2,7 @@ import { createHash, randomInt, randomUUID } from "node:crypto";
 import {
   MAX_ROLL_HISTORY,
   MAX_TOTAL_ROLLS,
+  MAX_TABLE_NOTES,
   parseDice,
   tableViewSchema,
 } from "./index.js";
@@ -13,7 +14,7 @@ import type {
   TableView,
 } from "./index.js";
 import type { Member } from "./access.js";
-import { authorizeCommand, canSeeRoll } from "./permissions.js";
+import { authorizeCommand, canSeeRoll, canSeeNote } from "./permissions.js";
 
 export function rollDice(
   expression: string,
@@ -42,6 +43,7 @@ export function projectTable(state: TableState, member: Member): TableView {
     drawings: state.drawings,
     tokens: state.tokens,
     rolls: state.rolls.filter((roll) => canSeeRoll(member, roll)),
+    notes: state.notes.filter((note) => canSeeNote(member, note)),
   };
   const version = createHash("sha256")
     .update(JSON.stringify(visible))
@@ -74,7 +76,8 @@ export function applyCommand(
         throw new Error("This scene has reached its drawing limit.");
       if (
         next.drawings.some((d) => d.id === command.drawing.id) ||
-        next.tokens.some((t) => t.id === command.drawing.id)
+        next.tokens.some((t) => t.id === command.drawing.id) ||
+        next.notes.some((n) => n.id === command.drawing.id)
       )
         throw new Error("An object with this ID already exists.");
       next.drawings.push({ ...command.drawing, ownerId: actor.id });
@@ -84,7 +87,8 @@ export function applyCommand(
         throw new Error("This scene has reached its token limit.");
       if (
         next.tokens.some((t) => t.id === command.token.id) ||
-        next.drawings.some((d) => d.id === command.token.id)
+        next.drawings.some((d) => d.id === command.token.id) ||
+        next.notes.some((n) => n.id === command.token.id)
       )
         throw new Error("An object with this ID already exists.");
       next.tokens.push({ ...command.token, ownerId: actor.id });
@@ -108,6 +112,28 @@ export function applyCommand(
         ownerId: actor.id,
         visibility: command.visibility ?? "public",
       });
+      break;
+    case "note.add":
+      if (next.notes.length >= MAX_TABLE_NOTES)
+        throw new Error("The table has reached its note limit.");
+      if (
+        [...next.notes, ...next.tokens, ...next.drawings].some(
+          (object) => object.id === command.note.id,
+        )
+      )
+        throw new Error("An object with this ID already exists.");
+      next.notes.push({ ...command.note, ownerId: actor.id, version: 1 });
+      break;
+    case "note.update": {
+      const note = next.notes.find((note) => note.id === command.noteId)!;
+      note.title = command.changes.title;
+      note.body = command.changes.body;
+      note.visibility = command.changes.visibility;
+      note.version += 1;
+      break;
+    }
+    case "note.delete":
+      next.notes = next.notes.filter((note) => note.id !== command.noteId);
       break;
   }
   next.revision += 1;

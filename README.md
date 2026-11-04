@@ -2,7 +2,7 @@
 
 A self-hosted, web-based virtual tabletop for the systems you actually play. TypeScript throughout, a shared sketchable battlefield, and code-first game modules with custom sheets, rules, and content packs.
 
-**Status:** authenticated tabletop with object permissions and server-filtered private rolls. Private documents and GM notes are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
+**Status:** authenticated tabletop with object permissions, private rolls, and shared/private note documents. Player recovery and member management are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
 
 ## Run locally
 
@@ -33,7 +33,11 @@ Only authenticated members can fetch or connect to the table. Everyone can draw,
 
 Scene objects are currently public to all table members. Before rolling, choose **Everyone at the table** or **You and the GM**. Private rolls are visible only to the roller and the GM; a GM's private rolls stay with the GM. The history marks private results explicitly. Public is the default, and already-recorded roll visibility cannot be changed. Sign-out/identity changes clear the local roll draft.
 
-Private documents and GM notes are not implemented yet. Backup of the private host key and player identity recovery still need a complete recovery workflow.
+The **Notes** panel supports plain-text documents. **New** creates a private note visible to its owner and the GM; GM-owned private notes stay with the GM. Set **Who can read this?** to **Everyone at the table** and save to share a note. Other players can read shared notes; only the owner and GM can edit or delete them. Changing a note back to private removes it from other players' current/future views. Previously shared text may already have been read.
+
+Note edits require **Save changes**. Unsaved drafts stay in memory when switching notes/tabs and through unrelated table updates; save before reloading or signing out. Clean editors follow remote saves. If another editor saves while you have a draft, your draft is retained and stale saves/deletes are blocked until you explicitly reload the latest version. Notes are limited to 100 per table, 120 characters per title, and 10,000 characters per body.
+
+Backup of the private host key and identity-preserving player recovery still need a complete recovery workflow. Module-backed character documents, rich text, attachments, note ownership reassignment, and version history are not implemented yet.
 
 ## Architecture
 
@@ -49,7 +53,7 @@ Private documents and GM notes are not implemented yet. Backup of the private ho
 
 The server serializes mutations and commits before sending updates. Commands have IDs for retry deduplication over the last 10,000 internal revisions; clients do not automatically replay commands after reconnecting. Every HTTP table response, initial/reconnect snapshot, mutation update, and retry response uses a per-member projection. Global revision counters stay on the server. Client views use a content fingerprint computed only from visible fields, and unchanged views are not broadcast when someone else makes a private roll.
 
-Dragging and unfinished strokes are local previews; committed changes synchronize. This first protocol sends complete projected snapshots and is deliberately small. It is not an offline-first or CRDT implementation. Table schema/protocol version 3 adds roll visibility and separates internal state from client views. Version 1/2 saves upgrade automatically, preserving scene content, internal revisions, command receipts, and version 2 ownership. Older rolls remain public; ownerless legacy objects stay GM-controlled. Unsupported/incomplete saves and ambiguous object IDs fail validation. Reload older browser tabs after upgrading.
+Dragging and unfinished strokes are local previews; committed changes synchronize. This first protocol sends complete projected snapshots and is deliberately small. It is not an offline-first or CRDT implementation. Table schema/protocol version 4 includes note documents and per-note edit versions. Version 1/2/3 saves upgrade automatically, preserving scene content, internal revisions, command receipts, version 2 ownership, and version 3 private roll visibility. Older rolls remain public; ownerless legacy objects stay GM-controlled. Migrated tables start with an empty notes collection. Unsupported/incomplete saves and ambiguous object IDs fail validation. Reload older browser tabs after upgrading.
 
 Roll retention is separate for the public audience and each private roller: 100 results per audience, at most 1,100 records overall. Private rolling never evicts public history or another player's private results. A full overall history rejects growth until archive/cleanup support is added; those controls remain queued.
 
@@ -79,12 +83,12 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
   - [x] Implement persistent host identity/recovery, table membership, expiring sessions, and atomic single-use invitations, with access-store tests.
   - [x] Wire host-key generation/storage, setup/recovery/join/logout/invitation APIs and UI, HttpOnly session cookies, request-origin checks, and HTTP/WebSocket authentication. Recheck session expiry/revocation for live sockets, and test unauthorized access end to end.
 - [x] Enforce GM/player roles and object ownership for every command; add permission tests.
-- [ ] Introduce server-filtered private documents, GM notes, and secret rolls; test that hidden data never reaches unauthorized clients.
+- [x] Introduce server-filtered private documents, GM notes, and secret rolls; test that hidden data never reaches unauthorized clients.
   - [x] Separate internal state from per-member client views; implement persistent private rolls and visibility controls, with raw-wire/HTTP/retry/reconnect/restart leakage tests.
-  - [ ] Add bounded private/public note documents, GM notes, authorization, migrations, and a notes editor; include document visibility changes/deletion in recipient-filtering tests.
+  - [x] Add bounded private/public note documents, GM notes, authorization, migrations, and a notes editor; include document visibility changes/deletion in recipient-filtering tests.
 - [ ] Add identity-preserving returning-player recovery, member management, invitation revocation, and GM ownership reassignment APIs/UI.
 - [ ] Add multiple campaigns/scenes, campaign settings, and pinned system/content-pack versions.
-- [ ] Add bounded document collections and normalized storage with schema migrations; add roll-history archive/cleanup controls and avoid unlimited snapshot growth.
+- [ ] Add normalized, module-backed document storage with schema migrations; add roll-history archive/cleanup controls and avoid unlimited snapshot growth.
 - [ ] Add graceful reconnect behavior for concurrent edits, protocol versions, conflict feedback, and backpressure.
 
 ### 2 — Comfortable tabletop tools
@@ -93,9 +97,10 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
 - [ ] Add durable undo/redo with multiplayer-safe semantics, multi-selection, resize, and snap-to-grid options.
 - [ ] Add image/map upload, local asset storage, asset size limits, and authorization.
 - [ ] Add text, shape styling, layers, grid settings, measurement, and keyboard shortcuts.
+- [ ] Add note history/trash and richer document content after the basic campaign workflow is playtested.
 - [ ] Extend the participant count into named presence; add transient cursors, chat, and roll visibility controls.
 - [ ] Improve touch/keyboard accessibility and verify narrow-screen layouts.
-- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 640 kB before gzip).
+- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 646 kB before gzip).
 
 ### 3 — Module development and character sheets
 
@@ -170,6 +175,16 @@ The **Keep building Tableloom** heartbeat is active every five minutes in this C
 - Added durable schema 1/2 → 3 migration. Existing object ownership and content are preserved, legacy rolls explicitly remain public, and unknown/incomplete/downgraded private save shapes fail validation. Client protocol version is 3; older browser tabs need a reload.
 - Verification: `npm run check` passed with **38 tests**, strict typecheck, production builds, and the authenticated distribution smoke check. New tests cover projection/visibility policy, unchanged fingerprints under hidden activity, audience retention, overall capacity, migration, and a real GM/Alice/Bob session that inspects raw JSON frames and HTTP bodies before/after private rolls, public ordering barriers, a guessed/replayed private command ID, reconnects, and a full server/database restart. Private result IDs/expressions and internal revisions are absent from unauthorized payloads; permitted recipients retain their results after restart.
 - Scope remains explicit: this completes private roll transport/controls, while the parent privacy work item stays unchecked until private document/GM-note CRUD, authorization, editor, and visibility-transition tests are implemented. All battlefield objects remain public. No published game rules/content were added. Existing third-party annotation and bundle-size notices remain; no deployment occurred.
+
+### 2026-11-04 — Private note documents and GM notes
+
+- Added bounded note documents with server-assigned ownership and versioned add/update/delete commands. Notes can be shared with the table or private to owner/GM. GM-owned private notes stay with the GM. Public readers cannot edit; hidden note mutations return a generic unavailable response before permission/version details are inspected. Stale updates and deletes are rejected without mutating state or consuming receipts.
+- Extended per-member projections to notes. Private edits do not change unauthorized view fingerprints or send snapshots to those viewers. Publishing, retracting visibility, and deleting public notes update affected views; hidden titles, bodies, IDs, and versions are omitted. Previously public information cannot be recalled from readers' knowledge.
+- Added the Notes editor with explicit save/delete controls, audience selection, read-only shared notes, and identity-scoped in-memory drafts. Drafts survive note/tab switches and unrelated rolls. Clean editors follow remote saves; real conflicts preserve the local draft and offer an explicit discard/reload action. Creation starts with a private blank note. Limits are 100 documents, 120 title characters, and 10,000 body characters; IDs remain unique across notes and battlefield objects.
+- Added schema/protocol version 4 and migrations from versions 1–3. Existing object ownership, scene data, receipts, revisions, and version 3 private roll metadata are preserved. Legacy save shapes are validated strictly and receive an empty notes collection.
+- Verification: `npm run check` passed with **44 tests**, strict typecheck, production builds, and the authenticated distribution smoke check. New tests cover note read/write matrices, bounds, ownership spoofing/collisions, stale writes, and private-roll-preserving migration. A real GM/Alice/Bob WebSocket/HTTP test inspects raw payloads across private creation/editing, explicit publication, retraction, guessed IDs/versions, retries of formerly public commands, public/private deletion, reconnect, and database/server restart.
+- Browser QA used an isolated temporary database and synthetic host key: created/saved a private note, kept a draft across tabs and an unrelated roll, published/retracted the note, verified persistence on reload, and tested two simultaneous editors. A clean editor followed the other window's save; an unsaved editor retained its text and blocked stale save/delete until explicit reload. Test browsers/server and temporary data were cleaned up; normal campaign data was untouched.
+- The privacy checklist item is complete for plain-text note documents and dice results. Module-backed character documents, note history/trash, ownership reassignment, richer content, and identity-preserving player recovery remain queued. Next: returning-player recovery and member/invitation management. No rulebook mechanics or catalog content were added; no deployment occurred. Existing third-party annotation/bundle-size notices remain.
 
 ## License
 

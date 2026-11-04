@@ -1209,3 +1209,124 @@ p {
   color: #7d816c;
   margin-top: 5px;
 }
+
+.panel-tabs {
+  gap: 13px;
+  padding-left: 17px;
+  padding-right: 17px;
+}
+.panel-tabs button {
+  font-size: 9px;
+  gap: 5px;
+}
+.notes-panel {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  padding: 20px;
+  overflow-y: auto;
+  gap: 16px;
+}
+.notes-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.notes-heading button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #526b42;
+}
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.notes-list button {
+  text-align: left;
+  padding: 10px;
+  border: 1px solid #dfe4d5;
+  background: #fbfcf4;
+}
+.notes-list button.active {
+  border-color: #8b9c77;
+  background: #e9eedf;
+}
+.notes-list strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.notes-list small {
+  display: block;
+  font-size: 9px;
+  color: #8b9380;
+  margin-top: 4px;
+}
+.note-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.note-editor label {
+  font-size: 10px;
+  color: #68765d;
+  margin-top: 7px;
+}
+.note-editor input,
+.note-editor textarea,
+.note-editor select {
+  width: 100%;
+  border: 1px solid #d8ddcd;
+  background: #fffef7;
+  color: #40543a;
+  padding: 9px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 11px;
+}
+.note-editor textarea {
+  min-height: 150px;
+  resize: vertical;
+  line-height: 1.7;
+}
+.note-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 9px;
+}
+.note-actions button {
+  padding: 9px;
+  border: 1px solid #ccd5bd;
+  font-size: 10px;
+}
+.note-actions button:first-child {
+  background: #526b42;
+  color: #fff;
+}
+.note-conflict {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #9b6746;
+  padding: 10px;
+  border: 1px solid #d9c5a8;
+  background: #fff6e9;
+}
+.note-conflict button {
+  text-decoration: underline;
+  display: block;
+  padding: 6px 0 0;
+  font-size: 10px;
+}
+.notes-empty {
+  font-size: 11px;
+  line-height: 1.9;
+}

@@ -99,7 +99,7 @@ export async function createApp(options: {
           socket.close(4001, "You signed out of the table.");
     },
   });
-  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 3 }));
+  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 4 }));
   app.get("/api/table", async (request, reply) => {
     const member = access.authenticate(sessionToken(request.headers.cookie));
     if (!member)
