@@ -1,0 +1,17 @@
+{
+  "name": "@tableloom/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@tableloom/core": "*",
+    "@tableloom/module-sdk": "*",
+    "@tableloom/cyberpunk-red": "*",
+    "@tableloom/kids-on-bikes": "*",
+    "@tableloom/kids-on-brooms": "*"
+  }
+}

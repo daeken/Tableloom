@@ -1,0 +1,17 @@
+{
+  "name": "@tableloom/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@tableloom/core": "*",
+    "@tableloom/module-sdk": "*",
+    "@tableloom/cyberpunk-red": "*",
+    "@tableloom/kids-on-bikes": "*",
+    "@tableloom/kids-on-brooms": "*"
+  }
+}
