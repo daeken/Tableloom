@@ -85,6 +85,14 @@ export function applyCommand(
   }
   const next = structuredClone(state);
   switch (command.type) {
+    case "tokens.move": {
+      for (const move of command.moves) {
+        const token = next.tokens.find((token) => token.id === move.tokenId)!;
+        token.position = move.position;
+        token.version += 1;
+      }
+      break;
+    }
     case "scene.undo":
     case "scene.redo":
       throw new Error("Move history actions must be resolved by the server.");

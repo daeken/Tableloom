@@ -9,12 +9,18 @@ import type {
   Token,
 } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
+import {
+  translateTokens,
+  tokensInBox,
+  selectTokens,
+} from "./token-selection.js";
 import { canEditObject } from "@tableloom/core/permissions";
 
 export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
 type Gesture =
   | { kind: "draw"; drawing: DrawingInput }
-  | { kind: "move"; token: Token; start: Point }
+  | { kind: "move"; tokens: Token[]; start: Point; delta: Point }
+  | { kind: "marquee"; start: Point; end: Point; base: string[] }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
   state: TableView;
@@ -43,7 +49,17 @@ export function Tabletop({
   const [failure, setFailure] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [selectionError, setSelectionError] = useState("");
+  useEffect(() => {
+    setSelected((previous) =>
+      previous.filter((id) =>
+        state.tokens.some(
+          (token) => token.id === id && canEditObject(member, token),
+        ),
+      ),
+    );
+  }, [state, member]);
 
   useEffect(() => {
     const element = host.current;
@@ -136,14 +152,19 @@ export function Tabletop({
       world.addChild(graphic);
     }
     for (const original of state.tokens) {
-      const token =
-        gesture?.kind === "move" && gesture.token.id === original.id
-          ? gesture.token
-          : original;
+      const preview =
+        gesture?.kind === "move"
+          ? translateTokens(gesture.tokens, gesture.delta).find(
+              (move) => move.tokenId === original.id,
+            )
+          : undefined;
+      const token = preview
+        ? { ...original, position: preview.position }
+        : original;
       const { x, y } = token.position;
       const graphic = new Graphics();
       graphic.circle(x + 2, y + 4, 24).fill({ color: "#242e29", alpha: 0.18 });
-      if (selected === token.id)
+      if (selected.includes(token.id))
         graphic.circle(x, y, 30).stroke({ color: "#405f4d", width: 2 });
       graphic
         .circle(x, y, 24)
@@ -169,6 +190,19 @@ export function Tabletop({
       label.anchor.set(0.5, 0);
       label.position.set(x, y + 32);
       world.addChild(label);
+    }
+    if (gesture?.kind === "marquee") {
+      const { start, end } = gesture;
+      const rectangle = new Graphics().rect(
+        Math.min(start.x, end.x),
+        Math.min(start.y, end.y),
+        Math.abs(end.x - start.x),
+        Math.abs(end.y - start.y),
+      );
+      rectangle
+        .fill({ color: "#405f4d", alpha: 0.08 })
+        .stroke({ color: "#405f4d", width: 1 / view.scale });
+      world.addChild(rectangle);
     }
   }, [ready, state, gesture, selected, view]);
 
@@ -246,16 +280,33 @@ export function Tabletop({
           expectedVersion: drawing.version,
         });
     } else if (tool === "select") {
+      setSelectionError("");
       const editable = token && canEditObject(member, token) ? token : null;
-      setSelected(editable?.id ?? null);
-      if (editable)
+      if (editable) {
+        if (event.shiftKey) {
+          const next = selected.includes(editable.id)
+            ? selected.filter((id) => id !== editable.id)
+            : selectTokens(selected, [editable.id]);
+          if (next) setSelected(next);
+          else setSelectionError("Select at most 100 tokens at once.");
+          return;
+        }
+        const ids = selected.includes(editable.id) ? selected : [editable.id];
+        setSelected(ids);
+        const tokens = state.tokens.filter(
+          (token) => ids.includes(token.id) && canEditObject(member, token),
+        );
+        setGesture({ kind: "move", tokens, start: p, delta: { x: 0, y: 0 } });
+      } else if (!token) {
         setGesture({
-          kind: "move",
-          token: editable,
-          start: { ...editable.position },
+          kind: "marquee",
+          start: p,
+          end: p,
+          base: event.shiftKey ? selected : [],
         });
+      } else setSelected([]);
     } else {
-      setSelected(null);
+      setSelected([]);
       setGesture({
         kind: "draw",
         drawing: {
@@ -279,8 +330,13 @@ export function Tabletop({
     } else if (gesture.kind === "move")
       setGesture({
         ...gesture,
-        token: { ...gesture.token, position: point(event) },
+        delta: {
+          x: point(event).x - gesture.start.x,
+          y: point(event).y - gesture.start.y,
+        },
       });
+    else if (gesture.kind === "marquee")
+      setGesture({ ...gesture, end: point(event) });
     else {
       const p = point(event);
       const points = gesture.drawing.points;
@@ -298,20 +354,40 @@ export function Tabletop({
       });
     }
   }
-  function up() {
+  function up(event: ReactPointerEvent) {
     if (gesture?.kind === "draw")
       send({ type: "drawing.add", drawing: gesture.drawing });
-    if (
-      gesture?.kind === "move" &&
-      (gesture.token.position.x !== gesture.start.x ||
-        gesture.token.position.y !== gesture.start.y)
-    )
-      send({
-        type: "token.move",
-        tokenId: gesture.token.id,
-        expectedVersion: gesture.token.version,
-        position: gesture.token.position,
+    if (gesture?.kind === "marquee") {
+      const editable = state.tokens.filter((token) =>
+        canEditObject(member, token),
+      );
+      const next = selectTokens(
+        gesture.base,
+        tokensInBox(editable, gesture.start, point(event)),
+      );
+      if (next) setSelected(next);
+      else setSelectionError("Select at most 100 tokens at once.");
+    }
+    if (gesture?.kind === "move") {
+      const p = point(event),
+        moves = translateTokens(gesture.tokens, {
+          x: p.x - gesture.start.x,
+          y: p.y - gesture.start.y,
+        });
+      const changed = moves.some((move) => {
+        const original = gesture.tokens.find(
+          (token) => token.id === move.tokenId,
+        )!;
+        return (
+          original.position.x !== move.position.x ||
+          original.position.y !== move.position.y
+        );
       });
+      if (changed) {
+        if (moves.length === 1) send({ type: "token.move", ...moves[0]! });
+        else if (moves.length > 1) send({ type: "tokens.move", moves });
+      }
+    }
     setGesture(null);
   }
   function zoom(factor: number, center?: Point) {
@@ -338,7 +414,8 @@ export function Tabletop({
       onPointerUp={up}
       onPointerCancel={() => setGesture(null)}
       onWheel={(event) => {
-        if (enabled) zoom(event.deltaY > 0 ? 0.92 : 1.08, local(event));
+        if (enabled && !gesture)
+          zoom(event.deltaY > 0 ? 0.92 : 1.08, local(event));
       }}
     >
       {failure && (
@@ -370,6 +447,26 @@ export function Tabletop({
       <div className="canvas-label">
         <span className="live-dot" /> SHARED BATTLEFIELD
       </div>
+      {(selected.length > 0 || selectionError) && (
+        <div
+          className="selection-controls"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <span role="status">
+            {selectionError ||
+              `${selected.length} ${selected.length === 1 ? "token" : "tokens"} selected`}
+          </span>
+          <button
+            onClick={() => {
+              setSelected([]);
+              setSelectionError("");
+              setGesture(null);
+            }}
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
       <div
         className="zoom-controls"
         onPointerDown={(e) => e.stopPropagation()}

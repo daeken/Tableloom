@@ -115,7 +115,7 @@ function legacy() {
   return { db, tables, access, host, bindings, first, context, a, b };
 }
 
-test("move-history 1 to scene-history 2 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
+test("move-history 1 to scene-history 3 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -125,7 +125,7 @@ test("move-history 1 to scene-history 2 preserves IDs, cursors, links, active/of
     const history = new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      2,
+      3,
     );
     assert.equal(
       f.db
@@ -136,7 +136,7 @@ test("move-history 1 to scene-history 2 preserves IDs, cursors, links, active/of
       undefined,
     );
     const migrated = f.db
-      .prepare("SELECT * FROM scene_edit_history ORDER BY sequence")
+      .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
       .all();
     assert.equal(migrated.length, rows.length);
     for (let i = 0; i < rows.length; i++) {
@@ -148,13 +148,14 @@ test("move-history 1 to scene-history 2 preserves IDs, cursors, links, active/of
         "campaign_id",
         "scene_id",
         "actor_id",
-        "previous_id",
         "state",
         "version",
       ])
         assert.equal(next[key], old[key]);
-      assert.equal(next.object_id, old.token_id);
-      assert.equal(next.expected_object_version, old.expected_token_version);
+      const target = JSON.parse(String(next.targets_json))[0];
+      assert.equal(target.objectId, old.token_id);
+      assert.equal(target.expectedVersion, old.expected_token_version);
+      assert.equal(target.previousId, old.previous_id);
       assert.deepEqual(JSON.parse(String(next.payload_json)), {
         kind: "move",
         objectType: "token",
@@ -218,7 +219,7 @@ test("history migration SQL failure rolls back the table replacement, copied row
     assert.equal(
       f.db
         .prepare(
-          "SELECT name FROM sqlite_master WHERE name='scene_edit_history'",
+          "SELECT name FROM sqlite_master WHERE name='scene_history_entries'",
         )
         .get(),
       undefined,
@@ -232,7 +233,7 @@ test("history migration SQL failure rolls back the table replacement, copied row
     new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      2,
+      3,
     );
   } finally {
     f.db.close();
@@ -260,7 +261,7 @@ test("malformed legacy inverse geometry or cross-object causal links abort migra
       assert.equal(
         f.db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE name='scene_edit_history'",
+            "SELECT name FROM sqlite_master WHERE name='scene_history_entries'",
           )
           .get(),
         undefined,
@@ -272,5 +273,125 @@ test("malformed legacy inverse geometry or cross-object causal links abort migra
     } finally {
       f.db.close();
     }
+  }
+});
+
+function toVersionTwo(f: ReturnType<typeof legacy>) {
+  const history = new SceneHistoryStore(f.db, f.tables),
+    status = history.status(f.host.member);
+  const rows = f.db
+    .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+    .all();
+  f.db.exec(`CREATE TABLE scene_edit_history (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,campaign_id TEXT NOT NULL,scene_id TEXT NOT NULL,actor_id TEXT NOT NULL REFERENCES access_users(id),object_id TEXT NOT NULL,
+    previous_id TEXT REFERENCES scene_edit_history(id) ON DELETE SET NULL,state TEXT NOT NULL CHECK(state IN ('done','undone')),version INTEGER NOT NULL CHECK(version>0),expected_object_version INTEGER NOT NULL CHECK(expected_object_version>0),payload_json TEXT NOT NULL,
+    FOREIGN KEY(campaign_id,scene_id) REFERENCES scene_records(campaign_id,id));`);
+  const insert = f.db.prepare(
+    "INSERT INTO scene_edit_history(sequence,id,campaign_id,scene_id,actor_id,object_id,previous_id,state,version,expected_object_version,payload_json) VALUES(?,?,?,?,?,?,NULL,?,?,?,?)",
+  );
+  for (const row of rows) {
+    const target = JSON.parse(String(row.targets_json))[0];
+    insert.run(
+      row.sequence!,
+      row.id!,
+      row.campaign_id!,
+      row.scene_id!,
+      row.actor_id!,
+      target.objectId,
+      row.state!,
+      row.version!,
+      target.expectedVersion,
+      row.payload_json!,
+    );
+  }
+  for (const row of rows) {
+    const target = JSON.parse(String(row.targets_json))[0];
+    f.db
+      .prepare("UPDATE scene_edit_history SET previous_id=? WHERE id=?")
+      .run(target.previousId, row.id!);
+  }
+  f.db.exec(
+    "DROP TABLE scene_history_entries; UPDATE scene_history_version SET version=2",
+  );
+  return { status, rows };
+}
+
+test("scene history 2 to 3 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
+  const f = legacy();
+  try {
+    const before = f.tables.load(),
+      { status, rows } = toVersionTwo(f),
+      reservations = f.db
+        .prepare("SELECT * FROM object_id_reservations ORDER BY campaign_id,id")
+        .all();
+    const history = new SceneHistoryStore(f.db, f.tables);
+    assert.deepEqual(history.status(f.host.member), status);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM object_id_reservations ORDER BY campaign_id,id")
+        .all(),
+      reservations,
+    );
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      3,
+    );
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name='scene_edit_history'",
+        )
+        .get(),
+      undefined,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("failed schema-2 history upgrade keeps the original entries and marker for a safe retry", () => {
+  const f = legacy();
+  try {
+    const { status } = toVersionTwo(f),
+      rows = f.db
+        .prepare("SELECT * FROM scene_edit_history ORDER BY sequence")
+        .all();
+    f.db.exec(
+      "CREATE TRIGGER reject_v3 BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture v3 failure'); END;",
+    );
+    assert.throws(
+      () => new SceneHistoryStore(f.db, f.tables),
+      /fixture v3 failure/,
+    );
+    assert.deepEqual(
+      f.db.prepare("SELECT * FROM scene_edit_history ORDER BY sequence").all(),
+      rows,
+    );
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      2,
+    );
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name='scene_history_entries'",
+        )
+        .get(),
+      undefined,
+    );
+    f.db.exec("DROP TRIGGER reject_v3");
+    assert.deepEqual(
+      new SceneHistoryStore(f.db, f.tables).status(f.host.member),
+      status,
+    );
+  } finally {
+    f.db.close();
   }
 });

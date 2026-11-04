@@ -383,6 +383,96 @@ try {
       );
       cursor = latest.history.redo;
     }
+    const secondToken = randomUUID(),
+      secondAdd = randomUUID(),
+      secondAck = acknowledgement(live, secondAdd);
+    const secondView = snapshot(
+      live,
+      (message) => message.state.tokens.length === 2,
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: secondAdd,
+          type: "token.add",
+          token: {
+            id: secondToken,
+            name: "Smoke companion",
+            color: "#405f4d",
+            position: { x: 110, y: 60 },
+          },
+        },
+      }),
+    );
+    await secondAck;
+    await secondView;
+    const groupId = randomUUID(),
+      groupAck = acknowledgement(live, groupId);
+    const groupView = snapshot(
+      live,
+      (message) =>
+        message.history.undo?.objectCount === 2 &&
+        message.state.tokens[0]?.version === 5,
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: groupId,
+          type: "tokens.move",
+          moves: [
+            { tokenId, expectedVersion: 4, position: { x: 70, y: 80 } },
+            {
+              tokenId: secondToken,
+              expectedVersion: 1,
+              position: { x: 130, y: 80 },
+            },
+          ],
+        },
+      }),
+    );
+    await groupAck;
+    let groupState = await groupView;
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+        type === "scene.undo"
+          ? groupState.history.undo!
+          : groupState.history.redo!;
+      const id = randomUUID(),
+        ack = acknowledgement(live, id),
+        view = snapshot(
+          live,
+          (message) =>
+            message.state.tokens[0]?.version ===
+            (type === "scene.undo" ? 6 : 7),
+        );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      await ack;
+      groupState = await view;
+      assert.deepEqual(
+        groupState.state.tokens.map((token) => token.position),
+        type === "scene.undo"
+          ? [
+              { x: 50, y: 60 },
+              { x: 110, y: 60 },
+            ]
+          : [
+              { x: 70, y: 80 },
+              { x: 130, y: 80 },
+            ],
+      );
+    }
     const deleteId = randomUUID(),
       deleted = acknowledgement(live, deleteId);
     const deletedView = snapshot(
@@ -396,7 +486,7 @@ try {
           id: deleteId,
           type: "object.delete",
           objectId: tokenId,
-          expectedVersion: 4,
+          expectedVersion: 7,
         },
       }),
     );
@@ -406,7 +496,9 @@ try {
       restored = acknowledgement(live, restoreId);
     const restoredView = snapshot(
       live,
-      (message) => message.state.tokens[0]?.version === 6,
+      (message) =>
+        message.state.tokens.find((token) => token.id === tokenId)?.version ===
+        9,
     );
     live.send(
       JSON.stringify({
@@ -421,7 +513,9 @@ try {
     );
     await restored;
     const restoreSnapshot = await restoredView;
-    assert.equal(restoreSnapshot.state.tokens[0]?.id, tokenId);
+    assert.ok(
+      restoreSnapshot.state.tokens.some((token) => token.id === tokenId),
+    );
     const redoDeletion = restoreSnapshot.history.redo!;
     const removeId = randomUUID(),
       removed = acknowledgement(live, removeId);
@@ -477,5 +571,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/group history, roll archive/cleanup, and clean shutdown.",
 );

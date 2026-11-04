@@ -121,7 +121,7 @@ test("live move history is requester-scoped, confirmed atomically, conflict-safe
     assert.deepEqual(store.load(), before);
     assert.equal(
       db
-        .prepare("SELECT state,version FROM scene_edit_history WHERE id=?")
+        .prepare("SELECT state,version FROM scene_history_entries WHERE id=?")
         .get(cursor.id)!.state,
       "done",
     );
@@ -272,6 +272,185 @@ test("live move history is requester-scoped, confirmed atomically, conflict-safe
     assert.equal(store.load().drawings.length, 0);
   } finally {
     sockets.forEach((s) => s.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("live token groups commit once, reject partial conflicts, preserve private cursors, and undo/redo after restart", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-live-groups-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, body: Record<string, unknown>, cookie = "") =>
+    app.inject({
+      method: "POST",
+      url: `/api/access/${route}`,
+      headers: { origin: "http://localhost", cookie },
+      payload: body,
+    });
+  const cookieOf = (response: { headers: Record<string, unknown> }) =>
+    String(response.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" }));
+    const player = cookieOf(
+      await post("join", {
+        name: "Player",
+        code: (await post("invitations", {}, gm)).json().token,
+      }),
+    );
+    let p = await connect(url, player);
+    const g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    const ids = [randomUUID(), randomUUID()];
+    for (const id of ids)
+      assert.equal(
+        (
+          await p.send({
+            id: randomUUID(),
+            type: "token.add",
+            token: {
+              id,
+              name: "Scout",
+              color: "#405f4d",
+              position: { x: 0, y: 0 },
+            },
+          })
+        ).type,
+        "ack",
+      );
+    const group = {
+      id: randomUUID(),
+      type: "tokens.move",
+      moves: ids.map((tokenId, i) => ({
+        tokenId,
+        expectedVersion: 1,
+        position: { x: 10 + i * 20, y: 0 },
+      })),
+    };
+    const revision = store.load().revision;
+    assert.equal((await p.send(group)).type, "ack");
+    await until(() => p.latest().history.undo?.objectCount === 2);
+    assert.equal(store.load().revision, revision + 1);
+    const cursor = p.latest().history.undo!;
+    assert.ok(!JSON.stringify(g.messages).includes(cursor.id));
+    assert.equal(g.latest().history.undo, null);
+    assert.equal((await p.send(group)).type, "ack");
+    assert.equal(store.load().revision, revision + 1);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "token.move",
+          tokenId: ids[0],
+          expectedVersion: 2,
+          position: { x: 90, y: 0 },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().history.undo?.available === false);
+    const changed = store.load();
+    const rejected = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: cursor.id,
+      expectedVersion: cursor.version,
+    };
+    assert.equal((await p.send(rejected)).type, "error");
+    assert.deepEqual(store.load(), changed);
+    assert.equal(store.hasCommand(rejected.id), false);
+    const fresh = {
+      ...group,
+      id: randomUUID(),
+      moves: ids.map((tokenId, i) => ({
+        tokenId,
+        expectedVersion: store
+          .load()
+          .tokens.find((token) => token.id === tokenId)!.version,
+        position: { x: 100 + i * 20, y: 0 },
+      })),
+    };
+    assert.equal((await p.send(fresh)).type, "ack");
+    await until(() => p.latest().state.tokens[0]?.version === 4);
+    const current = p.latest().history.undo!,
+      undo = {
+        id: randomUUID(),
+        type: "scene.undo",
+        historyId: current.id,
+        expectedVersion: current.version,
+      };
+    assert.equal((await p.send(undo)).type, "ack");
+    await until(() => p.latest().state.tokens[0]?.version === 5);
+    const redo = p.latest().history.redo!;
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    sockets.push(p.ws);
+    assert.deepEqual(p.latest().history.redo, redo);
+    const beforeRetry = store.load();
+    assert.equal((await p.send(fresh)).type, "ack");
+    assert.deepEqual(store.load(), beforeRetry);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.tokens[0]?.version === 6);
+    assert.deepEqual(
+      store.load().tokens.map((token) => token.position.x),
+      [100, 120],
+    );
+    const rows = db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      beforeFailure = store.load(),
+      top = p.latest().history.undo!;
+    db.exec(
+      "CREATE TRIGGER reject_group_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture group binding failure'); END;",
+    );
+    const failed = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: top.id,
+      expectedVersion: top.version,
+    };
+    assert.equal((await p.send(failed)).type, "error");
+    assert.deepEqual(store.load(), beforeFailure);
+    assert.deepEqual(
+      db.prepare("SELECT * FROM scene_history_entries ORDER BY sequence").all(),
+      rows,
+    );
+    assert.equal(store.hasCommand(failed.id), false);
+    db.exec("DROP TRIGGER reject_group_binding");
+    const stale = randomUUID();
+    p.ws.sendRaw(
+      JSON.stringify({
+        context: { ...p.ws.context, generation: 999 },
+        command: { ...fresh, id: stale },
+      }),
+    );
+    await until(() =>
+      p.messages.some(
+        (message) => message.type === "error" && message.commandId === stale,
+      ),
+    );
+    assert.equal(store.hasCommand(stale), false);
+    assert.deepEqual(store.load(), beforeFailure);
+  } finally {
+    sockets.forEach((socket) => socket.terminate());
     await app.close();
     db.close();
     rmSync(directory, { recursive: true, force: true });

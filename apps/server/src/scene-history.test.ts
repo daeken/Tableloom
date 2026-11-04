@@ -211,17 +211,24 @@ test("history is scene-scoped, leaves private activity alone, and prunes bounded
     const id = f.add();
     for (let x = 1; x <= MAX_MEMBER_SCENE_HISTORY + 3; x++) f.move(id, x);
     assert.equal(
-      f.db.prepare("SELECT count(*) AS count FROM scene_edit_history").get()!
+      f.db.prepare("SELECT count(*) AS count FROM scene_history_entries").get()!
         .count,
       MAX_MEMBER_SCENE_HISTORY,
     );
+    const oldest = JSON.parse(
+      String(
+        f.db
+          .prepare(
+            "SELECT targets_json FROM scene_history_entries ORDER BY sequence LIMIT 1",
+          )
+          .get()!.targets_json,
+      ),
+    )[0];
     assert.equal(
       f.db
-        .prepare(
-          "SELECT previous_id FROM scene_edit_history ORDER BY sequence LIMIT 1",
-        )
-        .get()!.previous_id,
-      null,
+        .prepare("SELECT id FROM scene_history_entries WHERE id=?")
+        .get(oldest.previousId),
+      undefined,
     );
     f.action("scene.undo");
     const current = f.history.status(f.player.member);
@@ -242,7 +249,7 @@ test("history is scene-scoped, leaves private activity alone, and prunes bounded
     assert.deepEqual(f.history.status(f.player.member), current);
     // The campaign cap also evicts prefixes belonging to other members/scenes.
     const insert = f.db.prepare(
-      "INSERT INTO scene_edit_history(id,campaign_id,scene_id,actor_id,object_id,state,version,expected_object_version,payload_json) VALUES(?,?,?,?,?,'done',1,1,?)",
+      "INSERT INTO scene_history_entries(id,campaign_id,scene_id,actor_id,state,version,targets_json,payload_json) VALUES(?,?,?,?,'done',1,?,?)",
     );
     transaction(f.db, () => {
       for (let n = 0; n < 10000; n++)
@@ -251,13 +258,15 @@ test("history is scene-scoped, leaves private activity alone, and prunes bounded
           campaign.id,
           scene.id,
           f.gm.member.id,
-          id,
+          JSON.stringify([
+            { objectId: id, expectedVersion: 1, previousId: null },
+          ]),
           '{"kind":"move","objectType":"token","before":{"x":0,"y":0},"after":{"x":1,"y":0}}',
         );
     });
     f.move(id, 200);
     assert.equal(
-      f.db.prepare("SELECT count(*) AS count FROM scene_edit_history").get()!
+      f.db.prepare("SELECT count(*) AS count FROM scene_history_entries").get()!
         .count,
       10000,
     );
@@ -293,17 +302,17 @@ test("history, scene state and receipt roll back together on failed writes; stor
     f.action("scene.undo");
     assert.equal(f.tables.load().tokens[0]!.version, 4);
     f.db
-      .prepare("UPDATE scene_edit_history SET payload_json=?")
+      .prepare("UPDATE scene_history_entries SET payload_json=?")
       .run('{"x":"bad"}');
     assert.throws(() => f.history.status(f.player.member));
     f.db.exec("UPDATE scene_history_version SET version=99");
     assert.throws(() => new SceneHistoryStore(f.db, f.tables));
     f.db.exec(
-      "UPDATE scene_history_version SET version=2; DROP TABLE scene_edit_history",
+      "UPDATE scene_history_version SET version=2; DROP TABLE scene_history_entries",
     );
     assert.throws(() => new SceneHistoryStore(f.db, f.tables), /incomplete/);
     f.db.exec(
-      "DROP TABLE scene_history_version; CREATE TABLE scene_edit_history(id TEXT)",
+      "DROP TABLE scene_history_version; CREATE TABLE scene_history_entries(id TEXT)",
     );
     assert.throws(
       () => new SceneHistoryStore(f.db, f.tables),
@@ -361,7 +370,7 @@ test("campaign stacks remain independent for the same identity and token UUID, a
     const gm = f.access.registerCampaign(f.gm.token, other.id);
     f.add(gm, id);
     f.db
-      .prepare("DELETE FROM scene_edit_history WHERE campaign_id=?")
+      .prepare("DELETE FROM scene_history_entries WHERE campaign_id=?")
       .run(other.id);
     // A pre-history state has no usable inverse to reconstruct.
     const before = f.tables.load(other.id),
@@ -527,7 +536,7 @@ test("reserved IDs reject replacements of another kind, private notes and other 
       /already been used/,
     );
     assert.deepEqual(f.history.status(f.player.member), redo);
-    f.db.prepare("DELETE FROM scene_edit_history").run();
+    f.db.prepare("DELETE FROM scene_history_entries").run();
     assert.throws(() => f.add(f.player.member, id), /already been used/);
     const campaign = f.tables.getCampaign(),
       scene = f.tables.createScene(campaign.id, { name: "Other scene" });
@@ -628,7 +637,7 @@ test("history geometry byte retention prunes a contiguous prefix across scenes",
       y: 9876.987654321,
     }));
     const insert = f.db.prepare(
-      "INSERT INTO scene_edit_history(id,campaign_id,scene_id,actor_id,object_id,state,version,expected_object_version,payload_json) VALUES(?,?,?,?,?,'done',1,1,?)",
+      "INSERT INTO scene_history_entries(id,campaign_id,scene_id,actor_id,state,version,targets_json,payload_json) VALUES(?,?,?,?,'done',1,?,?)",
     );
     transaction(f.db, () => {
       for (const scene of scenes)
@@ -651,7 +660,9 @@ test("history geometry byte retention prunes a contiguous prefix across scenes",
             campaign.id,
             scene.id,
             f.gm.member.id,
-            objectId,
+            JSON.stringify([
+              { objectId, expectedVersion: 1, previousId: null },
+            ]),
             payload,
           );
         }
@@ -660,7 +671,7 @@ test("history geometry byte retention prunes a contiguous prefix across scenes",
       Number(
         f.db
           .prepare(
-            "SELECT SUM(length(CAST(payload_json AS BLOB))) AS bytes FROM scene_edit_history",
+            "SELECT SUM(length(CAST(payload_json AS BLOB))) AS bytes FROM scene_history_entries",
           )
           .get()!.bytes,
       ) >
@@ -670,7 +681,7 @@ test("history geometry byte retention prunes a contiguous prefix across scenes",
     const bytes = Number(
       f.db
         .prepare(
-          "SELECT SUM(length(CAST(payload_json AS BLOB))) AS bytes FROM scene_edit_history",
+          "SELECT SUM(length(CAST(payload_json AS BLOB))) AS bytes FROM scene_history_entries",
         )
         .get()!.bytes,
     );
@@ -679,7 +690,7 @@ test("history geometry byte retention prunes a contiguous prefix across scenes",
     assert.equal(
       f.db
         .prepare(
-          "SELECT count(*) AS n FROM scene_edit_history WHERE scene_id=?",
+          "SELECT count(*) AS n FROM scene_history_entries WHERE scene_id=?",
         )
         .get(scenes[0]!.id)!.n,
       0,
@@ -717,6 +728,229 @@ test("object ID reservations have a campaign cap, roll back rejected edits, and 
     assert.throws(
       () => new SceneHistoryStore(f.db, f.tables),
       /missing from scene history/,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a token group is one revision/history edit and its per-target causal links survive full undo/redo cycles", () => {
+  const f = fixture();
+  try {
+    const a = f.add(),
+      b = f.add();
+    f.move(a, 10);
+    const before = f.tables.load(),
+      count = Number(
+        f.db.prepare("SELECT count(*) AS n FROM scene_history_entries").get()!
+          .n,
+      );
+    f.run({
+      type: "tokens.move",
+      moves: [
+        { tokenId: a, expectedVersion: 2, position: { x: 20, y: 0 } },
+        { tokenId: b, expectedVersion: 1, position: { x: 30, y: 0 } },
+      ],
+    });
+    assert.equal(f.tables.load().revision, before.revision + 1);
+    assert.equal(
+      f.db.prepare("SELECT count(*) AS n FROM scene_history_entries").get()!.n,
+      count + 1,
+    );
+    const cursor = f.history.status(f.player.member).undo!;
+    assert.equal(cursor.objectCount, 2);
+    assert.equal(cursor.name, "2 tokens");
+    f.action("scene.undo");
+    assert.deepEqual(
+      f.tables.load().tokens.map((token) => token.position.x),
+      [10, 0],
+    );
+    f.action("scene.undo");
+    f.action("scene.undo");
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens.length, 0);
+    f.action("scene.redo");
+    f.action("scene.redo");
+    f.action("scene.redo");
+    f.action("scene.redo");
+    assert.deepEqual(
+      f.tables.load().tokens.map((token) => [token.position.x, token.version]),
+      [
+        [20, 9],
+        [30, 6],
+      ],
+    );
+    assert.throws(
+      () =>
+        f.run({
+          type: "scene.undo",
+          historyId: cursor.id,
+          expectedVersion: cursor.version,
+        }),
+      /changed/,
+    );
+    assert.deepEqual(
+      new SceneHistoryStore(f.db, f.tables).status(f.player.member),
+      f.history.status(f.player.member),
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("overlapping token groups undo independently per target but one intervening remote edit blocks an entire group", () => {
+  const f = fixture();
+  try {
+    const a = f.add(),
+      b = f.add(),
+      c = f.add();
+    const group = (ids: string[], x: number) =>
+      f.run({
+        type: "tokens.move",
+        moves: ids.map((tokenId) => ({
+          tokenId,
+          expectedVersion: f.tables
+            .load()
+            .tokens.find((token) => token.id === tokenId)!.version,
+          position: { x, y: 0 },
+        })),
+      });
+    group([a, b], 10);
+    group([b, c], 20);
+    group([a, c], 30);
+    for (let n = 0; n < 3; n++) f.action("scene.undo");
+    assert.deepEqual(
+      f.tables.load().tokens.map((token) => token.position.x),
+      [0, 0, 0],
+    );
+    for (let n = 0; n < 3; n++) f.action("scene.redo");
+    assert.deepEqual(
+      f.tables.load().tokens.map((token) => token.position.x),
+      [30, 20, 30],
+    );
+    f.move(b, 90, f.gm.member);
+    f.action("scene.undo"); // A/C undo remains valid.
+    assert.deepEqual(
+      f.tables.load().tokens.map((token) => token.position.x),
+      [10, 90, 20],
+    );
+    const before = f.tables.load();
+    assert.equal(f.history.status(f.player.member).undo!.available, false);
+    assert.throws(() => f.action("scene.undo"), /entire edit/);
+    assert.deepEqual(f.tables.load(), before);
+    assert.equal(f.history.status(f.gm.member).undo!.objectCount, 1);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("group commands reject stale, unauthorized, missing, duplicate or invalid targets without partial edits or history", () => {
+  const f = fixture();
+  try {
+    const a = f.add(),
+      b = f.add(),
+      other = f.add(f.gm.member);
+    const valid = { tokenId: a, expectedVersion: 1, position: { x: 10, y: 0 } };
+    const reject = (second: typeof valid) => {
+      const before = f.tables.load(),
+        history = f.history.status(f.player.member);
+      assert.throws(() =>
+        f.run({ type: "tokens.move", moves: [valid, second] }),
+      );
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(f.history.status(f.player.member), history);
+    };
+    reject({ ...valid, tokenId: b, expectedVersion: 2 });
+    reject({ ...valid, tokenId: other });
+    reject({ ...valid, tokenId: randomUUID() });
+    reject(valid);
+    reject({ ...valid, tokenId: b, position: { x: 10001, y: 0 } });
+    for (const moves of [
+      [valid],
+      Array.from({ length: 101 }, () => ({ ...valid, tokenId: randomUUID() })),
+    ])
+      assert.equal(
+        commandSchema.safeParse({
+          id: randomUUID(),
+          type: "tokens.move",
+          moves,
+        }).success,
+        false,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("group history and all neighboring cursor rebases roll back with a failed receipt write", () => {
+  const f = fixture();
+  try {
+    const a = f.add(),
+      b = f.add();
+    f.run({
+      type: "tokens.move",
+      moves: [
+        { tokenId: a, expectedVersion: 1, position: { x: 10, y: 0 } },
+        { tokenId: b, expectedVersion: 1, position: { x: 20, y: 0 } },
+      ],
+    });
+    const before = f.tables.load(),
+      rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+    f.db.exec(
+      "CREATE TRIGGER reject_group_receipt BEFORE INSERT ON campaign_receipts BEGIN SELECT RAISE(ABORT,'fixture group failure'); END;",
+    );
+    assert.throws(() => f.action("scene.undo"), /fixture group failure/);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    f.db.exec("DROP TRIGGER reject_group_receipt");
+    f.action("scene.undo");
+    assert.deepEqual(
+      f.tables.load().tokens.map((token) => token.position.x),
+      [0, 0],
+    );
+    f.db
+      .prepare("UPDATE scene_history_entries SET targets_json=? WHERE id=?")
+      .run("[]", f.history.status(f.player.member).redo!.id);
+    assert.throws(() => f.history.status(f.player.member));
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a bounded hundred-token move and its undo remain one persisted history entry", () => {
+  const f = fixture();
+  try {
+    const ids = Array.from({ length: 100 }, () => f.add());
+    f.run({
+      type: "tokens.move",
+      moves: ids.map((tokenId) => ({
+        tokenId,
+        expectedVersion: 1,
+        position: { x: 50, y: 60 },
+      })),
+    });
+    assert.equal(f.history.status(f.player.member).undo!.objectCount, 100);
+    const view = f.action("scene.undo");
+    assert.ok(
+      view.tokens.every(
+        (token) =>
+          token.version === 3 &&
+          token.position.x === 0 &&
+          token.position.y === 0,
+      ),
+    );
+    assert.ok(
+      Number(
+        f.db.prepare("SELECT count(*) AS n FROM scene_history_entries").get()!
+          .n,
+      ) <= 100,
     );
   } finally {
     f.db.close();

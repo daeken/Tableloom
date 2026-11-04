@@ -1,3 +1,4 @@
+import { tokenMovesSchema } from "./index.js";
 import type { Member } from "./access.js";
 import type { Command, Roll, TableState } from "./index.js";
 
@@ -39,6 +40,15 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "tokens.move": {
+      for (const move of tokenMovesSchema.parse(command.moves))
+        authorizeCommand(
+          state,
+          { id: command.id, type: "token.move", ...move },
+          member,
+        );
+      return;
+    }
     case "scene.undo":
     case "scene.redo":
       throw new Error("Move history actions must be resolved by the server.");

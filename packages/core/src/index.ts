@@ -2,7 +2,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -196,8 +196,32 @@ export function restoreTable(value: unknown): {
   return { state, migrated: true };
 }
 
+export const MAX_TOKEN_MOVE_BATCH = 100;
+export const tokenMovesSchema = z
+  .array(
+    z
+      .object({
+        tokenId: z.uuid(),
+        expectedVersion: z.number().int().positive(),
+        position: pointSchema,
+      })
+      .strict(),
+  )
+  .min(2)
+  .max(MAX_TOKEN_MOVE_BATCH)
+  .refine(
+    (moves) => new Set(moves.map((move) => move.tokenId)).size === moves.length,
+    "Each token may appear only once.",
+  );
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("tokens.move"),
+      moves: tokenMovesSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

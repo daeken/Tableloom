@@ -419,7 +419,7 @@ export function App() {
             <span>
               <span className="keyboard-hint">↖</span>
               {tool === "select"
-                ? "Drag a token you control to move it"
+                ? "Shift-click to select several · Drag to move"
                 : tool === "hand"
                   ? "Drag to explore the table"
                   : tool === "pen"

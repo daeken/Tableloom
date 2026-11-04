@@ -19,6 +19,7 @@ export function SceneHistoryControls({
       item.status === "pending" &&
       [
         "token.move",
+        "tokens.move",
         "token.add",
         "drawing.add",
         "object.delete",
