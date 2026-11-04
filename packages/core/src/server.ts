@@ -85,6 +85,9 @@ export function applyCommand(
   }
   const next = structuredClone(state);
   switch (command.type) {
+    case "scene.undo":
+    case "scene.redo":
+      throw new Error("Move history actions must be resolved by the server.");
     case "object.assign": {
       const object = [...next.tokens, ...next.drawings].find(
         (object) => object.id === command.objectId,

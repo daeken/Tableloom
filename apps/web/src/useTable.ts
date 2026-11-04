@@ -3,6 +3,7 @@ import { PROTOCOL_VERSION } from "@tableloom/core";
 import type { CommandInput, TableView } from "@tableloom/core";
 import type { CommandContext } from "@tableloom/core/campaigns";
 import { z } from "zod";
+import type { SceneHistory } from "@tableloom/core/scene-history";
 import { TableConnection } from "./table-connection.js";
 import type { CommandDelivery, ConnectionStatus } from "./table-connection.js";
 
@@ -14,6 +15,7 @@ export function useTable(
   const [snapshot, setSnapshot] = useState<{
     viewerKey: string;
     state: TableView;
+    history: SceneHistory;
     context: CommandContext;
     campaignName: string;
     sceneName: string;
@@ -104,6 +106,7 @@ export function useTable(
   return {
     state: current ? snapshot.state : null,
     context,
+    history: current ? snapshot.history : null,
     campaignName: current ? snapshot.campaignName : "",
     sceneName: current ? snapshot.sceneName : "",
     status: connection.current?.viewerKey === viewerKey ? status : "connecting",

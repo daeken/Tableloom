@@ -14,6 +14,7 @@ import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
 import { OutboundChannel } from "./outbound.js";
+import { SceneHistoryStore } from "./scene-history.js";
 import { CommandBindings } from "./command-bindings.js";
 import { transaction } from "./database.js";
 import { RollHistoryStore } from "./roll-history.js";
@@ -63,6 +64,7 @@ export async function createApp(options: {
   let documents: DocumentStore;
   let history: RollHistoryStore;
   let bindings: CommandBindings;
+  let sceneHistory: SceneHistoryStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
@@ -70,6 +72,7 @@ export async function createApp(options: {
     documents = new DocumentStore(database, store);
     history = new RollHistoryStore(database, store);
     bindings = new CommandBindings(database);
+    sceneHistory = new SceneHistoryStore(database, store);
   } catch (error) {
     database.close();
     throw error;
@@ -122,12 +125,14 @@ export async function createApp(options: {
     };
     const scene = store.getScene(campaign.id, campaign.activeSceneId);
     const view = projectTable(store.load(member.tableId), member);
-    const fingerprint = `${contextKey(context)}:${view.version}`;
+    const history = sceneHistory.status(member);
+    const fingerprint = `${contextKey(context)}:${view.version}:${JSON.stringify(history)}`;
     if (!force && sentVersions.get(socket) === fingerprint) return null;
     sentVersions.set(socket, fingerprint);
     return {
       type: "snapshot",
       protocolVersion: PROTOCOL_VERSION,
+      history,
       state: view,
       context,
       campaignName: campaign.name,
@@ -334,12 +339,12 @@ export async function createApp(options: {
               command.type === "object.assign" || command.type === "note.assign"
                 ? access.getMember(command.ownerId, actor.tableId)
                 : undefined;
-            const next = applyCommand(
-              store.load(actor.tableId),
-              command,
-              actor,
-              recipient,
-            );
+            const before = store.load(actor.tableId);
+            const next =
+              command.type === "scene.undo" || command.type === "scene.redo"
+                ? sceneHistory.apply(actor, before, command)
+                : applyCommand(before, command, actor, recipient);
+            sceneHistory.record(actor, before, next, command);
             store.save(next, command.id, actor.tableId);
             bindings.bind(actor.id, parsed.data);
             return { kind: "saved" as const, state: next };

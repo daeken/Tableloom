@@ -39,6 +39,9 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "scene.undo":
+    case "scene.redo":
+      throw new Error("Move history actions must be resolved by the server.");
     case "object.assign": {
       if (member.role !== "gm")
         throw new Error("Only the GM can reassign ownership.");

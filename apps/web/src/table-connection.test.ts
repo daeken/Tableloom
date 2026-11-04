@@ -31,6 +31,7 @@ const member = {
 const snapshot = (next = context) => ({
   type: "snapshot" as const,
   protocolVersion: PROTOCOL_VERSION,
+  history: { undo: null, redo: null },
   state: projectTable(createTable(), member),
   context: next,
   campaignName: "Campaign",

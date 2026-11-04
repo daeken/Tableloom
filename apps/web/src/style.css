@@ -1558,3 +1558,32 @@ p {
   font-size: 11px;
   line-height: 1.5;
 }
+
+.scene-history-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 30px 12px;
+}
+.scene-history-controls .history-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #ddd9cd;
+  border-radius: 7px;
+  padding: 7px 10px;
+  background: #faf9f5;
+  color: #405f4d;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.scene-history-controls .history-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.scene-history-controls small {
+  color: #756d5e;
+  font-size: 12px;
+}

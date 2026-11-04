@@ -48,6 +48,7 @@ function fixture() {
         return {
           type: "snapshot",
           protocolVersion: PROTOCOL_VERSION,
+          history: { undo: null, redo: null },
           state: projectTable(createTable(), {
             id: crypto.randomUUID(),
             name: "GM",
@@ -249,6 +250,7 @@ test("large single snapshots remain supported without accumulating another seria
         return {
           type: "snapshot",
           protocolVersion: PROTOCOL_VERSION,
+          history: { undo: null, redo: null },
           state: {
             ...state,
             drawings: Array.from({ length: 200 }, () => ({

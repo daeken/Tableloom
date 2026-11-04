@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
+import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -200,6 +201,22 @@ export const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...envelope,
+      type: z.literal("scene.undo"),
+      historyId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("scene.redo"),
+      historyId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
       type: z.literal("drawing.add"),
       drawing: drawingInputSchema,
     })
@@ -298,6 +315,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("snapshot"),
     protocolVersion: z.literal(PROTOCOL_VERSION),
+    history: sceneHistorySchema,
     state: tableViewSchema,
     context: commandContextSchema,
     campaignName: z.string().min(1).max(120),

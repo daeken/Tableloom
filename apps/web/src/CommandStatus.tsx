@@ -1,5 +1,7 @@
 import type { CommandDelivery } from "./table-connection.js";
 const names: Record<CommandDelivery["type"], string> = {
+  "scene.undo": "Undo move",
+  "scene.redo": "Redo move",
   "dice.roll": "Roll dice",
   "drawing.add": "Add drawing",
   "token.add": "Place token",

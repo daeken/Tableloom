@@ -36,6 +36,7 @@ import { CampaignDialog } from "./CampaignDialog.js";
 import { RollHistoryDialog } from "./RollHistoryDialog.js";
 import { SceneDialog } from "./SceneDialog.js";
 import { contextKey } from "@tableloom/core/campaigns";
+import { SceneHistoryControls } from "./SceneHistoryControls.js";
 import { CommandStatus } from "./CommandStatus.js";
 import { NotesPanel } from "./NotesPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
@@ -348,6 +349,12 @@ export function App() {
               <span>{participants} at the table</span>
             </div>
           </div>
+          <SceneHistoryControls
+            history={table.history}
+            enabled={connected}
+            deliveries={table.deliveries}
+            send={send}
+          />
           <CommandStatus deliveries={table.deliveries} />
           <div className="canvas-frame">
             {state ? (

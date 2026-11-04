@@ -348,10 +348,41 @@ try {
       }),
     );
     await moved;
-    assert.deepEqual((await movedView).state.tokens[0]?.position, {
+    const movedSnapshot = await movedView;
+    assert.deepEqual(movedSnapshot.state.tokens[0]?.position, {
       x: 50,
       y: 60,
     });
+    let cursor = movedSnapshot.history.undo;
+    assert.ok(cursor?.available);
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      assert.ok(cursor?.available);
+      const id = randomUUID(),
+        ack = acknowledgement(live, id);
+      const view = snapshot(
+        live,
+        (message) =>
+          message.state.tokens[0]?.version === (type === "scene.undo" ? 3 : 4),
+      );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: cursor.id,
+            expectedVersion: cursor.version,
+          },
+        }),
+      );
+      await ack;
+      const latest = await view;
+      assert.deepEqual(
+        latest.state.tokens[0]?.position,
+        type === "scene.undo" ? { x: 10, y: 20 } : { x: 50, y: 60 },
+      );
+      cursor = latest.history.redo;
+    }
     const deleteId = randomUUID(),
       deleted = acknowledgement(live, deleteId);
     live.send(
@@ -361,7 +392,7 @@ try {
           id: deleteId,
           type: "object.delete",
           objectId: tokenId,
-          expectedVersion: 2,
+          expectedVersion: 4,
         },
       }),
     );
@@ -406,5 +437,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move undo/redo, roll archive/cleanup, and clean shutdown.",
 );
