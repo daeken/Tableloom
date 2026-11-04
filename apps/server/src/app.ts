@@ -92,7 +92,7 @@ export async function createApp(options: {
           socket.close(4001, "You signed out of the table.");
     },
   });
-  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 1 }));
+  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 2 }));
   app.get("/api/table", async (request, reply) => {
     if (!access.authenticate(sessionToken(request.headers.cookie)))
       return reply.code(401).send({ error: "Sign in to the table first." });
@@ -165,7 +165,7 @@ export async function createApp(options: {
             send(socket, snapshot());
             return;
           }
-          const next = applyCommand(state, command, member.name);
+          const next = applyCommand(state, command, member);
           store.save(next, command.id);
           state = next;
           broadcast(snapshot());

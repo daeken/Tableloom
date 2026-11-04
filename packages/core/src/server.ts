@@ -1,6 +1,8 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { parseDice } from "./index.js";
 import type { Command, Roll, TableState } from "./index.js";
+import type { Member } from "./access.js";
+import { authorizeCommand } from "./permissions.js";
 
 export function rollDice(
   expression: string,
@@ -24,23 +26,30 @@ export function rollDice(
 export function applyCommand(
   state: TableState,
   command: Command,
-  actor: string,
+  actor: Member,
 ): TableState {
+  authorizeCommand(state, command, actor);
   const next = structuredClone(state);
   switch (command.type) {
     case "drawing.add":
       if (next.drawings.length >= 2000)
         throw new Error("This scene has reached its drawing limit.");
-      if (next.drawings.some((d) => d.id === command.drawing.id))
-        throw new Error("Drawing already exists.");
-      next.drawings.push(command.drawing);
+      if (
+        next.drawings.some((d) => d.id === command.drawing.id) ||
+        next.tokens.some((t) => t.id === command.drawing.id)
+      )
+        throw new Error("An object with this ID already exists.");
+      next.drawings.push({ ...command.drawing, ownerId: actor.id });
       break;
     case "token.add":
       if (next.tokens.length >= 200)
         throw new Error("This scene has reached its token limit.");
-      if (next.tokens.some((t) => t.id === command.token.id))
-        throw new Error("Token already exists.");
-      next.tokens.push(command.token);
+      if (
+        next.tokens.some((t) => t.id === command.token.id) ||
+        next.drawings.some((d) => d.id === command.token.id)
+      )
+        throw new Error("An object with this ID already exists.");
+      next.tokens.push({ ...command.token, ownerId: actor.id });
       break;
     case "token.move": {
       const token = next.tokens.find((t) => t.id === command.tokenId);
@@ -56,9 +65,10 @@ export function applyCommand(
       next.systemId = command.systemId;
       break;
     case "dice.roll":
-      next.rolls = [...next.rolls, rollDice(command.expression, actor)].slice(
-        -100,
-      );
+      next.rolls = [
+        ...next.rolls,
+        rollDice(command.expression, actor.name),
+      ].slice(-100);
       break;
   }
   next.revision += 1;

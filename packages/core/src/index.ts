@@ -12,15 +12,22 @@ export const drawingSchema = z.object({
   kind: z.enum(["stroke", "rectangle"]),
   points: z.array(pointSchema).min(2).max(2000),
   color: colorSchema,
+  ownerId: z.uuid().nullable(),
 });
 export type Drawing = z.infer<typeof drawingSchema>;
+export const drawingInputSchema = drawingSchema
+  .omit({ ownerId: true })
+  .strict();
+export type DrawingInput = z.infer<typeof drawingInputSchema>;
 export const tokenSchema = z.object({
   id: z.uuid(),
   name: z.string().trim().min(1).max(32),
   position: pointSchema,
   color: colorSchema,
+  ownerId: z.uuid().nullable(),
 });
 export type Token = z.infer<typeof tokenSchema>;
+export const tokenInputSchema = tokenSchema.omit({ ownerId: true }).strict();
 
 export const rollSchema = z.object({
   id: z.uuid(),
@@ -34,17 +41,28 @@ export const rollSchema = z.object({
 });
 export type Roll = z.infer<typeof rollSchema>;
 
-export const tableSchema = z.object({
-  schemaVersion: z.literal(1),
+const tableDataSchema = z.object({
+  schemaVersion: z.literal(2),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
   tokens: z.array(tokenSchema).max(200),
   rolls: z.array(rollSchema).max(100),
 });
+export const tableSchema = tableDataSchema.superRefine((state, context) => {
+  const ids = new Set<string>();
+  for (const object of [...state.tokens, ...state.drawings]) {
+    if (ids.has(object.id))
+      context.addIssue({
+        code: "custom",
+        message: "Scene object IDs must be unique.",
+      });
+    ids.add(object.id);
+  }
+});
 export type TableState = z.infer<typeof tableSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -52,14 +70,44 @@ export const createTable = (): TableState => ({
   rolls: [],
 });
 
+const legacyTableSchema = tableDataSchema.extend({
+  schemaVersion: z.literal(1),
+  drawings: z.array(drawingInputSchema).max(2000),
+  tokens: z.array(tokenInputSchema).max(200),
+});
+
+/** Pre-authentication objects stay GM-controlled; never guess an owner's identity. */
+export function restoreTable(value: unknown): {
+  state: TableState;
+  migrated: boolean;
+} {
+  const legacy = legacyTableSchema.safeParse(value);
+  if (!legacy.success)
+    return { state: tableSchema.parse(value), migrated: false };
+  const state = tableSchema.parse({
+    ...legacy.data,
+    schemaVersion: 2,
+    drawings: legacy.data.drawings.map((drawing) => ({
+      ...drawing,
+      ownerId: null,
+    })),
+    tokens: legacy.data.tokens.map((token) => ({ ...token, ownerId: null })),
+  });
+  return { state, migrated: true };
+}
+
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
   z.object({
     ...envelope,
     type: z.literal("drawing.add"),
-    drawing: drawingSchema,
+    drawing: drawingInputSchema,
   }),
-  z.object({ ...envelope, type: z.literal("token.add"), token: tokenSchema }),
+  z.object({
+    ...envelope,
+    type: z.literal("token.add"),
+    token: tokenInputSchema,
+  }),
   z.object({
     ...envelope,
     type: z.literal("token.move"),

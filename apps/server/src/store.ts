@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { createTable, tableSchema } from "@tableloom/core";
+import { createTable, restoreTable, tableSchema } from "@tableloom/core";
 import type { TableState } from "@tableloom/core";
 
 export class TableStore {
@@ -14,9 +14,13 @@ export class TableStore {
     const row = this.db
       .prepare("SELECT json FROM table_state WHERE id = 1")
       .get();
-    return row
-      ? tableSchema.parse(JSON.parse(String(row.json)))
-      : createTable();
+    if (!row) return createTable();
+    const { state, migrated } = restoreTable(JSON.parse(String(row.json)));
+    if (migrated)
+      this.db
+        .prepare("UPDATE table_state SET json = ? WHERE id = 1")
+        .run(JSON.stringify(state));
+    return state;
   }
   hasCommand(id: string): boolean {
     return Boolean(

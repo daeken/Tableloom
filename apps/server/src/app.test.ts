@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import { serverMessageSchema } from "@tableloom/core";
+import { serverMessageSchema, tableSchema } from "@tableloom/core";
+import { accessStatusSchema } from "@tableloom/core/access";
 import type { ServerMessage } from "@tableloom/core";
 import { createApp } from "./app.js";
 import { TableStore } from "./store.js";
@@ -124,7 +125,7 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
           m.state.drawings.length === 1,
       ),
     );
-    bob.ws.send(
+    alice.ws.send(
       JSON.stringify({
         id: randomUUID(),
         type: "token.move",
@@ -255,5 +256,181 @@ test("SQLite state and command receipt are atomic when a duplicate receipt fails
     assert.equal(store.hasCommand(id), true);
   } finally {
     store.close();
+  }
+});
+
+test("real player sockets cannot edit other owners, spoof ownership, or change GM settings", async () => {
+  const app = await testApp({ databasePath: ":memory:" });
+  const connections: WebSocket[] = [];
+  try {
+    const url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const hostCookie = cookieOf(
+      await post(app, "setup", { key: HOST_KEY, name: "GM" }),
+    );
+    async function join(name: string) {
+      const invitation = await post(app, "invitations", {}, hostCookie);
+      const response = await post(app, "join", {
+        name,
+        code: invitation.json().token,
+      });
+      const member = accessStatusSchema.parse(response.json()).member!;
+      const connected = await client(url, cookieOf(response));
+      connections.push(connected.ws);
+      return { ...connected, member };
+    }
+    const alice = await join("Alice");
+    const bob = await join("Bob");
+    const host = await client(url, hostCookie);
+    connections.push(host.ws);
+    await until(() =>
+      [alice, bob, host].every((c) =>
+        c.messages.some((m) => m.type === "snapshot"),
+      ),
+    );
+    async function issue(
+      connection: Awaited<ReturnType<typeof client>>,
+      payload: unknown,
+      matches: (message: ServerMessage) => boolean,
+    ) {
+      const start = connection.messages.length;
+      connection.ws.send(JSON.stringify(payload));
+      await until(() => connection.messages.slice(start).some(matches));
+    }
+    const atRevision = (revision: number) => (message: ServerMessage) =>
+      message.type === "snapshot" && message.state.revision === revision;
+    const rejected = (message: ServerMessage) => message.type === "error";
+    const read = async () =>
+      tableSchema.parse(
+        (
+          await app.inject({
+            url: "/api/table",
+            headers: { cookie: hostCookie },
+          })
+        ).json(),
+      );
+    const tokenId = randomUUID();
+    const drawingId = randomUUID();
+    await issue(
+      alice,
+      {
+        id: randomUUID(),
+        type: "token.add",
+        token: {
+          id: tokenId,
+          name: "Scout",
+          position: { x: 20, y: 20 },
+          color: "#405f4d",
+        },
+      },
+      atRevision(1),
+    );
+    assert.equal((await read()).tokens[0]?.ownerId, alice.member.id);
+    await issue(
+      bob,
+      {
+        id: randomUUID(),
+        type: "token.move",
+        tokenId,
+        position: { x: 999, y: 999 },
+      },
+      rejected,
+    );
+    await issue(
+      bob,
+      { id: randomUUID(), type: "object.delete", objectId: tokenId },
+      rejected,
+    );
+    const settings = {
+      id: randomUUID(),
+      type: "system.set",
+      systemId: "kids-on-bikes",
+    };
+    await issue(bob, settings, rejected);
+    await issue(
+      bob,
+      {
+        id: randomUUID(),
+        type: "token.add",
+        token: {
+          id: randomUUID(),
+          name: "Forged",
+          position: { x: 0, y: 0 },
+          color: "#405f4d",
+          ownerId: alice.member.id,
+        },
+      },
+      rejected,
+    );
+    assert.equal((await read()).revision, 1);
+    assert.deepEqual((await read()).tokens[0]?.position, { x: 20, y: 20 });
+    await issue(
+      bob,
+      {
+        id: randomUUID(),
+        type: "drawing.add",
+        drawing: {
+          id: drawingId,
+          kind: "stroke",
+          points: [
+            { x: 0, y: 0 },
+            { x: 10, y: 10 },
+          ],
+          color: "#405f4d",
+        },
+      },
+      atRevision(2),
+    );
+    assert.equal((await read()).drawings[0]?.ownerId, bob.member.id);
+    await issue(
+      alice,
+      { id: randomUUID(), type: "object.delete", objectId: drawingId },
+      rejected,
+    );
+    assert.equal((await read()).revision, 2);
+    await issue(
+      alice,
+      {
+        id: randomUUID(),
+        type: "token.move",
+        tokenId,
+        position: { x: 40, y: 40 },
+      },
+      atRevision(3),
+    );
+    await issue(
+      host,
+      {
+        id: randomUUID(),
+        type: "token.move",
+        tokenId,
+        position: { x: 60, y: 60 },
+      },
+      atRevision(4),
+    );
+    await issue(
+      host,
+      { id: randomUUID(), type: "object.delete", objectId: drawingId },
+      atRevision(5),
+    );
+    // A denied request does not consume its command receipt.
+    await issue(host, settings, atRevision(6));
+    await issue(
+      bob,
+      { id: randomUUID(), type: "dice.roll", expression: "d6" },
+      atRevision(7),
+    );
+    assert.equal((await read()).rolls[0]?.actor, "Bob");
+    await issue(
+      alice,
+      { id: randomUUID(), type: "object.delete", objectId: tokenId },
+      atRevision(8),
+    );
+    const final = await read();
+    assert.equal(final.tokens.length, 0);
+    assert.equal(final.drawings.length, 0);
+    assert.equal(final.systemId, "kids-on-bikes");
+  } finally {
+    for (const ws of connections) ws.terminate();
+    await app.close();
   }
 });

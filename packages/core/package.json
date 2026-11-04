@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./access": "./src/access.ts",
+    "./permissions": "./src/permissions.ts",
     "./server": "./src/server.ts"
   }
 }

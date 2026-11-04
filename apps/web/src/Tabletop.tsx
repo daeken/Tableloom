@@ -3,19 +3,22 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { Application, Container, Graphics, Text } from "pixi.js";
 import type {
   CommandInput,
-  Drawing,
+  DrawingInput,
   Point,
   TableState,
   Token,
 } from "@tableloom/core";
+import type { Member } from "@tableloom/core/access";
+import { canEditObject } from "@tableloom/core/permissions";
 
 export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
 type Gesture =
-  | { kind: "draw"; drawing: Drawing }
+  | { kind: "draw"; drawing: DrawingInput }
   | { kind: "move"; token: Token }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
   state: TableState;
+  member: Member | null;
   tool: Tool;
   color: string;
   tokenName: string;
@@ -26,6 +29,7 @@ interface Props {
 const clamp = (v: number) => Math.max(-10000, Math.min(10000, v));
 export function Tabletop({
   state,
+  member,
   tool,
   color,
   tokenName,
@@ -204,7 +208,8 @@ export function Tabletop({
       .find((t) => Math.hypot(p.x - t.position.x, p.y - t.position.y) <= 28);
     if (tool === "erase") {
       if (token) {
-        send({ type: "object.delete", objectId: token.id });
+        if (canEditObject(member, token))
+          send({ type: "object.delete", objectId: token.id });
         return;
       }
       const drawing = [...state.drawings].reverse().find((d) => {
@@ -230,10 +235,12 @@ export function Tabletop({
         }
         return d.points.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 15);
       });
-      if (drawing) send({ type: "object.delete", objectId: drawing.id });
+      if (drawing && canEditObject(member, drawing))
+        send({ type: "object.delete", objectId: drawing.id });
     } else if (tool === "select") {
-      setSelected(token?.id ?? null);
-      if (token) setGesture({ kind: "move", token });
+      const editable = token && canEditObject(member, token) ? token : null;
+      setSelected(editable?.id ?? null);
+      if (editable) setGesture({ kind: "move", token: editable });
     } else {
       setSelected(null);
       setGesture({

@@ -4,6 +4,13 @@ import { randomUUID } from "node:crypto";
 import { commandSchema, createTable, parseDice } from "./index.js";
 import { applyCommand, rollDice } from "./server.js";
 
+const player = {
+  id: randomUUID(),
+  name: "Player",
+  role: "player" as const,
+  tableId: "main" as const,
+};
+
 test("dice expressions support defaults, whitespace, modifiers, and upper bounds", () => {
   assert.deepEqual(parseDice("d20"), { count: 1, sides: 20, modifier: 0 });
   assert.deepEqual(parseDice(" 2D6 - 3 "), {
@@ -92,7 +99,7 @@ test("mutations do not mutate old snapshots and reject duplicate/missing objects
   const added = applyCommand(
     before,
     { id: randomUUID(), type: "token.add", token },
-    "Player",
+    player,
   );
   assert.equal(before.tokens.length, 0);
   assert.equal(added.revision, 1);
@@ -104,16 +111,12 @@ test("mutations do not mutate old snapshots and reject duplicate/missing objects
       tokenId: token.id,
       position: { x: 40, y: 50 },
     },
-    "Player",
+    player,
   );
   assert.deepEqual(added.tokens[0]?.position, { x: 10, y: 20 });
   assert.deepEqual(moved.tokens[0]?.position, { x: 40, y: 50 });
   assert.throws(() =>
-    applyCommand(
-      added,
-      { id: randomUUID(), type: "token.add", token },
-      "Player",
-    ),
+    applyCommand(added, { id: randomUUID(), type: "token.add", token }, player),
   );
   assert.throws(() =>
     applyCommand(
@@ -124,13 +127,13 @@ test("mutations do not mutate old snapshots and reject duplicate/missing objects
         tokenId: token.id,
         position: { x: 0, y: 0 },
       },
-      "Player",
+      player,
     ),
   );
   const removed = applyCommand(
     moved,
     { id: randomUUID(), type: "object.delete", objectId: token.id },
-    "Player",
+    player,
   );
   assert.equal(removed.tokens.length, 0);
 });
@@ -141,7 +144,7 @@ test("roll history is bounded", () => {
     state = applyCommand(
       state,
       { id: randomUUID(), type: "dice.roll", expression: "d6" },
-      "Player",
+      player,
     );
   assert.equal(state.rolls.length, 100);
   assert.equal(state.revision, 110);

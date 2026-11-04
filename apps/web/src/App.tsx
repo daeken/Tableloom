@@ -30,6 +30,7 @@ import { useAccess, accessRequest } from "./useAccess.js";
 import { AccessGate } from "./AccessGate.js";
 import { InviteDialog } from "./InviteDialog.js";
 import { accessStatusSchema } from "@tableloom/core/access";
+import { canEditObject } from "@tableloom/core/permissions";
 
 const modules = [cyberpunk, bikes, brooms];
 const panels = {
@@ -178,7 +179,12 @@ export function App() {
               />
               <select
                 aria-label="Game system"
-                disabled={!connected}
+                disabled={!connected || member?.role !== "gm"}
+                title={
+                  member?.role === "gm"
+                    ? "Choose the game system"
+                    : "Only the GM can change the game system"
+                }
                 value={currentModule.id}
                 onChange={(e) =>
                   send({ type: "system.set", systemId: e.target.value })
@@ -218,7 +224,12 @@ export function App() {
                     <span>{token.name}</span>
                     <button
                       aria-label={`Delete ${token.name}`}
-                      disabled={!connected}
+                      disabled={!connected || !canEditObject(member, token)}
+                      title={
+                        canEditObject(member, token)
+                          ? "Delete token"
+                          : "Only the owner or GM can delete this token"
+                      }
                       onClick={() =>
                         send({ type: "object.delete", objectId: token.id })
                       }
@@ -260,6 +271,7 @@ export function App() {
           <div className="canvas-frame">
             {state ? (
               <Tabletop
+                member={member}
                 state={state}
                 tool={tool}
                 color={color}
@@ -314,7 +326,7 @@ export function App() {
             <span>
               <span className="keyboard-hint">↖</span>
               {tool === "select"
-                ? "Drag a token to move it"
+                ? "Drag a token you control to move it"
                 : tool === "hand"
                   ? "Drag to explore the table"
                   : tool === "pen"

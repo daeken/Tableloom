@@ -2,7 +2,7 @@
 
 A self-hosted, web-based virtual tabletop for the systems you actually play. TypeScript throughout, a shared sketchable battlefield, and code-first game modules with custom sheets, rules, and content packs.
 
-**Status:** authenticated shared-table prototype. Host setup and one-use player invitations work; GM/player command permissions and object ownership are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
+**Status:** authenticated tabletop with server-enforced GM/player permissions and object ownership. Private documents and secret rolls are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
 
 ## Run locally
 
@@ -29,7 +29,9 @@ npm start           # frontend + API on http://127.0.0.1:3001
 
 Configuration: `PORT` (default `3001`), `HOST` (default `127.0.0.1`), `DATA_DIR` (default `./data`), optional `TABLELOOM_HOST_KEY` (32–512 characters, otherwise a random key is generated in a private `host-key` file), and optional `PUBLIC_ORIGIN` (the browser-facing HTTP(S) origin, without a path). For an HTTPS reverse proxy, set `PUBLIC_ORIGIN=https://your-table.example`; this enforces the configured origin and enables Secure session cookies without trusting forwarded headers. Development defaults to same-origin HTTP on loopback.
 
-Keep this prototype local while GM/player command permissions and object ownership are pending. Only authenticated members can fetch or connect to the table, but all invited participants currently have equal scene editing access and receive the entire shared scene. No private/GM-only data exists yet. Backup of the private host key and player identity recovery still need a complete recovery workflow.
+Only authenticated members can fetch or connect to the table. Everyone can draw, create tokens, and roll dice. Players can move/delete their own tokens and delete their own drawings; the GM can edit every object and change the game system. The server assigns ownership to the creator, and clients cannot supply or change that ownership. Older objects without a recorded owner stay under GM control. Ownership reassignment is still queued.
+
+All members currently receive the entire shared scene. No private/GM-only data exists yet. Backup of the private host key and player identity recovery still need a complete recovery workflow.
 
 ## Architecture
 
@@ -43,7 +45,7 @@ Keep this prototype local while GM/player command permissions and object ownersh
 | `systems/kids-on-bikes`  | Independent Kids on Bikes module scaffold                           |
 | `systems/kids-on-brooms` | Independent Kids on Brooms module scaffold                          |
 
-The server serializes mutations, commits before broadcasting, and sends a current snapshot on connection. Commands have IDs for retry deduplication over the last 10,000 revisions; clients do not automatically replay commands after reconnecting. Dragging and unfinished strokes are local previews; committed changes synchronize. This first protocol sends full snapshots and is deliberately small. It is not an offline-first or CRDT implementation.
+The server serializes mutations, commits before broadcasting, and sends a current snapshot on connection. Commands have IDs for retry deduplication over the last 10,000 revisions; clients do not automatically replay commands after reconnecting. Dragging and unfinished strokes are local previews; committed changes synchronize. This first protocol sends full snapshots and is deliberately small. It is not an offline-first or CRDT implementation. Table schema/protocol version 2 adds server-owned object permissions. Version 1 saves upgrade automatically on load, preserving scene content, revision, and command receipts; legacy objects receive null ownership (GM control), and the upgraded state is saved immediately. Unsupported/incomplete versions and duplicate scene object IDs fail validation rather than silently discarding data. Reload older browser tabs after upgrading.
 
 SQLite currently uses Node 24's built-in `node:sqlite` and prepared SQL, behind a small store boundary. This avoids a native package build for self-hosters; Drizzle can be introduced when normalized campaign/document storage warrants it. The Node 24 SQLite API may emit an experimental warning.
 
@@ -70,9 +72,9 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
 - [x] Add host setup, player accounts or scoped invitations, authenticated sessions, and table membership.
   - [x] Implement persistent host identity/recovery, table membership, expiring sessions, and atomic single-use invitations, with access-store tests.
   - [x] Wire host-key generation/storage, setup/recovery/join/logout/invitation APIs and UI, HttpOnly session cookies, request-origin checks, and HTTP/WebSocket authentication. Recheck session expiry/revocation for live sockets, and test unauthorized access end to end.
-- [ ] Enforce GM/player roles and object ownership for every command; add permission tests.
+- [x] Enforce GM/player roles and object ownership for every command; add permission tests.
 - [ ] Introduce server-filtered private documents, GM notes, and secret rolls; test that hidden data never reaches unauthorized clients.
-- [ ] Add identity-preserving returning-player recovery, member management, and invitation revocation UI.
+- [ ] Add identity-preserving returning-player recovery, member management, invitation revocation, and GM ownership reassignment APIs/UI.
 - [ ] Add multiple campaigns/scenes, campaign settings, and pinned system/content-pack versions.
 - [ ] Add bounded document collections and normalized storage with schema migrations; avoid unlimited snapshot growth.
 - [ ] Add graceful reconnect behavior for concurrent edits, protocol versions, conflict feedback, and backpressure.
@@ -85,7 +87,7 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
 - [ ] Add text, shape styling, layers, grid settings, measurement, and keyboard shortcuts.
 - [ ] Extend the participant count into named presence; add transient cursors, chat, and roll visibility controls.
 - [ ] Improve touch/keyboard accessibility and verify narrow-screen layouts.
-- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 638 kB before gzip).
+- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 639 kB before gzip).
 
 ### 3 — Module development and character sheets
 
@@ -142,6 +144,15 @@ The **Keep building Tableloom** heartbeat is active every five minutes in this C
 - Verification: `npm run check` passed with **24 tests**, strict typecheck, production builds, and the expanded distribution smoke check, including unauthenticated denial, host setup, cookie-authenticated table access, asset delivery, and clean shutdown. Coverage includes origin rejection, cookie flags, invitation replay/role escalation rejection, session expiry/revocation during live connections, expiry before idle-socket broadcasts, authenticated attribution, persistence across restart, host-key permissions/symlinks, and sign-in throttling.
 - Browser QA on an isolated temporary test database with a synthetic host key: host setup, invitation creation, host sign-out, one-use player join, a roll attributed to Test Player, player sign-out with scene/history cleared, and recovery of the original host. Test server and temporary browser were stopped after QA; normal campaign data was not altered.
 - Remaining limits: this completes authenticated membership, not per-command permissions. All invited members still edit the shared scene equally; object ownership and GM-only actions are next. Players need a fresh invitation/new identity after session loss for now. There is one table, no private documents or secret rolls, and no published system rules/content. Existing harmless dependency annotation and bundle-size notices remain.
+
+### 2026-11-04 — GM/player permissions and object ownership
+
+- Added an exhaustive, system-neutral command authorization policy. Authenticated users may create drawings/tokens and roll dice; players may move/delete their own tokens and delete their own drawings. The GM may edit every scene object and change the game system. Rejected mutations leave scene state, revision, and command receipts unchanged.
+- New objects receive the authenticated creator's ID on the server. Network creation schemas reject supplied ownership metadata, and the state reducer overwrites it defensively even for trusted internal callers. Drawings and tokens share a unique ID namespace, preventing ambiguous permission/deletion targets; the same invariant is validated for persisted data.
+- Introduced table schema/protocol version 2 and a validated, durable version 1 migration. Legacy objects stay GM-controlled instead of guessing ownership; content, revisions, and retry receipts are preserved. Unknown schema versions and incomplete version 2 objects fail closed.
+- Updated browser affordances to match the policy: system selection is GM-only, delete controls are disabled for other owners, and token dragging/eraser gestures act only on editable objects. These affordances reuse the shared policy; server authorization remains authoritative.
+- Verification: `npm run check` passed with **32 tests**, strict typecheck, production builds, and the distribution smoke check. Added owner/other-player/GM matrices, ownership-spoof rejection, shared-ID collision checks, migration/restart checks, and a real three-client WebSocket test covering denied cross-owner moves/deletes, GM overrides, authenticated ownership/roll attribution, and a denied command ID subsequently used by an authorized GM. Existing two-client persistence/restart tests now operate within the permission policy. No new manual browser/layout pass was needed for these control restrictions.
+- Remaining limits: ownership is assigned at creation; GM reassignment and identity-preserving player recovery remain queued. All scene objects and public rolls are still visible to every member; private documents, GM notes, secret rolls, and per-recipient projections are the next item. There are still no published game rules or content packs. Existing third-party annotation and bundle-size notices remain.
 
 ## License
 
