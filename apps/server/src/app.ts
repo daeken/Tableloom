@@ -8,9 +8,7 @@ import { commandSchema } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
 import { applyCommand, projectTable } from "@tableloom/core/server";
 import { TableStore } from "./store.js";
-import { manifest as cyberpunk } from "@tableloom/cyberpunk-red";
-import { manifest as bikes } from "@tableloom/kids-on-bikes";
-import { manifest as brooms } from "@tableloom/kids-on-brooms";
+import { installedModules } from "./modules.js";
 import { AccessStore } from "./access.js";
 import {
   registerAccessRoutes,
@@ -18,7 +16,7 @@ import {
   sessionToken,
 } from "./access-http.js";
 
-const installedSystems = new Set([cyberpunk.id, bikes.id, brooms.id]);
+const installedSystems = new Set(installedModules.map((module) => module.id));
 
 export async function createApp(options: {
   databasePath: string;

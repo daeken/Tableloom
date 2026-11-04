@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const systemIdSchema = z.string().regex(/^[a-z][a-z0-9-]{1,63}$/);
 export type SystemId = z.infer<typeof systemIdSchema>;
+export const moduleVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
 
 export const sourceReferenceSchema = z.object({
   title: z.string().min(1),
@@ -12,7 +13,7 @@ export const sourceReferenceSchema = z.object({
 export const moduleManifestSchema = z.object({
   id: systemIdSchema,
   name: z.string().min(1),
-  version: z.string().regex(/^\d+\.\d+\.\d+$/),
+  version: moduleVersionSchema,
   sdkVersion: z.literal(1),
   status: z.enum(["scaffold", "playtest", "ready"]),
   description: z.string(),
