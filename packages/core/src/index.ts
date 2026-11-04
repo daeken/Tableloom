@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -287,7 +287,14 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("presence"),
     participants: z.number().int().nonnegative(),
   }),
-  z.object({ type: z.literal("error"), message: z.string().max(500) }),
+  z.object({ type: z.literal("ack"), commandId: z.uuid() }).strict(),
+  z
+    .object({
+      type: z.literal("error"),
+      commandId: z.uuid().optional(),
+      message: z.string().max(500),
+    })
+    .strict(),
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
 

@@ -21,7 +21,15 @@ export interface LiveHandlers {
   close(code: number): void;
   error(): void;
 }
+export type CommandDelivery = {
+  id: string;
+  type: CommandInput["type"];
+  target: string | null;
+  status: "pending" | "accepted" | "rejected" | "uncertain";
+  message: string;
+};
 export interface ConnectionDependencies {
+  delivery(result: CommandDelivery): void;
   probe(signal: AbortSignal): Promise<number>;
   open(url: string, handlers: LiveHandlers): LiveSocket;
   schedule(action: () => void, delay: number): () => void;
@@ -35,9 +43,14 @@ export interface ConnectionDependencies {
 }
 export const MAX_PENDING_BYTES = 256 * 1024;
 const CONNECT_TIMEOUT = 10000;
+export const MAX_PENDING_COMMANDS = 64;
 
 /** No offline queue or replay: fresh validated state is required after every connection. */
 export class TableConnection {
+  private pending = new Map<
+    string,
+    { delivery: CommandDelivery; cancel: () => void }
+  >();
   private generation = 0;
   private stopped = true;
   private attempts = 0;
@@ -59,9 +72,20 @@ export class TableConnection {
   }
   stop() {
     this.stopped = true;
-    this.retire();
+    this.retire(false);
   }
-  private retire() {
+  private retire(notify = true) {
+    for (const item of this.pending.values()) {
+      item.cancel();
+      if (notify)
+        this.deps.delivery({
+          ...item.delivery,
+          status: "uncertain",
+          message:
+            "Not confirmed. Review the current table before trying again.",
+        });
+    }
+    this.pending.clear();
     ++this.generation;
     this.ready = false;
     this.context = null;
@@ -159,6 +183,25 @@ export class TableConnection {
             this.deps.snapshot(message);
             this.deps.participants(message.participants);
             this.deps.status("connected");
+          } else if (
+            message.type === "ack" ||
+            (message.type === "error" && message.commandId)
+          ) {
+            const id = message.commandId!;
+            const item = this.pending.get(id);
+            if (item) {
+              item.cancel();
+              this.pending.delete(id);
+              this.deps.delivery({
+                ...item.delivery,
+                status: message.type === "ack" ? "accepted" : "rejected",
+                message:
+                  message.type === "ack"
+                    ? "Confirmed by the server."
+                    : message.message,
+              });
+              if (message.type === "error") this.deps.error(message.message);
+            }
           } else if (message.type === "presence") {
             if (this.ready) this.deps.participants(message.participants);
           } else this.deps.error(message.message);
@@ -197,10 +240,17 @@ export class TableConnection {
       return false;
     }
     try {
+      if (this.pending.size >= MAX_PENDING_COMMANDS) {
+        this.deps.error(
+          "Too many changes are waiting for confirmation. Wait before trying again.",
+        );
+        return false;
+      }
+      const id = crypto.randomUUID();
       const frame = JSON.stringify(
         clientCommandSchema.parse({
           context,
-          command: { ...command, id: crypto.randomUUID() },
+          command: { ...command, id },
         }),
       );
       if (
@@ -213,7 +263,46 @@ export class TableConnection {
         );
         return false;
       }
-      this.socket.send(frame);
+      const delivery: CommandDelivery = {
+        id,
+        type: command.type,
+        target:
+          "noteId" in command
+            ? command.noteId
+            : "objectId" in command
+              ? command.objectId
+              : "tokenId" in command
+                ? command.tokenId
+                : null,
+        status: "pending",
+        message: "Waiting for the server…",
+      };
+      const cancel = this.deps.schedule(() => {
+        const item = this.pending.get(id);
+        if (!item) return;
+        this.pending.delete(id);
+        this.deps.delivery({
+          ...delivery,
+          status: "uncertain",
+          message:
+            "Confirmation timed out. Review the current table before trying again.",
+        });
+      }, 10000);
+      this.pending.set(id, { delivery, cancel });
+      this.deps.delivery(delivery);
+      try {
+        this.socket.send(frame);
+      } catch {
+        cancel();
+        this.pending.delete(id);
+        this.deps.delivery({
+          ...delivery,
+          status: "uncertain",
+          message:
+            "Delivery could not be confirmed. Review the table before trying again.",
+        });
+        return false;
+      }
       return true;
     } catch {
       this.deps.error(

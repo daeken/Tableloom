@@ -10,6 +10,7 @@ import type { ServerMessage } from "@tableloom/core";
 import type { CommandContext } from "@tableloom/core/campaigns";
 import { TableConnection, MAX_PENDING_BYTES } from "./table-connection.js";
 import type {
+  CommandDelivery,
   ConnectionDependencies,
   ConnectionStatus,
   LiveHandlers,
@@ -62,6 +63,7 @@ function fixture(
   let time = 0,
     refreshes = 0,
     clears = 0;
+  const deliveries: CommandDelivery[] = [];
   const sockets: Socket[] = [],
     statuses: ConnectionStatus[] = [],
     errors: string[] = [],
@@ -72,6 +74,7 @@ function fixture(
     "ws://fixture.invalid/api/live",
     DEFAULT_CAMPAIGN_ID,
     {
+      delivery: (item) => deliveries.push(item),
       probe,
       open: (_url, handlers) => {
         const socket = new Socket(handlers);
@@ -115,6 +118,7 @@ function fixture(
   };
   return {
     client,
+    deliveries,
     sockets,
     statuses,
     errors,
@@ -300,4 +304,76 @@ test("credential loss clears snapshots, overload waits, and outgoing backpressur
   assert.equal(f.clears, 1);
   assert.equal(f.presence.at(-1), 0);
   f.client.stop();
+});
+
+test("command confirmations correlate only to pending requests; snapshots and unknown results cannot confirm delivery", async () => {
+  const f = fixture();
+  f.client.start();
+  await flush();
+  const socket = f.sockets[0]!;
+  socket.emit(snapshot());
+  assert.equal(
+    f.client.send(context, { type: "dice.roll", expression: "d6" }),
+    true,
+  );
+  const id = JSON.parse(socket.sent[0]!).command.id;
+  assert.equal(f.deliveries.at(-1)?.status, "pending");
+  socket.emit(snapshot());
+  socket.emit({ type: "ack", commandId: crypto.randomUUID() });
+  assert.equal(f.deliveries.at(-1)?.status, "pending");
+  socket.emit({ type: "ack", commandId: id });
+  assert.equal(f.deliveries.at(-1)?.status, "accepted");
+  const count = f.deliveries.length;
+  socket.emit({ type: "error", commandId: id, message: "Late duplicate" });
+  assert.equal(f.deliveries.length, count);
+  const noteId = crypto.randomUUID();
+  f.client.send(context, { type: "note.delete", noteId, expectedVersion: 1 });
+  const nextId = JSON.parse(socket.sent[1]!).command.id;
+  socket.emit({
+    type: "error",
+    commandId: nextId,
+    message: "This note changed.",
+  });
+  assert.equal(f.deliveries.at(-1)?.status, "rejected");
+  assert.equal(f.deliveries.at(-1)?.target, noteId);
+  assert.equal(f.deliveries.at(-1)?.message, "This note changed.");
+  f.client.stop();
+});
+
+test("pending requests have bounded count and deadlines; disconnects report uncertainty without replay", async () => {
+  const f = fixture();
+  f.client.start();
+  await flush();
+  const socket = f.sockets[0]!;
+  socket.emit(snapshot());
+  for (let i = 0; i < 64; i++)
+    assert.equal(
+      f.client.send(context, { type: "dice.roll", expression: "d6" }),
+      true,
+    );
+  assert.equal(
+    f.client.send(context, { type: "dice.roll", expression: "d6" }),
+    false,
+  );
+  assert.equal(socket.sent.length, 64);
+  await f.advance(10000);
+  assert.equal(
+    f.deliveries.filter((item) => item.status === "uncertain").length,
+    64,
+  );
+  socket.emit({
+    type: "ack",
+    commandId: JSON.parse(socket.sent[0]!).command.id,
+  });
+  assert.equal(f.deliveries.at(-1)?.status, "uncertain");
+  assert.equal(
+    f.client.send(context, { type: "dice.roll", expression: "d6" }),
+    true,
+  );
+  socket.handlers.close(1006);
+  assert.equal(f.deliveries.at(-1)?.status, "uncertain");
+  await f.advance(1000);
+  assert.equal(f.sockets[1]!.sent.length, 0);
+  f.client.stop();
+  assert.equal(f.timers.size, 0);
 });

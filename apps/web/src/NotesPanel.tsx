@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Plus } from "lucide-react";
 import type { CommandInput, Note } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
+import type { CommandDelivery } from "./table-connection.js";
 import { canEditObject } from "@tableloom/core/permissions";
 
 type Fields = Pick<Note, "title" | "body" | "visibility">;
@@ -26,6 +27,7 @@ function NoteEditor({
   enabled,
   member,
   send,
+  deliveries,
 }: {
   note: Note;
   draft: Draft;
@@ -33,8 +35,15 @@ function NoteEditor({
   enabled: boolean;
   member: Member;
   send: (command: CommandInput) => boolean;
+  deliveries: CommandDelivery[];
 }) {
   const submitted = useRef<Fields | null>(null);
+  const delivery = deliveries.find(
+    (item) =>
+      item.target === note.id &&
+      (item.type === "note.update" || item.type === "note.delete"),
+  );
+  const pending = delivery?.status === "pending";
   const saved = fieldsOf(note);
   const dirty = !matches(draft.fields, draft.baseFields);
   const stale =
@@ -134,14 +143,18 @@ function NoteEditor({
             <button
               type="submit"
               disabled={
-                !enabled || !dirty || stale || !draft.fields.title.trim()
+                !enabled ||
+                pending ||
+                !dirty ||
+                stale ||
+                !draft.fields.title.trim()
               }
             >
               Save changes
             </button>
             <button
               type="button"
-              disabled={!enabled || stale}
+              disabled={!enabled || pending || stale}
               onClick={() =>
                 send({
                   type: "note.delete",
@@ -153,6 +166,13 @@ function NoteEditor({
               Delete note
             </button>
           </div>
+          {delivery && (
+            <p className="note-delivery" role="status">
+              {delivery.status === "accepted"
+                ? "Change confirmed by the server."
+                : delivery.message}
+            </p>
+          )}
           <small className="muted">
             {!enabled
               ? "Reconnect to save."
@@ -174,12 +194,14 @@ export function NotesPanel({
   member,
   enabled,
   send,
+  deliveries,
 }: {
   active: boolean;
   notes: Note[];
   member: Member;
   enabled: boolean;
   send: (command: CommandInput) => boolean;
+  deliveries: CommandDelivery[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -246,6 +268,7 @@ export function NotesPanel({
           member={member}
           enabled={enabled}
           send={send}
+          deliveries={deliveries}
           draft={drafts[selected.id] ?? draftOf(selected)}
           change={(draft) =>
             setDrafts((previous) => ({ ...previous, [selected.id]: draft }))

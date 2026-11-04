@@ -167,7 +167,6 @@ test("the live default campaign never transmits offstage scene content or anothe
         other.name,
         otherNoteId,
         "Not public across campaigns",
-        otherCommandId,
       ]) {
         assert.ok(
           !client.raw.join("").includes(secret),
@@ -176,6 +175,17 @@ test("the live default campaign never transmits offstage scene content or anothe
         assert.ok(!response.body.includes(secret));
       }
     }
+    // The caller's own locally reused request ID is echoed only in its acknowledgement.
+    for (const client of [g, p])
+      for (const raw of client.raw) {
+        if (!raw.includes(otherCommandId)) continue;
+        assert.equal(client, p);
+        const message = serverMessageSchema.parse(JSON.parse(raw));
+        assert.equal(message.type, "ack");
+        assert.ok(
+          message.type === "ack" && message.commandId === otherCommandId,
+        );
+      }
     assert.equal(store.load(other.id).rolls.length, 0);
     assert.equal(store.hasCommand(command.id, other.id), false);
     await app.close();

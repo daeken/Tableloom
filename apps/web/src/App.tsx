@@ -36,6 +36,7 @@ import { CampaignDialog } from "./CampaignDialog.js";
 import { RollHistoryDialog } from "./RollHistoryDialog.js";
 import { SceneDialog } from "./SceneDialog.js";
 import { contextKey } from "@tableloom/core/campaigns";
+import { CommandStatus } from "./CommandStatus.js";
 import { NotesPanel } from "./NotesPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
@@ -343,6 +344,7 @@ export function App() {
               <span>{participants} at the table</span>
             </div>
           </div>
+          <CommandStatus deliveries={table.deliveries} />
           <div className="canvas-frame">
             {state ? (
               <Tabletop
@@ -450,6 +452,7 @@ export function App() {
               key={viewerKey}
               active={tab === "notes"}
               notes={state.notes}
+              deliveries={table.deliveries}
               member={member}
               enabled={connected}
               send={send}

@@ -13,6 +13,7 @@ import { applyCommand, projectTable } from "@tableloom/core/server";
 import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
+import { CommandBindings } from "./command-bindings.js";
 import { transaction } from "./database.js";
 import { RollHistoryStore } from "./roll-history.js";
 import { registerRollHistoryRoutes } from "./roll-history-http.js";
@@ -60,12 +61,14 @@ export async function createApp(options: {
   let access: AccessStore;
   let documents: DocumentStore;
   let history: RollHistoryStore;
+  let bindings: CommandBindings;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
     store.load();
     documents = new DocumentStore(database, store);
     history = new RollHistoryStore(database, store);
+    bindings = new CommandBindings(database);
   } catch (error) {
     database.close();
     throw error;
@@ -223,12 +226,10 @@ export async function createApp(options: {
           !protocol.success ||
           protocol.data.protocolVersion !== String(PROTOCOL_VERSION)
         )
-          return reply
-            .code(426)
-            .send({
-              error: "Reload the application to use this live protocol.",
-              protocolVersion: PROTOCOL_VERSION,
-            });
+          return reply.code(426).send({
+            error: "Reload the application to use this live protocol.",
+            protocolVersion: PROTOCOL_VERSION,
+          });
       },
     },
     (socket, request) => {
@@ -281,6 +282,8 @@ export async function createApp(options: {
           socket.close(1008, "Too many commands.");
           return;
         }
+        let commandId: string | undefined;
+        let committed = false;
         try {
           if (isBinary) throw new Error("Commands must be JSON text.");
           const parsed = clientCommandSchema.safeParse(
@@ -290,6 +293,7 @@ export async function createApp(options: {
             throw new Error(
               "Invalid action or old protocol. Reload the updated application.",
             );
+          commandId = parsed.data.command.id;
           const outcome = transaction(database, () => {
             const actor = authenticate(socket);
             if (!actor) return { kind: "unauthorized" as const };
@@ -307,8 +311,13 @@ export async function createApp(options: {
               !installedSystems.has(command.systemId)
             )
               throw new Error("That system is not installed.");
-            if (store.hasCommand(command.id, actor.tableId))
+            if (store.hasCommand(command.id, actor.tableId)) {
+              if (!bindings.matches(actor.id, parsed.data))
+                throw new Error(
+                  "This request cannot be confirmed. Review the latest table before making a new change.",
+                );
               return { kind: "retry" as const };
+            }
             const recipient =
               command.type === "object.assign" || command.type === "note.assign"
                 ? access.getMember(command.ownerId, actor.tableId)
@@ -320,29 +329,53 @@ export async function createApp(options: {
               recipient,
             );
             store.save(next, command.id, actor.tableId);
+            bindings.bind(actor.id, parsed.data);
             return { kind: "saved" as const, state: next };
           });
+          committed = outcome.kind === "saved" || outcome.kind === "retry";
           // No outbound acknowledgement precedes the transaction's commit.
           if (outcome.kind === "unauthorized")
             socket.close(4001, "Sign in again.");
           else if (outcome.kind === "stale") {
             send(socket, {
               type: "error",
+              commandId,
               message:
                 "The campaign or scene changed. Review the current scene before trying again.",
             });
             sendSnapshot(socket, true);
-          } else if (outcome.kind === "retry") sendSnapshot(socket, true);
-          else refreshCampaign(member.tableId, outcome.state);
+          } else {
+            send(socket, { type: "ack", commandId });
+            if (outcome.kind === "retry") sendSnapshot(socket, true);
+            else refreshCampaign(member.tableId, outcome.state);
+          }
         } catch (error) {
           app.log.debug({ err: error }, "Rejected table command");
+          if (committed) {
+            socket.close(
+              1011,
+              "The change was saved but the view could not refresh.",
+            );
+            return;
+          }
           const message =
             error instanceof SyntaxError
               ? "Commands must be valid JSON."
               : error instanceof Error && !("code" in error)
                 ? error.message
                 : "Unable to save this change.";
-          send(socket, { type: "error", message: message.slice(0, 500) });
+          send(socket, {
+            type: "error",
+            ...(commandId ? { commandId } : {}),
+            message: message.slice(0, 500),
+          });
+          if (commandId) {
+            try {
+              sendSnapshot(socket, true);
+            } catch {
+              socket.close(1011, "Unable to reload this campaign.");
+            }
+          }
         }
       });
       socket.on("error", (error) =>

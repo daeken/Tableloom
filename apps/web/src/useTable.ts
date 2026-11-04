@@ -4,7 +4,7 @@ import type { CommandInput, TableView } from "@tableloom/core";
 import type { CommandContext } from "@tableloom/core/campaigns";
 import { z } from "zod";
 import { TableConnection } from "./table-connection.js";
-import type { ConnectionStatus } from "./table-connection.js";
+import type { CommandDelivery, ConnectionStatus } from "./table-connection.js";
 
 export function useTable(
   viewerKey: string | null,
@@ -21,6 +21,7 @@ export function useTable(
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [participants, setParticipants] = useState(0),
     [error, setError] = useState("");
+  const [deliveries, setDeliveries] = useState<CommandDelivery[]>([]);
   const connection = useRef<{
     viewerKey: string;
     client: TableConnection;
@@ -29,6 +30,7 @@ export function useTable(
     setSnapshot(null);
     setParticipants(0);
     setError("");
+    setDeliveries([]);
     setStatus("connecting");
     if (!viewerKey || !campaignId) return;
     const url = new URL("/api/live", location.href);
@@ -36,6 +38,17 @@ export function useTable(
     url.searchParams.set("campaignId", campaignId);
     url.searchParams.set("protocolVersion", String(PROTOCOL_VERSION));
     const client = new TableConnection(url.href, campaignId, {
+      delivery: (result) =>
+        setDeliveries((previous) => {
+          const all = [
+            result,
+            ...previous.filter((item) => item.id !== result.id),
+          ];
+          let finished = 0;
+          return all.filter(
+            (item) => item.status === "pending" || finished++ < 20,
+          );
+        }),
       probe: async (signal) => {
         const response = await fetch("/api/health", {
           cache: "no-store",
@@ -96,6 +109,7 @@ export function useTable(
     status: connection.current?.viewerKey === viewerKey ? status : "connecting",
     participants: current ? participants : 0,
     error,
+    deliveries: connection.current?.viewerKey === viewerKey ? deliveries : [],
     clearError: () => setError(""),
     send,
   };

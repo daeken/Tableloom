@@ -58,6 +58,30 @@ function snapshot(
   );
 }
 
+function acknowledgement(socket: WebSocket, commandId: string) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Production command acknowledgement timed out"));
+    }, 5000);
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off("message", receive);
+    };
+    const receive = (raw: WebSocket.RawData) => {
+      const message = serverMessageSchema.parse(JSON.parse(raw.toString()));
+      if (message.type === "ack" && message.commandId === commandId) {
+        cleanup();
+        resolve();
+      } else if (message.type === "error" && message.commandId === commandId) {
+        cleanup();
+        reject(new Error(message.message));
+      }
+    };
+    socket.on("message", receive);
+  });
+}
+
 // Exercise the actual distribution: source tests cannot catch broken bundle imports.
 const directory = await mkdtemp(join(tmpdir(), "tableloom-smoke-"));
 const hostKey = "tableloom-production-smoke-key-never-use-outside-tests";
@@ -275,12 +299,15 @@ try {
       live,
       (message) => message.state.rolls.length === 1,
     );
+    const commandId = randomUUID(),
+      confirmed = acknowledgement(live, commandId);
     live.send(
       JSON.stringify({
         context: current.context,
-        command: { id: randomUUID(), type: "dice.roll", expression: "d6" },
+        command: { id: commandId, type: "dice.roll", expression: "d6" },
       }),
     );
+    await confirmed;
     const result = (await rolled).state.rolls[0]!;
     assert.equal(result.expression, "1d6");
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
@@ -323,5 +350,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, context-bound live dice, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged context-bound live dice, roll archive/cleanup, and clean shutdown.",
 );

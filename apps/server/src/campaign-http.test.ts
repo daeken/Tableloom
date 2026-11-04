@@ -392,7 +392,9 @@ test("live rooms isolate snapshots, presence, receipts, ownership recipients, an
     );
     for (const client of [...roomA, ...roomB])
       assert.ok(
-        client.messages.every((m) => m.type === "error" || m.participants <= 3),
+        client.messages.every(
+          (m) => m.type === "error" || m.type === "ack" || m.participants <= 3,
+        ),
       );
     const tokenA = randomUUID(),
       tokenB = randomUUID(),
@@ -620,7 +622,9 @@ test("live rooms isolate snapshots, presence, receipts, ownership recipients, an
       ),
     );
     assert.ok(
-      ga.messages.every((m) => m.type === "error" || m.participants <= 3),
+      ga.messages.every(
+        (m) => m.type === "error" || m.type === "ack" || m.participants <= 3,
+      ),
     );
     const mismatched = await app.inject({
       url: `/api/live?campaignId=${DEFAULT_CAMPAIGN_ID}`,

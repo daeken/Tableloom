@@ -1529,3 +1529,32 @@ p {
 .history-choice small {
   display: block;
 }
+
+.command-status {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid #d6dcc8;
+  border-radius: 6px;
+  background: #f8f8f0;
+  font-size: 11px;
+}
+.command-status summary {
+  cursor: pointer;
+}
+.command-status ol {
+  max-height: 170px;
+  overflow-y: auto;
+  padding-left: 20px;
+}
+.command-status li {
+  margin: 8px 0;
+}
+.command-status small {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.note-delivery {
+  font-size: 11px;
+  line-height: 1.5;
+}
