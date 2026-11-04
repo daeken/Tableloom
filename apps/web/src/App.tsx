@@ -32,6 +32,9 @@ import { useAccess, accessRequest } from "./useAccess.js";
 import { AccessGate } from "./AccessGate.js";
 import { InviteDialog } from "./InviteDialog.js";
 import { OwnershipDialog } from "./OwnershipDialog.js";
+import { CampaignDialog } from "./CampaignDialog.js";
+import { SceneDialog } from "./SceneDialog.js";
+import { contextKey } from "@tableloom/core/campaigns";
 import { NotesPanel } from "./NotesPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
@@ -60,6 +63,8 @@ export function App() {
     ? `${member.id}:${member.tableId}:${member.role}`
     : null;
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  const [sceneOpen, setSceneOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState(colors[0]!);
@@ -90,6 +95,10 @@ export function App() {
   useEffect(() => {
     setDraft({ viewerKey, expression: "2d6", visibility: "public" });
     setRollError("");
+    setCampaignOpen(false);
+    setSceneOpen(false);
+    setInviteOpen(false);
+    setOwnershipOpen(false);
   }, [viewerKey]);
 
   async function logout() {
@@ -140,7 +149,14 @@ export function App() {
           </span>
         </a>
         <span className="header-divider" />
-        <span className="table-name">The gathering place</span>
+        <button
+          className="table-name campaign-picker"
+          disabled={!member}
+          aria-label="Choose campaign"
+          onClick={() => setCampaignOpen(true)}
+        >
+          {table.campaignName || "Campaigns"} <ChevronDown size={12} />
+        </button>
         <span className="prototype-badge">EARLY ACCESS</span>
         <div className="header-actions">
           <span className={`connection ${connected ? "online" : ""}`}>
@@ -193,12 +209,20 @@ export function App() {
             </span>
             <span className="scene-caption">
               <span>
-                <strong>The gathering place</strong>
+                <strong>{table.sceneName || "The gathering place"}</strong>
                 <small>Your shared battlefield</small>
               </span>
               <span className="scene-active" />
             </span>
           </div>
+          {member?.role === "gm" && table.context && (
+            <button
+              className="add-cast manage-scenes"
+              onClick={() => setSceneOpen(true)}
+            >
+              Manage scenes
+            </button>
+          )}
           <div className="rail-section">
             <span className="eyebrow">GAME SYSTEM</span>
             <div className="system-select">
@@ -300,7 +324,8 @@ export function App() {
             <div>
               <span className="eyebrow">A PLACE TO MAKE BELIEVE</span>
               <h1>
-                The gathering place<span>.</span>
+                {table.sceneName || "The gathering place"}
+                <span>.</span>
               </h1>
             </div>
             <div className="table-presence">
@@ -311,6 +336,11 @@ export function App() {
           <div className="canvas-frame">
             {state ? (
               <Tabletop
+                key={
+                  table.context
+                    ? `${viewerKey}:${contextKey(table.context)}`
+                    : viewerKey
+                }
                 member={member}
                 state={state}
                 tool={tool}
@@ -550,6 +580,23 @@ export function App() {
           connectionError={accessError}
           refresh={refresh}
           accept={accept}
+        />
+      )}
+      {campaignOpen && member && (
+        <CampaignDialog
+          key={viewerKey}
+          member={member}
+          modules={modules}
+          accept={accept}
+          close={() => setCampaignOpen(false)}
+        />
+      )}
+      {sceneOpen && member?.role === "gm" && table.context && (
+        <SceneDialog
+          key={viewerKey}
+          context={table.context}
+          enabled={connected}
+          close={() => setSceneOpen(false)}
         />
       )}
       {ownershipOpen && member?.role === "gm" && state && (

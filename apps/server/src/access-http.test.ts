@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { WebSocket } from "ws";
+import { TestWebSocket as WebSocket, contextReady } from "./test-client.js";
 import { createApp } from "./app.js";
 import { serverMessageSchema } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
@@ -49,6 +49,7 @@ async function socket(url: string, cookie: string) {
     messages.push(serverMessageSchema.parse(JSON.parse(raw.toString()))),
   );
   await once(ws, "open");
+  await contextReady(ws);
   return { ws, messages };
 }
 

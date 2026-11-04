@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
+import { commandContextSchema } from "./campaigns.js";
+export const PROTOCOL_VERSION = 5;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -254,6 +256,9 @@ export const commandSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 export type Command = z.infer<typeof commandSchema>;
+export const clientCommandSchema = z
+  .object({ context: commandContextSchema, command: commandSchema })
+  .strict();
 export type CommandInput = Command extends infer C
   ? C extends Command
     ? Omit<C, "id">
@@ -264,6 +269,9 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("snapshot"),
     state: tableViewSchema,
+    context: commandContextSchema,
+    campaignName: z.string().min(1).max(120),
+    sceneName: z.string().min(1).max(120),
     participants: z.number().int().nonnegative(),
   }),
   z.object({

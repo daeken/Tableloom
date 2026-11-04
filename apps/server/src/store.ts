@@ -256,6 +256,10 @@ export class TableStore {
       .all(campaignId)
       .map((row) => this.scene(campaignId, z.uuid().parse(row.id)).metadata);
   }
+  getScene(campaignId: string, sceneId: string): Scene {
+    this.getCampaign(campaignId);
+    return this.scene(campaignId, sceneId).metadata;
+  }
   createScene(campaignId: string, input: { name: string }): Scene {
     const settings = sceneSettingsSchema.parse(input);
     return this.transaction(() => {
@@ -269,7 +273,7 @@ export class TableStore {
             .get(campaignId)?.count,
         ) >= MAX_SCENES
       )
-        throw new Error("This campaign has reached its scene limit.");
+        throw new StoreError("This campaign has reached its scene limit.", 409);
       const scene = sceneSchema.parse({
         ...settings,
         id: randomUUID(),
@@ -289,12 +293,13 @@ export class TableStore {
     return this.transaction(() => {
       const current = this.getCampaign(campaignId);
       if (current.version !== expectedVersion)
-        throw new Error(
+        throw new StoreError(
           "Campaign settings changed. Reload before switching scenes.",
+          409,
         );
       this.scene(campaignId, sceneId);
       if (current.activeSceneId === sceneId)
-        throw new Error("That scene is already active.");
+        throw new StoreError("That scene is already active.", 409);
       const next = campaignSchema.parse({
         ...current,
         activeSceneId: sceneId,
@@ -461,7 +466,8 @@ export class TableStore {
         "SELECT json, state_json FROM scene_records WHERE campaign_id = ? AND id = ?",
       )
       .get(campaignId, id);
-    if (!row) throw new Error("That scene is unavailable in this campaign.");
+    if (!row)
+      throw new StoreError("That scene is unavailable in this campaign.", 404);
     const metadata = sceneSchema.parse(json(row.json));
     if (metadata.id !== id || metadata.campaignId !== campaignId)
       throw new Error("Scene storage identifiers disagree.");

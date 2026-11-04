@@ -1419,3 +1419,63 @@ p {
 .ownership-review p {
   margin: 10px 0;
 }
+
+.campaign-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  max-width: 230px;
+  text-align: left;
+}
+.campaign-picker:disabled {
+  opacity: 0.6;
+}
+.manage-scenes {
+  margin-top: 12px;
+}
+.campaign-list button,
+.campaign-form .access-actions button {
+  margin: 8px 8px 0 0;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 11px;
+  background: #edf0e3;
+  color: #405535;
+  border: 1px solid #cdd6c0;
+  border-radius: 4px;
+}
+.campaign-form {
+  margin-top: 22px;
+  border-top: 1px solid #d6dcc8;
+  padding-top: 12px;
+}
+.campaign-form label {
+  margin-top: 14px;
+}
+.campaign-form textarea,
+.campaign-form select {
+  width: 100%;
+  padding: 10px;
+  background: #fffef8;
+  border: 1px solid #cfd7bf;
+  color: #41543a;
+  font: inherit;
+  font-size: 12px;
+}
+.campaign-form textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.campaign-form p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+@media (max-width: 650px) {
+  .campaign-picker {
+    max-width: 130px;
+    font-size: 10px;
+  }
+}

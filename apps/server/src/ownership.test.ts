@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocket } from "ws";
+import { TestWebSocket as WebSocket, contextReady } from "./test-client.js";
 import { serverMessageSchema, tableViewSchema } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
 import { createApp } from "./app.js";
@@ -31,6 +31,7 @@ async function connect(url: string, cookie: string) {
     messages.push(serverMessageSchema.parse(JSON.parse(data.toString())));
   });
   await once(ws, "open");
+  await contextReady(ws);
   return { ws, raw, messages };
 }
 

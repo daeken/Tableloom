@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { WebSocket } from "ws";
+import { TestWebSocket as WebSocket, contextReady } from "./test-client.js";
 import { serverMessageSchema, tableViewSchema } from "@tableloom/core";
 import { accessStatusSchema } from "@tableloom/core/access";
 import type { ServerMessage, TableView } from "@tableloom/core";
@@ -48,6 +48,7 @@ async function client(url: string, cookie: string) {
     ws.once("open", resolve);
     ws.once("error", reject);
   });
+  await contextReady(ws);
   return { ws, messages };
 }
 async function until(predicate: () => boolean) {

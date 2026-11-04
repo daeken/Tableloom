@@ -57,3 +57,17 @@ export const campaignUpdateSchema = z
     settings: campaignSettingsSchema,
   })
   .strict();
+export const sceneListSchema = z.array(sceneSchema).max(MAX_SCENES);
+export const sceneActivationSchema = z
+  .object({ sceneId: z.uuid(), expectedVersion: z.number().int().positive() })
+  .strict();
+export const commandContextSchema = z
+  .object({
+    campaignId: z.uuid(),
+    sceneId: z.uuid(),
+    generation: z.number().int().positive(),
+  })
+  .strict();
+export type CommandContext = z.infer<typeof commandContextSchema>;
+export const contextKey = (context: CommandContext) =>
+  `${context.campaignId}:${context.sceneId}:${context.generation}`;

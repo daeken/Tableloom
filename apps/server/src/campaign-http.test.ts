@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { WebSocket } from "ws";
+import { TestWebSocket as WebSocket, contextReady } from "./test-client.js";
 import { serverMessageSchema, tableViewSchema } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
 import { accessStatusSchema, invitationSchema } from "@tableloom/core/access";
@@ -91,6 +91,7 @@ async function connect(url: string, cookie: string, campaignId?: string) {
     messages.push(serverMessageSchema.parse(JSON.parse(data.toString())));
   });
   await once(ws, "open");
+  await contextReady(ws);
   return { ws, raw, messages };
 }
 
@@ -684,7 +685,7 @@ test("a socket for an earlier active scene cannot apply a delayed command to a n
       scene = store.createScene(campaign.id, { name: "Another scene" });
     store.activateScene(campaign.id, scene.id, campaign.version);
     const commandId = randomUUID(),
-      closed = once(live.ws, "close");
+      start = live.messages.length;
     live.ws.send(
       JSON.stringify({
         id: commandId,
@@ -697,7 +698,15 @@ test("a socket for an earlier active scene cannot apply a delayed command to a n
         },
       }),
     );
-    assert.equal((await closed)[0], 4002);
+    await until(() =>
+      live.messages
+        .slice(start)
+        .some(
+          (message) =>
+            message.type === "error" &&
+            message.message.includes("scene changed"),
+        ),
+    );
     assert.equal(store.hasCommand(commandId), false);
     assert.equal(store.load().tokens.length, 0);
   } finally {

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocket } from "ws";
+import { TestWebSocket as WebSocket, contextReady } from "./test-client.js";
 import { serverMessageSchema, tableViewSchema } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
 import { applyCommand } from "@tableloom/core/server";
@@ -33,6 +33,7 @@ async function connect(url: string, token: string) {
     messages.push(serverMessageSchema.parse(JSON.parse(data.toString())));
   });
   await once(socket, "open");
+  await contextReady(socket);
   return { socket, raw, messages };
 }
 

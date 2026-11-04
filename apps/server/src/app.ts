@@ -5,13 +5,15 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { WebSocket } from "ws";
 import { z } from "zod";
-import { commandSchema } from "@tableloom/core";
+import { clientCommandSchema, PROTOCOL_VERSION } from "@tableloom/core";
+import { contextKey } from "@tableloom/core/campaigns";
 import type { Member } from "@tableloom/core/access";
 import type { TableState, ServerMessage } from "@tableloom/core";
 import { applyCommand, projectTable } from "@tableloom/core/server";
 import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
+import { transaction } from "./database.js";
 import { AccessStore } from "./access.js";
 import {
   registerAccessRoutes,
@@ -60,7 +62,7 @@ export async function createApp(options: {
     database.close();
     throw error;
   }
-  type Client = { credential: string; campaignId: string; sceneId: string };
+  type Client = { credential: string; campaignId: string };
   const clients = new Map<WebSocket, Client>();
   const sentVersions = new Map<WebSocket, string>();
   const authenticate = (socket: WebSocket): Member | null => {
@@ -106,18 +108,24 @@ export async function createApp(options: {
       return;
     }
     const campaign = store.getCampaign(member.tableId);
-    if (campaign.activeSceneId !== clients.get(socket)?.sceneId) {
-      socket.close(4002, "The scene changed. Reconnect to continue.");
-      return;
-    }
+    const context = {
+      campaignId: campaign.id,
+      sceneId: campaign.activeSceneId,
+      generation: campaign.version,
+    };
+    const scene = store.getScene(campaign.id, campaign.activeSceneId);
     const view = projectTable(loaded ?? store.load(member.tableId), member);
-    if (!force && sentVersions.get(socket) === view.version) return;
+    const fingerprint = `${contextKey(context)}:${view.version}`;
+    if (!force && sentVersions.get(socket) === fingerprint) return;
     send(socket, {
       type: "snapshot",
       state: view,
+      context,
+      campaignName: campaign.name,
+      sceneName: scene.name,
       participants: participants(member.tableId),
     });
-    sentVersions.set(socket, view.version);
+    sentVersions.set(socket, fingerprint);
   };
   const refreshCampaign = (
     campaignId: string,
@@ -172,7 +180,10 @@ export async function createApp(options: {
     disconnectInvalid,
     refreshCampaign,
   });
-  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 4 }));
+  app.get("/api/health", async () => ({
+    status: "ok",
+    protocolVersion: PROTOCOL_VERSION,
+  }));
   app.get("/api/table", async (request, reply) => {
     const member = access.authenticate(sessionToken(request.headers.cookie));
     if (!member)
@@ -203,11 +214,10 @@ export async function createApp(options: {
         socket.close(4001, "Sign in again.");
         return;
       }
-      const campaign = store.getCampaign(initial.tableId);
+      store.getCampaign(initial.tableId);
       clients.set(socket, {
         credential,
         campaignId: initial.tableId,
-        sceneId: campaign.activeSceneId,
       });
       try {
         sendSnapshot(socket, true);
@@ -248,39 +258,58 @@ export async function createApp(options: {
           return;
         }
         try {
-          if (
-            store.getCampaign(member.tableId).activeSceneId !==
-            clients.get(socket)?.sceneId
-          ) {
-            socket.close(4002, "The scene changed. Reconnect to continue.");
-            return;
-          }
           if (isBinary) throw new Error("Commands must be JSON text.");
-          const parsed = commandSchema.safeParse(JSON.parse(raw.toString()));
-          if (!parsed.success)
-            throw new Error("Invalid command. Check its fields and limits.");
-          const command = parsed.data;
-          if (
-            command.type === "system.set" &&
-            !installedSystems.has(command.systemId)
-          )
-            throw new Error("That system is not installed.");
-          if (store.hasCommand(command.id, member.tableId)) {
-            sendSnapshot(socket, true);
-            return;
-          }
-          const recipient =
-            command.type === "object.assign" || command.type === "note.assign"
-              ? access.getMember(command.ownerId, member.tableId)
-              : undefined;
-          const next = applyCommand(
-            store.load(member.tableId),
-            command,
-            member,
-            recipient,
+          const parsed = clientCommandSchema.safeParse(
+            JSON.parse(raw.toString()),
           );
-          store.save(next, command.id, member.tableId);
-          refreshCampaign(member.tableId, next);
+          if (!parsed.success)
+            throw new Error(
+              "Invalid action or old protocol. Reload the updated application.",
+            );
+          const outcome = transaction(database, () => {
+            const actor = authenticate(socket);
+            if (!actor) return { kind: "unauthorized" as const };
+            const campaign = store.getCampaign(actor.tableId);
+            const currentContext = {
+              campaignId: campaign.id,
+              sceneId: campaign.activeSceneId,
+              generation: campaign.version,
+            };
+            if (contextKey(parsed.data.context) !== contextKey(currentContext))
+              return { kind: "stale" as const };
+            const command = parsed.data.command;
+            if (
+              command.type === "system.set" &&
+              !installedSystems.has(command.systemId)
+            )
+              throw new Error("That system is not installed.");
+            if (store.hasCommand(command.id, actor.tableId))
+              return { kind: "retry" as const };
+            const recipient =
+              command.type === "object.assign" || command.type === "note.assign"
+                ? access.getMember(command.ownerId, actor.tableId)
+                : undefined;
+            const next = applyCommand(
+              store.load(actor.tableId),
+              command,
+              actor,
+              recipient,
+            );
+            store.save(next, command.id, actor.tableId);
+            return { kind: "saved" as const, state: next };
+          });
+          // No outbound acknowledgement precedes the transaction's commit.
+          if (outcome.kind === "unauthorized")
+            socket.close(4001, "Sign in again.");
+          else if (outcome.kind === "stale") {
+            send(socket, {
+              type: "error",
+              message:
+                "The campaign or scene changed. Review the current scene before trying again.",
+            });
+            sendSnapshot(socket, true);
+          } else if (outcome.kind === "retry") sendSnapshot(socket, true);
+          else refreshCampaign(member.tableId, outcome.state);
         } catch (error) {
           app.log.debug({ err: error }, "Rejected table command");
           const message =

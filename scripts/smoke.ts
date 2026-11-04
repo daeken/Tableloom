@@ -4,12 +4,57 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { WebSocket } from "ws";
 import {
   campaignListSchema,
   campaignMembershipSchema,
 } from "@tableloom/core/campaigns";
 import { accessStatusSchema } from "@tableloom/core/access";
-import { tableViewSchema } from "@tableloom/core";
+import {
+  tableViewSchema,
+  serverMessageSchema,
+  PROTOCOL_VERSION,
+} from "@tableloom/core";
+import type { ServerMessage } from "@tableloom/core";
+import { sceneSchema } from "@tableloom/core/campaigns";
+
+function snapshot(
+  socket: WebSocket,
+  matches: (message: Extract<ServerMessage, { type: "snapshot" }>) => boolean,
+) {
+  return new Promise<Extract<ServerMessage, { type: "snapshot" }>>(
+    (resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Production live snapshot timed out"));
+      }, 5000);
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off("message", receive);
+        socket.off("error", failed);
+      };
+      const failed = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const receive = (raw: WebSocket.RawData) => {
+        try {
+          const message = serverMessageSchema.parse(JSON.parse(raw.toString()));
+          if (message.type === "snapshot" && matches(message)) {
+            cleanup();
+            resolve(message);
+          }
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      };
+      socket.on("message", receive);
+      socket.on("error", failed);
+    },
+  );
+}
 
 // Exercise the actual distribution: source tests cannot catch broken bundle imports.
 const directory = await mkdtemp(join(tmpdir(), "tableloom-smoke-"));
@@ -54,7 +99,12 @@ try {
   });
   const health = await fetch(`${url}/api/health`);
   assert.equal(health.status, 200);
-  assert.equal(((await health.json()) as { status: string }).status, "ok");
+  const healthBody = (await health.json()) as {
+    status: string;
+    protocolVersion: number;
+  };
+  assert.equal(healthBody.status, "ok");
+  assert.equal(healthBody.protocolVersion, PROTOCOL_VERSION);
   const response = await fetch(url);
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -129,6 +179,60 @@ try {
   });
   assert.equal(previousTable.status, 401);
   await previousTable.text();
+  const sceneResponse = await fetch(
+    `${url}/api/campaigns/${campaign.id}/scenes`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: nextCookie,
+        Origin: url,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: "Smoke battlefield" }),
+    },
+  );
+  assert.equal(sceneResponse.status, 201);
+  const scene = sceneSchema.parse(await sceneResponse.json());
+  const activated = await fetch(
+    `${url}/api/campaigns/${campaign.id}/activate`,
+    {
+      method: "POST",
+      headers: {
+        Cookie: nextCookie,
+        Origin: url,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sceneId: scene.id,
+        expectedVersion: campaign.version,
+      }),
+    },
+  );
+  assert.equal(activated.status, 200);
+  await activated.json();
+  const live = new WebSocket(
+    `${url.replace("http", "ws")}/api/live?campaignId=${campaign.id}`,
+    { headers: { Cookie: nextCookie, Origin: url } },
+  );
+  try {
+    const opened = snapshot(live, () => true);
+    await once(live, "open");
+    const current = await opened;
+    assert.equal(current.sceneName, scene.name);
+    const rolled = snapshot(
+      live,
+      (message) => message.state.rolls.length === 1,
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: { id: randomUUID(), type: "dice.roll", expression: "d6" },
+      }),
+    );
+    assert.equal((await rolled).state.rolls[0]?.expression, "1d6");
+  } finally {
+    live.terminate();
+  }
 } finally {
   if (child.exitCode === null && child.signalCode === null) {
     const timeout = setTimeout(() => child.kill("SIGKILL"), 5000);
@@ -143,5 +247,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server, frontend/assets, health, authenticated table access, campaign creation/selection, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, scene activation, context-bound live dice, and clean shutdown.",
 );

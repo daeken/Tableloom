@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { serverMessageSchema } from "@tableloom/core";
 import type { CommandInput, TableView } from "@tableloom/core";
+import { contextKey } from "@tableloom/core/campaigns";
+import type { CommandContext } from "@tableloom/core/campaigns";
 
 export function useTable(
   viewerKey: string | null,
@@ -10,6 +12,9 @@ export function useTable(
   const [snapshot, setSnapshot] = useState<{
     viewerKey: string;
     state: TableView;
+    context: CommandContext;
+    campaignName: string;
+    sceneName: string;
   } | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "offline">(
     "connecting",
@@ -19,6 +24,7 @@ export function useTable(
   const socket = useRef<WebSocket | null>(null);
   const ready = useRef(false);
   const socketViewer = useRef<string | null>(null);
+  const activeContext = useRef<string | null>(null);
 
   useEffect(() => {
     setSnapshot(null);
@@ -29,6 +35,7 @@ export function useTable(
     let attempts = 0;
     const connect = () => {
       ready.current = false;
+      activeContext.current = null;
       setStatus("connecting");
       const url = new URL("/api/live", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -43,7 +50,16 @@ export function useTable(
             JSON.parse(String(event.data)),
           );
           if (message.type === "snapshot") {
-            setSnapshot({ viewerKey, state: message.state });
+            if (message.context.campaignId !== campaignId)
+              throw new Error("Unexpected campaign.");
+            activeContext.current = contextKey(message.context);
+            setSnapshot({
+              viewerKey,
+              state: message.state,
+              context: message.context,
+              campaignName: message.campaignName,
+              sceneName: message.sceneName,
+            });
             setParticipants(message.participants);
             ready.current = true;
             setStatus("connected");
@@ -76,15 +92,19 @@ export function useTable(
       stopped = true;
       ready.current = false;
       socketViewer.current = null;
+      activeContext.current = null;
       clearTimeout(retry);
       socket.current?.close();
     };
   }, [viewerKey, onUnauthorized, campaignId]);
 
+  const context = snapshot?.viewerKey === viewerKey ? snapshot.context : null;
   const send = useCallback(
     (command: CommandInput) => {
       if (
         !viewerKey ||
+        !context ||
+        contextKey(context) !== activeContext.current ||
         socketViewer.current !== viewerKey ||
         !ready.current ||
         socket.current?.readyState !== WebSocket.OPEN
@@ -95,16 +115,22 @@ export function useTable(
         return false;
       }
       socket.current.send(
-        JSON.stringify({ ...command, id: crypto.randomUUID() }),
+        JSON.stringify({
+          context,
+          command: { ...command, id: crypto.randomUUID() },
+        }),
       );
       return true;
     },
-    [viewerKey],
+    [viewerKey, context],
   );
 
   const current = snapshot?.viewerKey === viewerKey;
   return {
     state: current ? snapshot.state : null,
+    context,
+    campaignName: current ? snapshot.campaignName : "",
+    sceneName: current ? snapshot.sceneName : "",
     status: current ? status : ("connecting" as const),
     participants: current ? participants : 0,
     error,

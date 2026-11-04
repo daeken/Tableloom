@@ -6,6 +6,10 @@ import {
   campaignMembershipSchema,
   campaignSettingsSchema,
   campaignUpdateSchema,
+  sceneListSchema,
+  sceneSchema,
+  sceneSettingsSchema,
+  sceneActivationSchema,
 } from "@tableloom/core/campaigns";
 import { AccessError, AccessStore } from "./access.js";
 import type { SessionGrant } from "./access.js";
@@ -28,14 +32,47 @@ export function registerCampaignRoutes(
     sessionToken(request.headers.cookie);
   const id = (request: FastifyRequest) =>
     z.object({ id: z.uuid() }).strict().parse(request.params).id;
+  const activeGM = (request: FastifyRequest) => {
+    const current = access.authenticate(token(request));
+    if (!current) throw new AccessError("sign_in_required");
+    const campaignId = id(request);
+    if (current.tableId !== campaignId)
+      throw new StoreError(
+        "Your active campaign changed. Open it before managing scenes.",
+        409,
+      );
+    if (current.role !== "gm") throw new AccessError("host_required");
+    return current;
+  };
+  app.get("/api/campaigns/:id/scenes", async (request) => {
+    const member = activeGM(request);
+    return sceneListSchema.parse(store.listScenes(member.tableId));
+  });
+  app.post("/api/campaigns/:id/scenes", async (request, reply) => {
+    const member = activeGM(request);
+    const scene = store.createScene(
+      member.tableId,
+      sceneSettingsSchema.parse(request.body),
+    );
+    return reply.code(201).send(sceneSchema.parse(scene));
+  });
+  app.post("/api/campaigns/:id/activate", async (request) => {
+    const member = activeGM(request);
+    const body = sceneActivationSchema.parse(request.body);
+    const campaign = store.activateScene(
+      member.tableId,
+      body.sceneId,
+      body.expectedVersion,
+    );
+    options.refreshCampaign(member.tableId);
+    return campaignMembershipSchema.parse({ ...campaign, role: member.role });
+  });
   app.get("/api/campaigns", async (request) =>
     campaignListSchema.parse(
-      access
-        .listMemberships(token(request))
-        .map((member) => ({
-          ...store.getCampaign(member.tableId),
-          role: member.role,
-        })),
+      access.listMemberships(token(request)).map((member) => ({
+        ...store.getCampaign(member.tableId),
+        role: member.role,
+      })),
     ),
   );
   app.get("/api/campaigns/:id", async (request) => {
