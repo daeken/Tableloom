@@ -607,3 +607,200 @@ test("GM member management restores ownership/private notes, revokes codes, and 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("default HTTP/live endpoints reject other-campaign credentials and recheck rotated sessions before broadcasting", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { AccessStore } = await import("./access.js");
+  const { TableStore } = await import("./store.js");
+  const { applyCommand } = await import("@tableloom/core/server");
+  const { DEFAULT_CAMPAIGN_ID } = await import("@tableloom/core/campaigns");
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-scoped-wire-"));
+  const databasePath = join(directory, "table.sqlite");
+  let app = await makeApp({ databasePath });
+  const access = new AccessStore(databasePath, KEY),
+    store = new TableStore(databasePath);
+  const sockets: WebSocket[] = [];
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const originalHost = await setup(app);
+    const other = store.createCampaign({
+      name: "Other campaign",
+      description: "",
+      system: { id: "kids-on-bikes", version: "0.1.0" },
+      contentPacks: [],
+    });
+    access.registerCampaign(sessionToken(originalHost), other.id);
+    const otherHost = access.selectCampaign(
+      sessionToken(originalHost),
+      other.id,
+    );
+    const gmCookie = getCookie(await post(app, "recover", { key: KEY }));
+    const original = await player(app, gmCookie);
+    const otherInvitation = access.createInvitation(otherHost.token);
+    const otherPlayer = access.redeemInvitation(
+      otherInvitation.token,
+      "Ignored",
+      { sessionToken: sessionToken(original.cookie) },
+    );
+    const commandId = crypto.randomUUID();
+    store.save(
+      applyCommand(
+        store.load(other.id),
+        {
+          id: commandId,
+          type: "note.add",
+          note: {
+            id: crypto.randomUUID(),
+            title: "Other campaign public clue",
+            body: "Must stay in other campaign",
+            visibility: "public",
+          },
+        },
+        otherPlayer.member,
+      ),
+      commandId,
+      other.id,
+    );
+    const gm = await socket(url, gmCookie),
+      joined = await socket(url, original.cookie);
+    sockets.push(gm.ws, joined.ws);
+    const noteId = crypto.randomUUID();
+    joined.ws.send(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "note.add",
+        note: {
+          id: noteId,
+          title: "Default private note",
+          body: "Must stay in default campaign",
+          visibility: "gm",
+        },
+      }),
+    );
+    const deadline = Date.now() + 3000;
+    while (
+      ![gm, joined].every((client) =>
+        client.messages.some(
+          (m) =>
+            m.type === "snapshot" &&
+            m.state.notes.some((note) => note.id === noteId),
+        ),
+      )
+    ) {
+      if (Date.now() > deadline) throw new Error("No default note snapshot");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const otherCookie = `tableloom_session=${otherPlayer.token}`;
+    for (const route of [
+      "/api/table",
+      `/api/table?campaignId=${DEFAULT_CAMPAIGN_ID}`,
+    ]) {
+      const denied = await app.inject({
+        url: route,
+        headers: { cookie: otherCookie },
+      });
+      assert.equal(denied.statusCode, 401);
+      assert.ok(!denied.body.includes("Must stay in default campaign"));
+      assert.ok(!denied.body.includes(noteId));
+    }
+    assert.equal(
+      (
+        await app.inject({
+          url: "/api/live",
+          headers: { origin: "http://localhost", cookie: otherCookie },
+        })
+      ).statusCode,
+      401,
+    );
+    const current = await app.inject({
+      url: `/api/table?campaignId=${other.id}`,
+      headers: { cookie: original.cookie },
+    });
+    assert.equal(current.statusCode, 200);
+    assert.ok(current.body.includes("Must stay in default campaign"));
+    assert.ok(!current.body.includes("Must stay in other campaign"));
+    assert.ok(
+      !JSON.stringify(joined.messages).includes("Other campaign public clue"),
+    );
+    const invitation = invitationSchema.parse(
+      (await post(app, "invitations", { tableId: other.id }, gmCookie)).json(),
+    );
+    assert.equal(invitation.tableId, DEFAULT_CAMPAIGN_ID);
+    const restricted = access.createInvitation(otherHost.token);
+    assert.equal(
+      (
+        await post(app, "join", {
+          name: "Not enabled yet",
+          code: restricted.token,
+        })
+      ).statusCode,
+      400,
+    );
+    assert.ok(
+      access
+        .listInvitations(otherHost.token)
+        .some((item) => item.id === restricted.id),
+    );
+    const snapshotCount = joined.messages.filter(
+      (m) => m.type === "snapshot",
+    ).length;
+    const closed = once(joined.ws, "close");
+    const switched = access.selectCampaign(
+      sessionToken(original.cookie),
+      other.id,
+    );
+    assert.equal(access.authenticate(switched.token)?.tableId, other.id);
+    gm.ws.send(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "dice.roll",
+        expression: "d6",
+      }),
+    );
+    assert.equal((await closed)[0], 4001);
+    await waitForRoll(gm.messages);
+    assert.equal(
+      joined.messages.filter((m) => m.type === "snapshot").length,
+      snapshotCount,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          url: "/api/table",
+          headers: { cookie: original.cookie },
+        })
+      ).statusCode,
+      401,
+    );
+    await app.close();
+    app = await makeApp({ databasePath });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    assert.equal(access.authenticate(switched.token)?.tableId, other.id);
+    assert.equal(
+      (
+        await app.inject({
+          url: "/api/table",
+          headers: { cookie: `tableloom_session=${switched.token}` },
+        })
+      ).statusCode,
+      401,
+    );
+    assert.equal(
+      (await app.inject({ url: "/api/table", headers: { cookie: gmCookie } }))
+        .statusCode,
+      200,
+    );
+    assert.equal(
+      store.load(other.id).notes[0]?.body,
+      "Must stay in other campaign",
+    );
+  } finally {
+    for (const ws of sockets) ws.terminate();
+    await app.close();
+    access.close();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

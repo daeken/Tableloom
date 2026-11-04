@@ -56,7 +56,9 @@ export function App() {
   const { access, error: accessError, refresh, accept } = useAccess();
   const member = access?.member ?? null;
   const name = member?.name ?? null;
-  const viewerKey = member ? `${member.id}:${member.role}` : null;
+  const viewerKey = member
+    ? `${member.id}:${member.tableId}:${member.role}`
+    : null;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");

@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { DEFAULT_CAMPAIGN_ID } from "@tableloom/core/campaigns";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { commandSchema } from "@tableloom/core";
@@ -31,7 +33,6 @@ export async function createApp(options: {
     logger: options.logger ?? false,
     bodyLimit: 256 * 1024,
   });
-  const store = new TableStore(options.databasePath);
   const now = options.now ?? Date.now;
   let publicOrigin: string | undefined;
   if (options.publicOrigin) {
@@ -47,13 +48,29 @@ export async function createApp(options: {
       throw new Error("PUBLIC_ORIGIN must be the server's HTTP(S) origin.");
     publicOrigin = url.origin;
   }
-  const access = new AccessStore(options.databasePath, options.hostKey, now);
-  let state = store.load();
+  const database = new DatabaseSync(options.databasePath);
+  let store: TableStore;
+  let access: AccessStore;
+  let state: ReturnType<TableStore["load"]>;
+  try {
+    store = new TableStore(database);
+    access = new AccessStore(database, options.hostKey, now);
+    state = store.load();
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+  // Campaign selection is not exposed yet: never project the default table
+  // using a credential for a different campaign.
+  const authenticate = (token: string) => {
+    const member = access.authenticate(token);
+    return member?.tableId === DEFAULT_CAMPAIGN_ID ? member : null;
+  };
   const clients = new Map<WebSocket, string>();
   const sentVersions = new Map<WebSocket, string>();
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState !== 1) return;
-    if (!access.authenticate(clients.get(socket) ?? "")) {
+    if (!authenticate(clients.get(socket) ?? "")) {
       socket.close(4001, "Sign in to the table again.");
       return;
     }
@@ -67,7 +84,7 @@ export async function createApp(options: {
     for (const socket of clients.keys()) send(socket, message);
   };
   const sendSnapshot = (socket: WebSocket, force = false) => {
-    const member = access.authenticate(clients.get(socket) ?? "");
+    const member = authenticate(clients.get(socket) ?? "");
     if (!member) {
       socket.close(4001, "Sign in again.");
       return;
@@ -98,13 +115,13 @@ export async function createApp(options: {
     },
     disconnectInvalid: () => {
       for (const [socket, credential] of clients)
-        if (!access.authenticate(credential))
+        if (!authenticate(credential))
           socket.close(4001, "Your table access changed. Sign in again.");
     },
   });
   app.get("/api/health", async () => ({ status: "ok", protocolVersion: 4 }));
   app.get("/api/table", async (request, reply) => {
-    const member = access.authenticate(sessionToken(request.headers.cookie));
+    const member = authenticate(sessionToken(request.headers.cookie));
     if (!member)
       return reply.code(401).send({ error: "Sign in to the table first." });
     return projectTable(state, member);
@@ -116,13 +133,13 @@ export async function createApp(options: {
       preValidation: async (request, reply) => {
         if (!sameOrigin(request, publicOrigin))
           return reply.code(403).send({ error: "Origin is not allowed." });
-        if (!access.authenticate(sessionToken(request.headers.cookie)))
+        if (!authenticate(sessionToken(request.headers.cookie)))
           return reply.code(401).send({ error: "Sign in to the table first." });
       },
     },
     (socket, request) => {
       const credential = sessionToken(request.headers.cookie);
-      if (!access.authenticate(credential)) {
+      if (!authenticate(credential)) {
         socket.close(4001, "Sign in again.");
         return;
       }
@@ -136,7 +153,7 @@ export async function createApp(options: {
         alive = true;
       });
       const heartbeat = setInterval(() => {
-        if (!access.authenticate(credential)) {
+        if (!authenticate(credential)) {
           socket.close(4001, "Sign in again.");
           return;
         }
@@ -148,7 +165,7 @@ export async function createApp(options: {
         socket.ping();
       }, 30000);
       socket.on("message", (raw, isBinary) => {
-        const member = access.authenticate(credential);
+        const member = authenticate(credential);
         if (!member) {
           socket.close(4001, "Sign in again.");
           return;
@@ -213,6 +230,7 @@ export async function createApp(options: {
     for (const socket of clients.keys()) socket.terminate();
     store.close();
     access.close();
+    database.close();
   });
   return app;
 }

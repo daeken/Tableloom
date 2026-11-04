@@ -22,6 +22,7 @@ import type {
 import { moduleManifestSchema } from "@tableloom/module-sdk";
 import type { ModuleManifest } from "@tableloom/module-sdk";
 import { installedModules } from "./modules.js";
+import { transaction } from "./database.js";
 
 const campaignDataSchema = z
   .object({
@@ -51,8 +52,9 @@ const version = z.number().int().positive();
 export class TableStore {
   private readonly db: DatabaseSync;
   private readonly catalog: InstalledCatalog;
+  private readonly ownsConnection: boolean;
   constructor(
-    path: string,
+    path: string | DatabaseSync,
     catalog: InstalledCatalog = { systems: installedModules, contentPacks: [] },
   ) {
     this.catalog = {
@@ -70,12 +72,13 @@ export class TableStore {
       ).size !== this.catalog.contentPacks.length
     )
       throw new Error("Installed content pack versions must be unique.");
-    this.db = new DatabaseSync(path);
+    this.ownsConnection = typeof path === "string";
+    this.db = typeof path === "string" ? new DatabaseSync(path) : path;
     try {
       this.db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
       this.transaction(() => this.initialize());
     } catch (error) {
-      this.db.close();
+      if (this.ownsConnection) this.db.close();
       throw error;
     }
   }
@@ -385,7 +388,7 @@ export class TableStore {
     });
   }
   close(): void {
-    this.db.close();
+    if (this.ownsConnection) this.db.close();
   }
 
   private insertCampaign(
@@ -509,14 +512,6 @@ export class TableStore {
     );
   }
   private transaction<T>(action: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = action();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    return transaction(this.db, action);
   }
 }

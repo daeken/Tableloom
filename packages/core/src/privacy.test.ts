@@ -15,19 +15,19 @@ const alice: Member = {
   id: randomUUID(),
   name: "Alice",
   role: "player",
-  tableId: "main",
+  tableId: "00000000-0000-4000-8000-000000000001",
 };
 const bob: Member = {
   id: randomUUID(),
   name: "Bob",
   role: "player",
-  tableId: "main",
+  tableId: "00000000-0000-4000-8000-000000000001",
 };
 const gm: Member = {
   id: randomUUID(),
   name: "GM",
   role: "gm",
-  tableId: "main",
+  tableId: "00000000-0000-4000-8000-000000000001",
 };
 const roll = (
   state: TableState,

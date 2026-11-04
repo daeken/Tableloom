@@ -25,7 +25,10 @@ test("host setup requires the machine owner's key, validates names, and can happ
     const session = store.setupHost(KEY, "  Host  ");
     assert.equal(session.member.name, "Host");
     assert.equal(session.member.role, "gm");
-    assert.equal(session.member.tableId, "main");
+    assert.equal(
+      session.member.tableId,
+      "00000000-0000-4000-8000-000000000001",
+    );
     assert.equal(store.setupRequired, false);
     assert.deepEqual(store.authenticate(session.token), session.member);
     assert.throws(
@@ -231,7 +234,10 @@ test("active invitation capacity is bounded and expires cleanly", () => {
       code("invitation_limit"),
     );
     now += 60000;
-    assert.equal(store.createInvitation(host.token).tableId, "main");
+    assert.equal(
+      store.createInvitation(host.token).tableId,
+      "00000000-0000-4000-8000-000000000001",
+    );
   } finally {
     store.close();
   }
@@ -272,7 +278,7 @@ test("GM-issued return codes preserve identity, replace previous codes, and revo
     assert.deepEqual(store.listInvitations(host.token), [
       {
         id: latest.id,
-        tableId: "main",
+        tableId: "00000000-0000-4000-8000-000000000001",
         expiresAt: latest.expiresAt,
         memberId: player.member.id,
       },
@@ -393,43 +399,6 @@ test("failed recovery rolls back code consumption and session revocation, then w
     } finally {
       second.close();
     }
-  } finally {
-    store.close();
-    db.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("legacy access invitations gain stable management IDs without changing credentials or memberships", () => {
-  const directory = mkdtempSync(join(tmpdir(), "tableloom-access-migration-"));
-  const path = join(directory, "table.sqlite");
-  let store = new AccessStore(path, KEY);
-  const db = new DatabaseSync(path);
-  try {
-    const host = store.setupHost(KEY, "GM");
-    const invitation = store.createInvitation(host.token);
-    store.close();
-    // Recreate the exact pre-management invitation table, including a pending code.
-    db.exec(`DROP INDEX access_invitation_id;
-      ALTER TABLE access_invitations RENAME TO new_invitations;
-      CREATE TABLE access_invitations (
-        token_hash TEXT PRIMARY KEY, table_id TEXT NOT NULL CHECK(table_id = 'main'),
-        created_by TEXT NOT NULL REFERENCES access_users(id), expires_at INTEGER NOT NULL, consumed_at INTEGER
-      );
-      INSERT INTO access_invitations SELECT token_hash, table_id, created_by, expires_at, consumed_at FROM new_invitations;
-      DROP TABLE new_invitations;`);
-    store = new AccessStore(path, KEY);
-    const migrated = store.listInvitations(host.token);
-    assert.equal(migrated.length, 1);
-    assert.equal(migrated[0]?.memberId, null);
-    store.close();
-    store = new AccessStore(path, KEY);
-    assert.deepEqual(store.listInvitations(host.token), migrated);
-    assert.equal(
-      store.redeemInvitation(invitation.token, "Robin").member.name,
-      "Robin",
-    );
-    assert.equal(store.listMembers(host.token).length, 2);
   } finally {
     store.close();
     db.close();

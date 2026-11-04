@@ -8,7 +8,7 @@ const player = {
   id: randomUUID(),
   name: "Player",
   role: "player" as const,
-  tableId: "main" as const,
+  tableId: "00000000-0000-4000-8000-000000000001" as const,
 };
 
 test("dice expressions support defaults, whitespace, modifiers, and upper bounds", () => {

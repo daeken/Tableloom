@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AccessError, AccessStore } from "./access.js";
 import type { SessionGrant } from "./access.js";
+import { DEFAULT_CAMPAIGN_ID } from "@tableloom/core/campaigns";
 
 const COOKIE = "tableloom_session";
 export function sessionToken(cookie: string | undefined): string {
@@ -141,7 +142,9 @@ export function registerAccessRoutes(
     const body = z
       .object({ name, code: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })
       .parse(request.body);
-    const grant = access.redeemInvitation(body.code, body.name);
+    const grant = access.redeemInvitation(body.code, body.name, {
+      campaignId: DEFAULT_CAMPAIGN_ID,
+    });
     options.disconnectInvalid();
     reply.header("Set-Cookie", setSession(grant));
     return { setupRequired: false, member: grant.member };
