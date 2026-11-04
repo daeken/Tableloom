@@ -157,7 +157,7 @@ export function App() {
           >
             {copied ? <Check size={15} /> : <Users size={15} />}
             {member?.role === "gm"
-              ? "Invite player"
+              ? "Invite & players"
               : copied
                 ? "Link copied"
                 : "Copy table link"}

@@ -364,3 +364,246 @@ test("sign-in attempts are bounded per IP and recover after the window", async (
     await app.close();
   }
 });
+
+test("GM member management restores ownership/private notes, revokes codes, and disconnects replaced or removed sessions", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { membersSchema, invitationsSchema } =
+    await import("@tableloom/core/access");
+  const { tableViewSchema } = await import("@tableloom/core");
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-members-api-"));
+  const databasePath = join(directory, "table.sqlite");
+  let app = await makeApp({ databasePath });
+  const sockets: WebSocket[] = [];
+  const read = (route: string, cookie = "") =>
+    app.inject({ url: `/api/${route}`, headers: { cookie } });
+  async function until(check: () => boolean) {
+    const deadline = Date.now() + 3000;
+    while (!check()) {
+      if (Date.now() > deadline)
+        throw new Error("No expected member snapshot arrived");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = await setup(app);
+    const gmId = accessStatusSchema.parse((await read("access", gm)).json())
+      .member!.id;
+    const original = await player(app, gm);
+    const other = await player(app, gm);
+    const originalMember = accessStatusSchema.parse(
+      (await read("access", original.cookie)).json(),
+    ).member!;
+    const before = await socket(url, original.cookie);
+    sockets.push(before.ws);
+    const tokenId = crypto.randomUUID();
+    const noteId = crypto.randomUUID();
+    before.ws.send(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "token.add",
+        token: {
+          id: tokenId,
+          name: "Robin's marker",
+          position: { x: 0, y: 0 },
+          color: "#456789",
+        },
+      }),
+    );
+    before.ws.send(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "note.add",
+        note: {
+          id: noteId,
+          title: "Recovered private note",
+          body: "Only the original owner",
+          visibility: "gm",
+        },
+      }),
+    );
+    before.ws.send(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "dice.roll",
+        expression: "d17",
+        visibility: "gm",
+      }),
+    );
+    await until(() =>
+      before.messages.some(
+        (m) =>
+          m.type === "snapshot" &&
+          m.state.notes.length === 1 &&
+          m.state.rolls.length === 1,
+      ),
+    );
+    for (const cookie of ["", original.cookie]) {
+      for (const route of ["access/members", "access/invitations"]) {
+        assert.equal(
+          (await read(route, cookie)).statusCode,
+          cookie ? 403 : 401,
+        );
+      }
+      assert.equal(
+        (await post(app, `members/${originalMember.id}/recovery`, {}, cookie))
+          .statusCode,
+        cookie ? 403 : 401,
+      );
+      assert.equal(
+        (await post(app, `members/${originalMember.id}/remove`, {}, cookie))
+          .statusCode,
+        cookie ? 403 : 401,
+      );
+    }
+    assert.equal(
+      (await post(app, `members/${gmId}/remove`, {}, gm)).statusCode,
+      403,
+    );
+    assert.equal(
+      (await post(app, `members/${gmId}/recovery`, {}, gm)).statusCode,
+      400,
+    );
+    const recoveryResponse = await post(
+      app,
+      `members/${originalMember.id}/recovery`,
+      {},
+      gm,
+    );
+    assert.equal(recoveryResponse.statusCode, 200);
+    const recovery = invitationSchema.parse(recoveryResponse.json());
+    const listedResponse = await read("access/invitations", gm);
+    assert.equal(listedResponse.headers["cache-control"], "no-store");
+    const listed = invitationsSchema.parse(listedResponse.json());
+    assert.equal(listed[0]?.memberId, originalMember.id);
+    assert.ok(!listedResponse.body.includes(recovery.token));
+    assert.ok(!listedResponse.body.includes("token_hash"));
+    assert.equal(
+      (
+        await post(
+          app,
+          `invitations/${recovery.id}/revoke`,
+          {},
+          original.cookie,
+        )
+      ).statusCode,
+      403,
+    );
+    const closed = once(before.ws, "close");
+    const restored = await post(app, "join", {
+      name: "Cannot rename or become GM",
+      code: recovery.token,
+    });
+    assert.equal(restored.statusCode, 200);
+    assert.deepEqual(
+      accessStatusSchema.parse(restored.json()).member,
+      originalMember,
+    );
+    const returnedCookie = getCookie(restored);
+    assert.equal((await closed)[0], 4001);
+    assert.equal((await read("table", original.cookie)).statusCode, 401);
+    assert.equal(
+      (await post(app, "join", { name: "Replay", code: recovery.token }))
+        .statusCode,
+      400,
+    );
+    assert.equal(
+      membersSchema.parse((await read("access/members", gm)).json()).length,
+      3,
+    );
+    const returned = await socket(url, returnedCookie);
+    sockets.push(returned.ws);
+    await until(() =>
+      returned.messages.some(
+        (m) =>
+          m.type === "snapshot" &&
+          m.state.notes[0]?.id === noteId &&
+          m.state.rolls[0]?.ownerId === originalMember.id,
+      ),
+    );
+    assert.equal(
+      tableViewSchema.parse((await read("table", other.cookie)).json()).notes
+        .length,
+      0,
+    );
+    assert.equal(
+      tableViewSchema.parse((await read("table", other.cookie)).json()).rolls
+        .length,
+      0,
+    );
+    returned.ws.send(
+      JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "token.move",
+        tokenId,
+        position: { x: 10, y: 20 },
+      }),
+    );
+    await until(() =>
+      returned.messages.some(
+        (m) => m.type === "snapshot" && m.state.tokens[0]?.position.x === 10,
+      ),
+    );
+    const unused = invitationSchema.parse(
+      (await post(app, "invitations", {}, gm)).json(),
+    );
+    assert.equal(
+      (await post(app, `invitations/${unused.id}/revoke`, {}, gm)).statusCode,
+      200,
+    );
+    assert.equal(
+      (await post(app, "join", { name: "Too late", code: unused.token }))
+        .statusCode,
+      400,
+    );
+    const pending = invitationSchema.parse(
+      (await post(app, `members/${originalMember.id}/recovery`, {}, gm)).json(),
+    );
+    const removed = once(returned.ws, "close");
+    assert.equal(
+      (await post(app, `members/${originalMember.id}/remove`, {}, gm))
+        .statusCode,
+      200,
+    );
+    assert.equal((await removed)[0], 4001);
+    assert.equal((await read("table", returnedCookie)).statusCode, 401);
+    assert.equal(
+      (await post(app, "join", { name: "Removed", code: pending.token }))
+        .statusCode,
+      400,
+    );
+    assert.equal(
+      membersSchema.parse((await read("access/members", gm)).json()).length,
+      2,
+    );
+    await app.close();
+    app = await makeApp({ databasePath });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gmView = tableViewSchema.parse((await read("table", gm)).json());
+    assert.equal(gmView.notes[0]?.ownerId, originalMember.id);
+    assert.equal(gmView.rolls[0]?.ownerId, originalMember.id);
+    assert.equal(gmView.tokens[0]?.position.x, 10);
+    const fresh = await player(app, gm);
+    const freshView = tableViewSchema.parse(
+      (await read("table", fresh.cookie)).json(),
+    );
+    assert.equal(freshView.notes.length, 0);
+    assert.equal(freshView.rolls.length, 0);
+    const freshId = accessStatusSchema.parse(
+      (await read("access", fresh.cookie)).json(),
+    ).member!.id;
+    assert.notEqual(freshId, originalMember.id);
+    assert.equal(freshView.tokens[0]?.ownerId, originalMember.id);
+    assert.equal(
+      invitationsSchema.parse((await read("access/invitations", gm)).json())
+        .length,
+      0,
+    );
+  } finally {
+    for (const ws of sockets) ws.terminate();
+    await app.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

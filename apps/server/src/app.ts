@@ -98,6 +98,11 @@ export async function createApp(options: {
         if (credential === token)
           socket.close(4001, "You signed out of the table.");
     },
+    disconnectInvalid: () => {
+      for (const [socket, credential] of clients)
+        if (!access.authenticate(credential))
+          socket.close(4001, "Your table access changed. Sign in again.");
+    },
   });
   app.get("/api/health", async () => ({ status: "ok", protocolVersion: 4 }));
   app.get("/api/table", async (request, reply) => {

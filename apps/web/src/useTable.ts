@@ -60,9 +60,10 @@ export function useTable(
         if (event.code === 4001) {
           setSnapshot(null);
           setParticipants(0);
-          void onUnauthorized();
-          return;
         }
+        // Another tab may have replaced the cookie with a return-code session
+        // for the same identity. Refresh access and retry; sign-out/removal
+        // changes viewerKey to null and cleanup cancels this pending reconnect.
         void onUnauthorized();
         retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15000));
       };

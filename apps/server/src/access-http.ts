@@ -46,6 +46,7 @@ export function registerAccessRoutes(
     secureCookies: boolean;
     now: () => number;
     disconnect: (token: string) => void;
+    disconnectInvalid: () => void;
   },
 ) {
   const attempts = new Map<string, { started: number; count: number }>();
@@ -141,6 +142,7 @@ export function registerAccessRoutes(
       .object({ name, code: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })
       .parse(request.body);
     const grant = access.redeemInvitation(body.code, body.name);
+    options.disconnectInvalid();
     reply.header("Set-Cookie", setSession(grant));
     return { setupRequired: false, member: grant.member };
   });
@@ -157,4 +159,30 @@ export function registerAccessRoutes(
   app.post("/api/access/invitations", async (request) =>
     access.createInvitation(sessionToken(request.headers.cookie)),
   );
+  app.get("/api/access/members", async (request) =>
+    access.listMembers(sessionToken(request.headers.cookie)),
+  );
+  app.get("/api/access/invitations", async (request) =>
+    access.listInvitations(sessionToken(request.headers.cookie)),
+  );
+  const paramId = (request: FastifyRequest) =>
+    z.object({ id: z.uuid() }).strict().parse(request.params).id;
+  app.post("/api/access/members/:id/recovery", async (request) =>
+    access.createRecoveryInvitation(
+      sessionToken(request.headers.cookie),
+      paramId(request),
+    ),
+  );
+  app.post("/api/access/members/:id/remove", async (request) => {
+    access.removeMember(sessionToken(request.headers.cookie), paramId(request));
+    options.disconnectInvalid();
+    return { ok: true };
+  });
+  app.post("/api/access/invitations/:id/revoke", async (request) => {
+    access.revokeInvitation(
+      sessionToken(request.headers.cookie),
+      paramId(request),
+    );
+    return { ok: true };
+  });
 }

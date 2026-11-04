@@ -6,7 +6,11 @@ import {
 } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { memberSchema } from "@tableloom/core/access";
+import {
+  memberSchema,
+  membersSchema,
+  invitationsSchema,
+} from "@tableloom/core/access";
 import type { Member } from "@tableloom/core/access";
 export type { Member } from "@tableloom/core/access";
 
@@ -23,6 +27,7 @@ export interface SessionGrant {
   expiresAt: number;
 }
 export interface InvitationGrant {
+  id: string;
   /** Shown once to the host; the database stores only its hash. */
   token: string;
   expiresAt: number;
@@ -39,6 +44,7 @@ const messages = {
   invitation_limit: "This table already has 100 active invitations.",
   member_limit: "This table has reached its member limit.",
   host_removal: "The host cannot be removed from the table.",
+  invalid_member: "Choose an existing player at this table.",
 } as const;
 export class AccessError extends Error {
   constructor(public readonly code: keyof typeof messages) {
@@ -101,6 +107,28 @@ export class AccessStore {
         consumed_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS access_invitations_expiry ON access_invitations(expires_at);`);
+    // Add management IDs and optional recovery targets to existing access databases.
+    // Keep credentials hashed; opaque management IDs cannot redeem an invitation.
+    this.transaction(() => {
+      const columns = this.db
+        .prepare("PRAGMA table_info(access_invitations)")
+        .all();
+      if (!columns.some((column) => column.name === "id"))
+        this.db.exec("ALTER TABLE access_invitations ADD COLUMN id TEXT");
+      if (!columns.some((column) => column.name === "target_user_id"))
+        this.db.exec(
+          "ALTER TABLE access_invitations ADD COLUMN target_user_id TEXT REFERENCES access_users(id)",
+        );
+      for (const row of this.db
+        .prepare("SELECT token_hash FROM access_invitations WHERE id IS NULL")
+        .all())
+        this.db
+          .prepare("UPDATE access_invitations SET id = ? WHERE token_hash = ?")
+          .run(randomUUID(), String(row.token_hash));
+      this.db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS access_invitation_id ON access_invitations(id)",
+      );
+    });
   }
 
   get setupRequired(): boolean {
@@ -161,10 +189,73 @@ export class AccessStore {
   }
 
   createInvitation(sessionToken: string, lifetime = DAY): InvitationGrant {
+    return this.issueInvitation(sessionToken, null, lifetime);
+  }
+
+  /** The GM selects the identity. Names supplied by the returning player cannot retarget it. */
+  createRecoveryInvitation(
+    sessionToken: string,
+    memberId: string,
+    lifetime = DAY,
+  ): InvitationGrant {
+    z.uuid().parse(memberId);
+    return this.issueInvitation(sessionToken, memberId, lifetime);
+  }
+
+  listMembers(sessionToken: string): Member[] {
+    this.requireHost(sessionToken);
+    return membersSchema.parse(
+      this.db
+        .prepare(
+          `SELECT u.id, u.name, m.table_id AS tableId, m.role
+      FROM access_memberships m JOIN access_users u ON m.user_id = u.id
+      WHERE m.table_id = ? ORDER BY u.created_at, u.id`,
+        )
+        .all(TABLE_ID),
+    );
+  }
+
+  listInvitations(sessionToken: string) {
+    this.requireHost(sessionToken);
+    return invitationsSchema.parse(
+      this.db
+        .prepare(
+          `SELECT id, table_id AS tableId, expires_at AS expiresAt,
+      target_user_id AS memberId FROM access_invitations
+      WHERE table_id = ? AND consumed_at IS NULL AND expires_at > ? ORDER BY expires_at, id`,
+        )
+        .all(TABLE_ID, this.now()),
+    );
+  }
+
+  revokeInvitation(sessionToken: string, invitationId: string): void {
+    this.requireHost(sessionToken);
+    z.uuid().parse(invitationId);
+    this.db
+      .prepare("DELETE FROM access_invitations WHERE id = ? AND table_id = ?")
+      .run(invitationId, TABLE_ID);
+  }
+
+  private issueInvitation(
+    sessionToken: string,
+    memberId: string | null,
+    lifetime: number,
+  ): InvitationGrant {
     z.number().int().min(60000).max(MAX_INVITATION_LIFETIME).parse(lifetime);
     return this.transaction(() => {
       const host = this.requireHost(sessionToken);
       this.prune();
+      if (memberId !== null) {
+        const member = this.findMember(memberId);
+        if (!member || member.role !== "player")
+          throw new AccessError("invalid_member");
+        // Only the latest recovery code for an identity remains usable.
+        this.db
+          .prepare(
+            "DELETE FROM access_invitations WHERE table_id = ? AND target_user_id = ?",
+          )
+          .run(TABLE_ID, memberId);
+      }
       const count = this.db
         .prepare(
           "SELECT COUNT(*) AS count FROM access_invitations WHERE table_id = ? AND consumed_at IS NULL",
@@ -173,13 +264,14 @@ export class AccessStore {
       if (Number(count?.count) >= 100)
         throw new AccessError("invitation_limit");
       const token = newToken();
+      const id = randomUUID();
       const expiresAt = this.now() + lifetime;
       this.db
         .prepare(
-          "INSERT INTO access_invitations (token_hash, table_id, created_by, expires_at) VALUES (?, ?, ?, ?)",
+          "INSERT INTO access_invitations (token_hash, table_id, created_by, expires_at, id, target_user_id) VALUES (?, ?, ?, ?, ?, ?)",
         )
-        .run(hash(token), TABLE_ID, host.id, expiresAt);
-      return { token, expiresAt, tableId: TABLE_ID };
+        .run(hash(token), TABLE_ID, host.id, expiresAt, id, memberId);
+      return { id, token, expiresAt, tableId: TABLE_ID };
     });
   }
 
@@ -193,12 +285,26 @@ export class AccessStore {
       const result = this.db
         .prepare(
           `UPDATE access_invitations SET consumed_at = ?
-        WHERE token_hash = ? AND table_id = ? AND consumed_at IS NULL AND expires_at > ?`,
+        WHERE token_hash = ? AND table_id = ? AND consumed_at IS NULL AND expires_at > ?
+        RETURNING target_user_id`,
         )
-        .run(this.now(), hash(token), TABLE_ID, this.now());
-      if (Number(result.changes) !== 1)
-        throw new AccessError("invalid_invitation");
-      const member = this.addMember(parsedName, "player");
+        .get(this.now(), hash(token), TABLE_ID, this.now());
+      if (!result) throw new AccessError("invalid_invitation");
+      let member: Member;
+      if (result.target_user_id !== null) {
+        const existing = this.findMember(z.uuid().parse(result.target_user_id));
+        if (!existing || existing.role !== "player")
+          throw new AccessError("invalid_invitation");
+        member = existing;
+        // Recovery replaces lost-device sessions atomically with code consumption.
+        this.db
+          .prepare(
+            "DELETE FROM access_sessions WHERE user_id = ? AND table_id = ?",
+          )
+          .run(member.id, TABLE_ID);
+      } else {
+        member = this.addMember(parsedName, "player");
+      }
       return this.createSession(member);
     });
   }
@@ -209,6 +315,11 @@ export class AccessStore {
     this.transaction(() => {
       const host = this.requireHost(sessionToken);
       if (memberId === host.id) throw new AccessError("host_removal");
+      this.db
+        .prepare(
+          "DELETE FROM access_invitations WHERE target_user_id = ? AND table_id = ?",
+        )
+        .run(memberId, TABLE_ID);
       this.db
         .prepare(
           "DELETE FROM access_memberships WHERE user_id = ? AND table_id = ?",
@@ -236,6 +347,17 @@ export class AccessStore {
     if (!member) throw new AccessError("sign_in_required");
     if (member.role !== "gm") throw new AccessError("host_required");
     return member;
+  }
+
+  private findMember(id: string): Member | null {
+    const row = this.db
+      .prepare(
+        `SELECT u.id, u.name, m.table_id AS tableId, m.role
+      FROM access_users u JOIN access_memberships m ON u.id = m.user_id
+      WHERE u.id = ? AND m.table_id = ?`,
+      )
+      .get(id, TABLE_ID);
+    return row ? memberSchema.parse(row) : null;
   }
 
   private addMember(name: string, role: Member["role"]): Member {

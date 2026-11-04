@@ -93,7 +93,7 @@ export function AccessGate({
                 ? "Set up the host using the private key saved on your server."
                 : mode === "recover"
                   ? "Use your server's private host key to return to your existing host account."
-                  : "Your host has a seat waiting. Enter your one-use invitation code to join."}
+                  : "Enter a new-player invitation or a return code from your host. A return code restores your original name and ownership."}
             </p>
             {mode !== "recover" && (
               <>
@@ -155,7 +155,7 @@ export function AccessGate({
             )}
             <small>
               {mode === "join"
-                ? "Your session stays in this browser. Keep your invitation private."
+                ? "Returning player? Ask the host for a return code for your existing seat. Your name here is used only for new-player invitations."
                 : "Find the key in your server's data/host-key file, or use the key configured by the server owner."}
             </small>
           </>

@@ -236,3 +236,203 @@ test("active invitation capacity is bounded and expires cleanly", () => {
     store.close();
   }
 });
+
+test("GM-issued return codes preserve identity, replace previous codes, and revoke old sessions only on use", () => {
+  const store = new AccessStore(":memory:", KEY);
+  try {
+    const host = store.setupHost(KEY, "GM");
+    const player = store.redeemInvitation(
+      store.createInvitation(host.token).token,
+      "Robin",
+    );
+    assert.throws(() => store.listMembers(player.token), code("host_required"));
+    assert.throws(
+      () => store.listInvitations(player.token),
+      code("host_required"),
+    );
+    assert.throws(
+      () => store.createRecoveryInvitation(player.token, player.member.id),
+      code("host_required"),
+    );
+    assert.throws(
+      () => store.createRecoveryInvitation(host.token, host.member.id),
+      code("invalid_member"),
+    );
+    assert.throws(
+      () => store.createRecoveryInvitation(host.token, crypto.randomUUID()),
+      code("invalid_member"),
+    );
+    const old = store.createRecoveryInvitation(host.token, player.member.id);
+    const latest = store.createRecoveryInvitation(host.token, player.member.id);
+    assert.deepEqual(store.authenticate(player.token), player.member);
+    assert.throws(
+      () => store.redeemInvitation(old.token, "Impostor"),
+      code("invalid_invitation"),
+    );
+    assert.deepEqual(store.listInvitations(host.token), [
+      {
+        id: latest.id,
+        tableId: "main",
+        expiresAt: latest.expiresAt,
+        memberId: player.member.id,
+      },
+    ]);
+    assert.ok(
+      !JSON.stringify(store.listInvitations(host.token)).includes(latest.token),
+    );
+    assert.throws(
+      () => store.revokeInvitation(player.token, latest.id),
+      code("host_required"),
+    );
+    // Even knowing a management ID cannot redeem a code.
+    assert.throws(
+      () => store.redeemInvitation(latest.id, "Robin"),
+      code("invalid_invitation"),
+    );
+    const recovered = store.redeemInvitation(latest.token, "A different name");
+    assert.deepEqual(recovered.member, player.member);
+    assert.equal(store.authenticate(player.token), null);
+    assert.deepEqual(store.authenticate(recovered.token), player.member);
+    assert.equal(store.listMembers(host.token).length, 2);
+    assert.equal(store.listInvitations(host.token).length, 0);
+    assert.throws(
+      () => store.redeemInvitation(latest.token, "Again"),
+      code("invalid_invitation"),
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("revoking invitations or removing members invalidates return codes without deleting other identities", () => {
+  let now = 1000000;
+  const store = new AccessStore(":memory:", KEY, () => now);
+  try {
+    const host = store.setupHost(KEY, "GM");
+    const invitation = store.createInvitation(host.token);
+    store.revokeInvitation(host.token, invitation.id);
+    store.revokeInvitation(host.token, invitation.id); // idempotent
+    assert.throws(
+      () => store.redeemInvitation(invitation.token, "Robin"),
+      code("invalid_invitation"),
+    );
+    const player = store.redeemInvitation(
+      store.createInvitation(host.token).token,
+      "Robin",
+    );
+    const expiring = store.createRecoveryInvitation(
+      host.token,
+      player.member.id,
+      60000,
+    );
+    now = expiring.expiresAt;
+    assert.equal(store.listInvitations(host.token).length, 0);
+    assert.throws(
+      () => store.redeemInvitation(expiring.token, "Robin"),
+      code("invalid_invitation"),
+    );
+    const recovery = store.createRecoveryInvitation(
+      host.token,
+      player.member.id,
+    );
+    store.removeMember(host.token, player.member.id);
+    assert.throws(
+      () => store.redeemInvitation(recovery.token, "Robin"),
+      code("invalid_invitation"),
+    );
+    assert.throws(
+      () => store.createRecoveryInvitation(host.token, player.member.id),
+      code("invalid_member"),
+    );
+    assert.deepEqual(store.listMembers(host.token), [host.member]);
+    const fresh = store.redeemInvitation(
+      store.createInvitation(host.token).token,
+      "Robin",
+    );
+    assert.notEqual(fresh.member.id, player.member.id);
+  } finally {
+    store.close();
+  }
+});
+
+test("failed recovery rolls back code consumption and session revocation, then works across restart", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-return-rollback-"));
+  const path = join(directory, "table.sqlite");
+  let store = new AccessStore(path, KEY);
+  const db = new DatabaseSync(path);
+  try {
+    const host = store.setupHost(KEY, "GM");
+    const player = store.redeemInvitation(
+      store.createInvitation(host.token).token,
+      "Robin",
+    );
+    const recovery = store.createRecoveryInvitation(
+      host.token,
+      player.member.id,
+    );
+    db.exec(
+      "CREATE TRIGGER reject_return_session BEFORE INSERT ON access_sessions BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
+    );
+    assert.throws(() => store.redeemInvitation(recovery.token, "Ignored"));
+    assert.deepEqual(store.authenticate(player.token), player.member);
+    assert.equal(store.listInvitations(host.token).length, 1);
+    db.exec("DROP TRIGGER reject_return_session");
+    store.close();
+    store = new AccessStore(path, KEY);
+    const second = new AccessStore(path, KEY);
+    try {
+      assert.deepEqual(
+        second.redeemInvitation(recovery.token, "Ignored").member,
+        player.member,
+      );
+      assert.equal(store.authenticate(player.token), null);
+      assert.throws(
+        () => store.redeemInvitation(recovery.token, "Again"),
+        code("invalid_invitation"),
+      );
+    } finally {
+      second.close();
+    }
+  } finally {
+    store.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy access invitations gain stable management IDs without changing credentials or memberships", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-access-migration-"));
+  const path = join(directory, "table.sqlite");
+  let store = new AccessStore(path, KEY);
+  const db = new DatabaseSync(path);
+  try {
+    const host = store.setupHost(KEY, "GM");
+    const invitation = store.createInvitation(host.token);
+    store.close();
+    // Recreate the exact pre-management invitation table, including a pending code.
+    db.exec(`DROP INDEX access_invitation_id;
+      ALTER TABLE access_invitations RENAME TO new_invitations;
+      CREATE TABLE access_invitations (
+        token_hash TEXT PRIMARY KEY, table_id TEXT NOT NULL CHECK(table_id = 'main'),
+        created_by TEXT NOT NULL REFERENCES access_users(id), expires_at INTEGER NOT NULL, consumed_at INTEGER
+      );
+      INSERT INTO access_invitations SELECT token_hash, table_id, created_by, expires_at, consumed_at FROM new_invitations;
+      DROP TABLE new_invitations;`);
+    store = new AccessStore(path, KEY);
+    const migrated = store.listInvitations(host.token);
+    assert.equal(migrated.length, 1);
+    assert.equal(migrated[0]?.memberId, null);
+    store.close();
+    store = new AccessStore(path, KEY);
+    assert.deepEqual(store.listInvitations(host.token), migrated);
+    assert.equal(
+      store.redeemInvitation(invitation.token, "Robin").member.name,
+      "Robin",
+    );
+    assert.equal(store.listMembers(host.token).length, 2);
+  } finally {
+    store.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

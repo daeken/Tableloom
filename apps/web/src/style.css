@@ -1330,3 +1330,69 @@ p {
   font-size: 11px;
   line-height: 1.9;
 }
+
+.access-management {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+.access-management h1 {
+  font-size: 32px;
+}
+.access-management h2 {
+  font-size: 15px;
+  margin: 12px 0;
+}
+.access-management button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.access-section,
+.issued-code {
+  margin-top: 24px;
+  border-top: 1px solid #d6dcc8;
+  padding-top: 12px;
+}
+.access-management .access-section p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.access-list {
+  list-style: none;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.access-list li {
+  padding: 12px 0;
+  border-bottom: 1px solid #d6dcc8;
+  font-size: 12px;
+}
+.access-list small {
+  display: block;
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+.access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.access-section button {
+  font: inherit;
+  font-size: 11px;
+  padding: 7px 10px;
+  background: #edf0e3;
+  color: #405535;
+  border: 1px solid #cdd6c0;
+  border-radius: 4px;
+}
+.remove-confirm {
+  padding: 10px;
+  margin-top: 10px;
+  background: #f5eadb;
+}
+.remove-confirm button {
+  margin-right: 8px;
+}

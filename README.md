@@ -2,7 +2,7 @@
 
 A self-hosted, web-based virtual tabletop for the systems you actually play. TypeScript throughout, a shared sketchable battlefield, and code-first game modules with custom sheets, rules, and content packs.
 
-**Status:** authenticated tabletop with object permissions, private rolls, and shared/private note documents. Player recovery and member management are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
+**Status:** authenticated tabletop with object permissions, private rolls, and shared/private note documents. Returning-player recovery and member/invitation management are available; GM ownership reassignment is next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
 
 ## Run locally
 
@@ -15,9 +15,9 @@ npm run dev
 
 Open http://localhost:5173. On first launch, create the host using the private key in `data/host-key` (or your configured `TABLELOOM_HOST_KEY`). The server prints the file location, never the key itself. Keep this key private: it can also recover the host identity after signing out or losing a session. Existing prototype scene data is retained.
 
-Once signed in, the host can choose **Invite player**, create a one-use code, and share the table address and code with a friend. The friend enters a name and that code. Use separate browser profiles to test independent identities; ordinary tabs share a browser session. A player cannot create invitations.
+Once signed in, the host can choose **Invite & players**, create a one-use code, and share the table address and code with a friend. The friend enters a name and that code. Use separate browser profiles to test independent identities; ordinary tabs share a browser session. A player cannot create invitations.
 
-Sessions last seven days and survive server restarts. Signing out revokes the session and clears the browser table. The host can select **I'm the host** to recover access with the private key. Returning players currently need a new invitation after signing out or session expiry, which creates a new identity; identity-preserving player recovery is queued.
+Sessions last seven days and survive server restarts. Signing out revokes the session and clears the browser table. The host can select **I'm the host** to recover access with the private key. For a returning player, the GM opens **Invite & players** and chooses **Create return code** beside their existing membership. The player enters that code on the same join screen; their original identity, name, object ownership, private notes, and private rolls are preserved. The name entered on the join screen is used only for new-player invitations. Issuing a new return code replaces that player’s previous unused return code; using it signs out all of their previous sessions. Codes expire after one day and work once. Names alone never recover an identity.
 
 The development server proxies `/api` and the WebSocket to Fastify on port 3001. The prototype uses one shared table. SQLite data lives in `data/tableloom.sqlite` (ignored by Git).
 
@@ -37,7 +37,7 @@ The **Notes** panel supports plain-text documents. **New** creates a private not
 
 Note edits require **Save changes**. Unsaved drafts stay in memory when switching notes/tabs and through unrelated table updates; save before reloading or signing out. Clean editors follow remote saves. If another editor saves while you have a draft, your draft is retained and stale saves/deletes are blocked until you explicitly reload the latest version. Notes are limited to 100 per table, 120 characters per title, and 10,000 characters per body.
 
-Backup of the private host key and identity-preserving player recovery still need a complete recovery workflow. Module-backed character documents, rich text, attachments, note ownership reassignment, and version history are not implemented yet.
+The GM can list members and unused codes, revoke codes, and remove players in **Invite & players**. Member/code lists never return saved bearer credentials; a newly issued code is displayed only in its issuing dialog. Removing a player immediately revokes their sessions and return codes. Their existing objects, notes, and rolls remain stored and available to the GM; removal does not reassign or publish them. A fresh invitation creates a different identity, even with the same name. The host cannot be removed. Backing up the private host key still needs a complete backup/recovery procedure. Module-backed character documents, rich text, attachments, note ownership reassignment, and version history are not implemented yet.
 
 ## Architecture
 
@@ -87,6 +87,8 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
   - [x] Separate internal state from per-member client views; implement persistent private rolls and visibility controls, with raw-wire/HTTP/retry/reconnect/restart leakage tests.
   - [x] Add bounded private/public note documents, GM notes, authorization, migrations, and a notes editor; include document visibility changes/deletion in recipient-filtering tests.
 - [ ] Add identity-preserving returning-player recovery, member management, invitation revocation, and GM ownership reassignment APIs/UI.
+  - [x] Add GM-managed returning-player codes, member listing/removal, and pending-invitation listing/revocation, with APIs/UI and identity/privacy/session/migration tests.
+  - [ ] Add GM ownership reassignment for scene objects and notes, validate recipient membership, and make private-note audience changes explicit.
 - [ ] Add multiple campaigns/scenes, campaign settings, and pinned system/content-pack versions.
 - [ ] Add normalized, module-backed document storage with schema migrations; add roll-history archive/cleanup controls and avoid unlimited snapshot growth.
 - [ ] Add graceful reconnect behavior for concurrent edits, protocol versions, conflict feedback, and backpressure.
@@ -100,7 +102,7 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
 - [ ] Add note history/trash and richer document content after the basic campaign workflow is playtested.
 - [ ] Extend the participant count into named presence; add transient cursors, chat, and roll visibility controls.
 - [ ] Improve touch/keyboard accessibility and verify narrow-screen layouts.
-- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 646 kB before gzip).
+- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 649 kB before gzip).
 
 ### 3 — Module development and character sheets
 
@@ -185,6 +187,16 @@ The **Keep building Tableloom** heartbeat is active every five minutes in this C
 - Verification: `npm run check` passed with **44 tests**, strict typecheck, production builds, and the authenticated distribution smoke check. New tests cover note read/write matrices, bounds, ownership spoofing/collisions, stale writes, and private-roll-preserving migration. A real GM/Alice/Bob WebSocket/HTTP test inspects raw payloads across private creation/editing, explicit publication, retraction, guessed IDs/versions, retries of formerly public commands, public/private deletion, reconnect, and database/server restart.
 - Browser QA used an isolated temporary database and synthetic host key: created/saved a private note, kept a draft across tabs and an unrelated roll, published/retracted the note, verified persistence on reload, and tested two simultaneous editors. A clean editor followed the other window's save; an unsaved editor retained its text and blocked stale save/delete until explicit reload. Test browsers/server and temporary data were cleaned up; normal campaign data was untouched.
 - The privacy checklist item is complete for plain-text note documents and dice results. Module-backed character documents, note history/trash, ownership reassignment, richer content, and identity-preserving player recovery remain queued. Next: returning-player recovery and member/invitation management. No rulebook mechanics or catalog content were added; no deployment occurred. Existing third-party annotation/bundle-size notices remain.
+
+### 2026-11-04 — Returning players and access management
+
+- Added GM-issued single-use return codes targeting an existing player membership. Redemption preserves the original UUID/name, object ownership, private notes, and private rolls; a supplied name cannot select or rename the identity. A new code replaces prior unused return codes for that player. Redemption atomically consumes the code, revokes previous sessions, and creates a replacement session; failed writes roll everything back.
+- Added authenticated GM-only member listing/removal, pending-code listing/revocation, and recovery-code APIs. Removal immediately disconnects affected live sockets, revokes all sessions/return codes, and preserves owned scene data without transferring or publishing it. Hosts cannot be removed or recovered using player codes. Management lists contain opaque UUIDs and expiry/target metadata, never reusable tokens or token hashes.
+- Expanded **Invite & players** into a member/code management dialog, with private one-time code display/copy, return-code controls, explicit removal confirmation/cancellation, code revocation, and refresh. The join screen explains returning-player recovery. A revoked/used code disappears on refresh; the dialog does not poll for external changes. Existing tabs clear their snapshot on revoked sessions and retry after refreshing access, allowing a replaced same-identity cookie to reconnect without replaying mutations.
+- Added an atomic access-database upgrade that assigns stable management IDs to existing invitations and initializes their recovery target as empty. Old invitation tokens, sessions, memberships, host identity, and table schema/protocol 4 remain compatible. No new dependencies or published rules/content were added.
+- Verification: `npm run check` passed with **49 tests**, strict typecheck, frontend/server builds, and production startup/assets/authentication/shutdown smoke verification. New tests cover GM/player/anonymous access, identity/name preservation, management IDs that cannot redeem codes, replacement/revocation/expiry/replay, membership removal, cross-connection restart, legacy-access migration, and forced session-insert rollback that preserves both the unused code and previous sessions. A real WebSocket/API test recovers a private note and editable token under the same owner, immediately closes replaced/removed sessions, checks another player's filtered view, and verifies retained ownership after server/database restart.
+- Browser QA used a separate temporary database and synthetic host key: recovered the GM, listed existing members, created/revoked a return code, inspected/cancelled player removal, and redeemed a fresh return code under a different entered name. The original player name and editable private journal were restored. Test browser/server/data were cleaned up; normal campaign data was untouched.
+- Remaining scope: the parent access-management item stays unchecked until GM ownership reassignment is implemented. Removed identities cannot be restored through this UI; their data stays GM-accessible, and reassignment is next. There is still one table, no self-service player recovery or member renaming/role changes, no backup/restore workflow, and no rulebook mechanics or catalog content. Existing third-party annotation and approximately 649 kB bundle notices remain. No deployment occurred.
 
 ## License
 
