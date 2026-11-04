@@ -127,6 +127,7 @@ export async function createApp(options: {
     if (!force && sentVersions.get(socket) === fingerprint) return;
     send(socket, {
       type: "snapshot",
+      protocolVersion: PROTOCOL_VERSION,
       state: view,
       context,
       campaignName: campaign.name,
@@ -215,6 +216,19 @@ export async function createApp(options: {
           return reply.code(401).send({ error: "Sign in to the table first." });
         queryContext(request, member);
         store.getCampaign(member.tableId);
+        const protocol = z
+          .object({ protocolVersion: z.string().optional() })
+          .safeParse(request.query);
+        if (
+          !protocol.success ||
+          protocol.data.protocolVersion !== String(PROTOCOL_VERSION)
+        )
+          return reply
+            .code(426)
+            .send({
+              error: "Reload the application to use this live protocol.",
+              protocolVersion: PROTOCOL_VERSION,
+            });
       },
     },
     (socket, request) => {

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { serverMessageSchema } from "@tableloom/core";
+import { PROTOCOL_VERSION } from "@tableloom/core";
 import type { CommandInput, TableView } from "@tableloom/core";
-import { contextKey } from "@tableloom/core/campaigns";
 import type { CommandContext } from "@tableloom/core/campaigns";
+import { z } from "zod";
+import { TableConnection } from "./table-connection.js";
+import type { ConnectionStatus } from "./table-connection.js";
 
 export function useTable(
   viewerKey: string | null,
@@ -16,122 +18,82 @@ export function useTable(
     campaignName: string;
     sceneName: string;
   } | null>(null);
-  const [status, setStatus] = useState<"connecting" | "connected" | "offline">(
-    "connecting",
-  );
-  const [participants, setParticipants] = useState(0);
-  const [error, setError] = useState("");
-  const socket = useRef<WebSocket | null>(null);
-  const ready = useRef(false);
-  const socketViewer = useRef<string | null>(null);
-  const activeContext = useRef<string | null>(null);
-
+  const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const [participants, setParticipants] = useState(0),
+    [error, setError] = useState("");
+  const connection = useRef<{
+    viewerKey: string;
+    client: TableConnection;
+  } | null>(null);
   useEffect(() => {
     setSnapshot(null);
     setParticipants(0);
-    if (!viewerKey) return;
-    let stopped = false;
-    let retry: ReturnType<typeof setTimeout>;
-    let attempts = 0;
-    const connect = () => {
-      ready.current = false;
-      activeContext.current = null;
-      setStatus("connecting");
-      const url = new URL("/api/live", location.href);
-      url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      if (campaignId) url.searchParams.set("campaignId", campaignId);
-      const ws = new WebSocket(url);
-      socketViewer.current = viewerKey;
-      socket.current = ws;
-      ws.onmessage = (event) => {
-        if (stopped || socket.current !== ws) return;
-        try {
-          const message = serverMessageSchema.parse(
-            JSON.parse(String(event.data)),
-          );
-          if (message.type === "snapshot") {
-            if (message.context.campaignId !== campaignId)
-              throw new Error("Unexpected campaign.");
-            activeContext.current = contextKey(message.context);
-            setSnapshot({
-              viewerKey,
-              state: message.state,
-              context: message.context,
-              campaignName: message.campaignName,
-              sceneName: message.sceneName,
-            });
-            setParticipants(message.participants);
-            ready.current = true;
-            setStatus("connected");
-            attempts = 0;
-          } else if (message.type === "presence")
-            setParticipants(message.participants);
-          else setError(message.message);
-        } catch {
-          setError("The table sent an unreadable update. Please reload.");
-        }
-      };
-      ws.onclose = (event) => {
-        if (stopped) return;
-        ready.current = false;
-        setStatus("offline");
-        if (event.code === 4001 || event.code === 4002) {
-          setSnapshot(null);
-          setParticipants(0);
-        }
-        // Another tab may have replaced the cookie with a return-code session
-        // for the same identity. Refresh access and retry; sign-out/removal
-        // changes viewerKey to null and cleanup cancels this pending reconnect.
-        void onUnauthorized();
-        retry = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15000));
-      };
-      ws.onerror = () => ws.close();
-    };
-    connect();
+    setError("");
+    setStatus("connecting");
+    if (!viewerKey || !campaignId) return;
+    const url = new URL("/api/live", location.href);
+    url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("campaignId", campaignId);
+    url.searchParams.set("protocolVersion", String(PROTOCOL_VERSION));
+    const client = new TableConnection(url.href, campaignId, {
+      probe: async (signal) => {
+        const response = await fetch("/api/health", {
+          cache: "no-store",
+          credentials: "same-origin",
+          signal,
+        });
+        if (!response.ok) throw new Error("Server unavailable.");
+        return z
+          .object({
+            status: z.literal("ok"),
+            protocolVersion: z.number().int().positive(),
+          })
+          .parse(await response.json()).protocolVersion;
+      },
+      open: (address, handlers) => {
+        const socket = new WebSocket(address);
+        socket.onmessage = (event) => handlers.message(event.data);
+        socket.onclose = (event) => handlers.close(event.code);
+        socket.onerror = () => handlers.error();
+        return socket;
+      },
+      schedule: (action, delay) => {
+        const timer = setTimeout(action, delay);
+        return () => clearTimeout(timer);
+      },
+      random: Math.random,
+      refreshAccess: onUnauthorized,
+      snapshot: (message) => setSnapshot({ viewerKey, ...message }),
+      participants: setParticipants,
+      clear: () => setSnapshot(null),
+      status: setStatus,
+      error: setError,
+    });
+    connection.current = { viewerKey, client };
+    client.start();
     return () => {
-      stopped = true;
-      ready.current = false;
-      socketViewer.current = null;
-      activeContext.current = null;
-      clearTimeout(retry);
-      socket.current?.close();
+      client.stop();
+      if (connection.current?.client === client) connection.current = null;
     };
   }, [viewerKey, onUnauthorized, campaignId]);
-
   const context = snapshot?.viewerKey === viewerKey ? snapshot.context : null;
   const send = useCallback(
     (command: CommandInput) => {
-      if (
-        !viewerKey ||
-        !context ||
-        contextKey(context) !== activeContext.current ||
-        socketViewer.current !== viewerKey ||
-        !ready.current ||
-        socket.current?.readyState !== WebSocket.OPEN
-      ) {
-        setError(
-          "The table is reconnecting. Try that change again once connected.",
-        );
+      if (!viewerKey || connection.current?.viewerKey !== viewerKey) {
+        setError("Sign in to the table before making changes.");
         return false;
       }
-      socket.current.send(
-        JSON.stringify({
-          context,
-          command: { ...command, id: crypto.randomUUID() },
-        }),
-      );
-      return true;
+      return connection.current.client.send(context, command);
     },
     [viewerKey, context],
   );
-
   const current = snapshot?.viewerKey === viewerKey;
   return {
     state: current ? snapshot.state : null,
     context,
     campaignName: current ? snapshot.campaignName : "",
     sceneName: current ? snapshot.sceneName : "",
-    status: current ? status : ("connecting" as const),
+    status: connection.current?.viewerKey === viewerKey ? status : "connecting",
     participants: current ? participants : 0,
     error,
     clearError: () => setError(""),

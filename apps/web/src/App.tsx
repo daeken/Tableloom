@@ -168,9 +168,11 @@ export function App() {
               ? "Sign in to join"
               : connected
                 ? "Connected to table"
-                : status === "offline"
-                  ? "Reconnecting…"
-                  : "Connecting…"}
+                : status === "blocked"
+                  ? "Reload required"
+                  : status === "offline"
+                    ? "Reconnecting…"
+                    : "Connecting…"}
           </span>
           <button
             className="invite-button"
@@ -186,6 +188,11 @@ export function App() {
                 ? "Link copied"
                 : "Copy table link"}
           </button>
+          {member && status === "blocked" && (
+            <button className="sign-out" onClick={() => location.reload()}>
+              Reload page
+            </button>
+          )}
           {member && (
             <button className="sign-out" onClick={() => void logout()}>
               Sign out

@@ -263,7 +263,7 @@ try {
   assert.equal(activated.status, 200);
   await activated.json();
   const live = new WebSocket(
-    `${url.replace("http", "ws")}/api/live?campaignId=${campaign.id}`,
+    `${url.replace("http", "ws")}/api/live?campaignId=${campaign.id}&protocolVersion=${PROTOCOL_VERSION}`,
     { headers: { Cookie: nextCookie, Origin: url } },
   );
   try {

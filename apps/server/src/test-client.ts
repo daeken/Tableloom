@@ -2,13 +2,16 @@
 import { WebSocket } from "ws";
 import type { ClientOptions, RawData } from "ws";
 import { once } from "node:events";
+import { PROTOCOL_VERSION } from "@tableloom/core";
 import { commandContextSchema } from "@tableloom/core/campaigns";
 import type { CommandContext } from "@tableloom/core/campaigns";
 
 export class TestWebSocket extends WebSocket {
   context: CommandContext | null = null;
   constructor(address: string, options?: ClientOptions) {
-    super(address, options);
+    const url = new URL(address);
+    url.searchParams.set("protocolVersion", String(PROTOCOL_VERSION));
+    super(url, options);
     this.on("message", (data: RawData) => {
       const parsed: unknown = JSON.parse(data.toString());
       if (

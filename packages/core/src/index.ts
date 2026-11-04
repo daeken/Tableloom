@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -276,6 +276,7 @@ export type CommandInput = Command extends infer C
 export const serverMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("snapshot"),
+    protocolVersion: z.literal(PROTOCOL_VERSION),
     state: tableViewSchema,
     context: commandContextSchema,
     campaignName: z.string().min(1).max(120),
