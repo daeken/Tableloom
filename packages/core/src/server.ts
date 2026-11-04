@@ -59,7 +59,9 @@ function appendRoll(history: Roll[], roll: Roll): Roll[] {
   const evicted = bucket.length >= MAX_ROLL_HISTORY ? bucket[0]?.id : undefined;
   const retained = history.filter((other) => other.id !== evicted);
   if (retained.length >= MAX_TOTAL_ROLLS)
-    throw new Error("The table has reached its roll history limit.");
+    throw new Error(
+      "The table has reached its roll history limit. Archive or delete live results to make room.",
+    );
   return [...retained, roll];
 }
 

@@ -33,6 +33,7 @@ import { AccessGate } from "./AccessGate.js";
 import { InviteDialog } from "./InviteDialog.js";
 import { OwnershipDialog } from "./OwnershipDialog.js";
 import { CampaignDialog } from "./CampaignDialog.js";
+import { RollHistoryDialog } from "./RollHistoryDialog.js";
 import { SceneDialog } from "./SceneDialog.js";
 import { contextKey } from "@tableloom/core/campaigns";
 import { NotesPanel } from "./NotesPanel.js";
@@ -64,6 +65,7 @@ export function App() {
     : null;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [campaignOpen, setCampaignOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [sceneOpen, setSceneOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
@@ -97,6 +99,7 @@ export function App() {
     setRollError("");
     setCampaignOpen(false);
     setSceneOpen(false);
+    setHistoryOpen(false);
     setInviteOpen(false);
     setOwnershipOpen(false);
   }, [viewerKey]);
@@ -509,6 +512,13 @@ export function App() {
                 )}
               </section>
               <section className="roll-history">
+                <button
+                  className="history-manage"
+                  disabled={!member || !connected}
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  Manage roll history
+                </button>
                 <div className="section-row">
                   <span className="eyebrow">THE EVENING'S ROLLS</span>
                   <span className="count">{state?.rolls.length ?? 0}</span>
@@ -608,6 +618,15 @@ export function App() {
           error={error}
           clearError={clearError}
           close={() => setOwnershipOpen(false)}
+        />
+      )}
+      {historyOpen && member && state && (
+        <RollHistoryDialog
+          key={viewerKey}
+          member={member}
+          rolls={state.rolls}
+          enabled={connected}
+          close={() => setHistoryOpen(false)}
         />
       )}
       {inviteOpen && member?.role === "gm" && (

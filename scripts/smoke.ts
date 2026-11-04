@@ -18,6 +18,7 @@ import {
   PROTOCOL_VERSION,
 } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
+import { rollArchivePageSchema } from "@tableloom/core/roll-history";
 import { sceneSchema } from "@tableloom/core/campaigns";
 
 function snapshot(
@@ -280,7 +281,31 @@ try {
         command: { id: randomUUID(), type: "dice.roll", expression: "d6" },
       }),
     );
-    assert.equal((await rolled).state.rolls[0]?.expression, "1d6");
+    const result = (await rolled).state.rolls[0]!;
+    assert.equal(result.expression, "1d6");
+    const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
+    const archived = await fetch(`${historyRoot}/archive`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({ ids: [result.id] }),
+    });
+    assert.equal(archived.status, 200);
+    await archived.json();
+    const archiveList = await fetch(`${historyRoot}/archive`, {
+      headers: { Cookie: nextCookie },
+    });
+    assert.equal(archiveList.status, 200);
+    assert.deepEqual(
+      rollArchivePageSchema.parse(await archiveList.json()).entries[0]?.roll,
+      result,
+    );
+    const cleaned = await fetch(`${historyRoot}/archive/delete`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({ ids: [result.id] }),
+    });
+    assert.equal(cleaned.status, 200);
+    await cleaned.json();
   } finally {
     live.terminate();
   }
@@ -298,5 +323,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, context-bound live dice, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, context-bound live dice, roll archive/cleanup, and clean shutdown.",
 );

@@ -13,6 +13,16 @@ export function canSeeRoll(
 }
 export const canSeeNote = canSeeRoll;
 
+export function canManageRoll(
+  member: Member,
+  roll: Pick<Roll, "visibility" | "ownerId">,
+): boolean {
+  return (
+    member.role === "gm" ||
+    (roll.visibility === "gm" && roll.ownerId === member.id)
+  );
+}
+
 export function canEditObject(
   member: Member | null,
   object: { ownerId: string | null },

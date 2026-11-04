@@ -90,8 +90,16 @@ export const tableSchema = tableDataSchema.superRefine((state, context) => {
       });
     ids.add(object.id);
   }
+  const rollIds = new Set<string>();
   const audiences = new Map<string, number>();
   for (const roll of state.rolls) {
+    if (rollIds.has(roll.id))
+      context.addIssue({
+        code: "custom",
+        message: "Roll IDs must be unique.",
+        path: ["rolls"],
+      });
+    rollIds.add(roll.id);
     const key = roll.visibility === "public" ? "public" : roll.ownerId!;
     const count = (audiences.get(key) ?? 0) + 1;
     if (count > MAX_ROLL_HISTORY)

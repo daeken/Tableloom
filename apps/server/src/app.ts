@@ -14,6 +14,8 @@ import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
 import { transaction } from "./database.js";
+import { RollHistoryStore } from "./roll-history.js";
+import { registerRollHistoryRoutes } from "./roll-history-http.js";
 import { DocumentStore } from "./documents.js";
 import { registerDocumentRoutes } from "./documents-http.js";
 import { AccessStore } from "./access.js";
@@ -57,11 +59,13 @@ export async function createApp(options: {
   let store: TableStore;
   let access: AccessStore;
   let documents: DocumentStore;
+  let history: RollHistoryStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
     store.load();
     documents = new DocumentStore(database, store);
+    history = new RollHistoryStore(database, store);
   } catch (error) {
     database.close();
     throw error;
@@ -185,6 +189,7 @@ export async function createApp(options: {
     refreshCampaign,
   });
   registerDocumentRoutes(app, access, documents);
+  registerRollHistoryRoutes(app, access, history, refreshCampaign);
   app.get("/api/health", async () => ({
     status: "ok",
     protocolVersion: PROTOCOL_VERSION,
