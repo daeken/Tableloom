@@ -246,7 +246,7 @@ export class AccessStore {
       const host = this.requireHost(sessionToken);
       this.prune();
       if (memberId !== null) {
-        const member = this.findMember(memberId);
+        const member = this.getMember(memberId);
         if (!member || member.role !== "player")
           throw new AccessError("invalid_member");
         // Only the latest recovery code for an identity remains usable.
@@ -292,7 +292,7 @@ export class AccessStore {
       if (!result) throw new AccessError("invalid_invitation");
       let member: Member;
       if (result.target_user_id !== null) {
-        const existing = this.findMember(z.uuid().parse(result.target_user_id));
+        const existing = this.getMember(z.uuid().parse(result.target_user_id));
         if (!existing || existing.role !== "player")
           throw new AccessError("invalid_invitation");
         member = existing;
@@ -349,7 +349,9 @@ export class AccessStore {
     return member;
   }
 
-  private findMember(id: string): Member | null {
+  /** Internal membership lookup; never accept a recipient object from a client. */
+  getMember(id: string): Member | null {
+    z.uuid().parse(id);
     const row = this.db
       .prepare(
         `SELECT u.id, u.name, m.table_id AS tableId, m.role

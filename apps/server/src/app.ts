@@ -178,7 +178,11 @@ export async function createApp(options: {
             sendSnapshot(socket, true);
             return;
           }
-          const next = applyCommand(state, command, member);
+          const recipient =
+            command.type === "object.assign" || command.type === "note.assign"
+              ? access.getMember(command.ownerId)
+              : undefined;
+          const next = applyCommand(state, command, member, recipient);
           store.save(next, command.id);
           state = next;
           for (const client of clients.keys()) sendSnapshot(client);

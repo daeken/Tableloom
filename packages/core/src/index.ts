@@ -201,6 +201,15 @@ export const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...envelope,
+      type: z.literal("object.assign"),
+      objectId: z.uuid(),
+      expectedOwnerId: z.uuid().nullable(),
+      ownerId: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
       type: z.literal("dice.roll"),
       expression: z.string().trim().min(1).max(32),
       visibility: rollVisibilitySchema.optional(),
@@ -231,6 +240,16 @@ export const commandSchema = z.discriminatedUnion("type", [
       type: z.literal("note.delete"),
       noteId: z.uuid(),
       expectedVersion: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("note.assign"),
+      noteId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      ownerId: z.uuid(),
+      acknowledgePrivateAccess: z.literal(true).optional(),
     })
     .strict(),
 ]);

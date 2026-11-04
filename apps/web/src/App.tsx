@@ -31,6 +31,7 @@ import { useTable } from "./useTable.js";
 import { useAccess, accessRequest } from "./useAccess.js";
 import { AccessGate } from "./AccessGate.js";
 import { InviteDialog } from "./InviteDialog.js";
+import { OwnershipDialog } from "./OwnershipDialog.js";
 import { NotesPanel } from "./NotesPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
@@ -57,6 +58,7 @@ export function App() {
   const name = member?.name ?? null;
   const viewerKey = member ? `${member.id}:${member.role}` : null;
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [ownershipOpen, setOwnershipOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState(colors[0]!);
   const [tokenName, setTokenName] = useState("Adventurer");
@@ -92,6 +94,7 @@ export function App() {
     try {
       accept(await accessRequest("/api/access/logout", accessStatusSchema, {}));
       setInviteOpen(false);
+      setOwnershipOpen(false);
     } catch (err) {
       setRollError(err instanceof Error ? err.message : "Unable to sign out.");
     }
@@ -267,6 +270,17 @@ export function App() {
             <button className="add-cast" onClick={() => setTool("token")}>
               <Plus size={14} /> Place a token
             </button>
+            {member?.role === "gm" && state && (
+              <button
+                className="add-cast"
+                onClick={() => {
+                  clearError();
+                  setOwnershipOpen(true);
+                }}
+              >
+                Manage ownership
+              </button>
+            )}
           </div>
           <div className="rail-footer">
             <span className="small-spark">✧</span>
@@ -534,6 +548,17 @@ export function App() {
           connectionError={accessError}
           refresh={refresh}
           accept={accept}
+        />
+      )}
+      {ownershipOpen && member?.role === "gm" && state && (
+        <OwnershipDialog
+          key={viewerKey}
+          state={state}
+          enabled={connected}
+          send={send}
+          error={error}
+          clearError={clearError}
+          close={() => setOwnershipOpen(false)}
         />
       )}
       {inviteOpen && member?.role === "gm" && (

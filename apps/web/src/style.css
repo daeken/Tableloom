@@ -1396,3 +1396,26 @@ p {
 .remove-confirm button {
   margin-right: 8px;
 }
+
+.ownership-dialog select {
+  width: 100%;
+  padding: 10px;
+  margin: 0 0 16px;
+  background: #fffef8;
+  border: 1px solid #cfd7bf;
+  color: #41543a;
+  font: inherit;
+  font-size: 12px;
+}
+.ownership-review {
+  margin-top: 20px;
+  padding: 14px;
+  background: #f0ecdc;
+  border: 1px solid #d6cfb6;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.ownership-review p {
+  margin: 10px 0;
+}

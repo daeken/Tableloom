@@ -29,6 +29,36 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "object.assign": {
+      if (member.role !== "gm")
+        throw new Error("Only the GM can reassign ownership.");
+      const object = [...state.tokens, ...state.drawings].find(
+        (object) => object.id === command.objectId,
+      );
+      if (!object) throw new Error("That object no longer exists.");
+      if (object.ownerId !== command.expectedOwnerId)
+        throw new Error(
+          "Ownership changed. Review the latest owner before transferring.",
+        );
+      if (object.ownerId === command.ownerId)
+        throw new Error("This member already owns that object.");
+      return;
+    }
+    case "note.assign": {
+      if (member.role !== "gm")
+        throw new Error("Only the GM can reassign ownership.");
+      const note = state.notes.find((note) => note.id === command.noteId);
+      if (!note) throw new Error("That note is unavailable.");
+      if (note.version !== command.expectedVersion)
+        throw new Error("This note changed. Review it before transferring.");
+      if (note.ownerId === command.ownerId)
+        throw new Error("This member already owns that note.");
+      if (note.visibility === "gm" && command.acknowledgePrivateAccess !== true)
+        throw new Error(
+          "Confirm that this private note will be shared with its new owner and removed from the previous owner's view.",
+        );
+      return;
+    }
     case "system.set":
       if (member.role !== "gm")
         throw new Error("Only the GM can change the game system.");

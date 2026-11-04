@@ -67,10 +67,35 @@ export function applyCommand(
   state: TableState,
   command: Command,
   actor: Member,
+  ownershipRecipient?: Member | null,
 ): TableState {
   authorizeCommand(state, command, actor);
+  // Membership is resolved by the server at command time, never from wire data.
+  if (command.type === "object.assign" || command.type === "note.assign") {
+    if (
+      !ownershipRecipient ||
+      ownershipRecipient.id !== command.ownerId ||
+      ownershipRecipient.tableId !== actor.tableId
+    )
+      throw new Error(
+        "Choose a current member of this table as the new owner.",
+      );
+  }
   const next = structuredClone(state);
   switch (command.type) {
+    case "object.assign": {
+      const object = [...next.tokens, ...next.drawings].find(
+        (object) => object.id === command.objectId,
+      )!;
+      object.ownerId = command.ownerId;
+      break;
+    }
+    case "note.assign": {
+      const note = next.notes.find((note) => note.id === command.noteId)!;
+      note.ownerId = command.ownerId;
+      note.version += 1;
+      break;
+    }
     case "drawing.add":
       if (next.drawings.length >= 2000)
         throw new Error("This scene has reached its drawing limit.");
