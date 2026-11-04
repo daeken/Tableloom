@@ -12,10 +12,13 @@ export const system = defineSystem({
     description: "Small towns. Big mysteries. Unlikely heroes.",
     accent: "#d4a95f",
   },
-  documentSchema: z.object({
-    name: z.string().max(100),
-    notes: z.string().max(10000),
-  }),
+  documentVersion: 1,
+  documentSchema: z
+    .object({
+      name: z.string().max(100),
+      notes: z.string().max(10000),
+    })
+    .strict(),
   createDocument: () => ({ name: "", notes: "" }),
 });
 export const manifest = system.manifest;

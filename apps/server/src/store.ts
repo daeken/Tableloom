@@ -50,7 +50,7 @@ const version = z.number().int().positive();
 export class StoreError extends Error {
   constructor(
     message: string,
-    public readonly statusCode: 400 | 404 | 409,
+    public readonly statusCode: 400 | 403 | 404 | 409,
   ) {
     super(message);
     this.name = "StoreError";
@@ -238,6 +238,7 @@ export class TableStore {
           "Campaign settings changed. Reload before saving.",
           409,
         );
+      this.assertDocumentPinCompatible(id, settings.system);
       const next = campaignSchema.parse({
         ...current,
         ...settings,
@@ -377,6 +378,7 @@ export class TableStore {
           version: campaign.version + 1,
         });
         this.validatePins(metadata);
+        this.assertDocumentPinCompatible(campaignId, metadata.system);
       }
       this.writeCampaign(
         metadata,
@@ -525,6 +527,23 @@ export class TableStore {
           400,
         );
     }
+  }
+  private assertDocumentPinCompatible(
+    campaignId: string,
+    system: { id: string; version: string },
+  ) {
+    if (
+      this.hasTable("module_documents") &&
+      this.db
+        .prepare(
+          "SELECT id FROM module_documents WHERE campaign_id = ? AND (system_id != ? OR system_version != ?) LIMIT 1",
+        )
+        .get(campaignId, system.id, system.version)
+    )
+      throw new StoreError(
+        "This campaign has system documents. An explicit document/package migration or removal is required before changing its system version.",
+        409,
+      );
   }
   private hasTable(name: string): boolean {
     return Boolean(

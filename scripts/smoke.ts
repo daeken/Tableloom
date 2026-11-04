@@ -11,6 +11,7 @@ import {
   campaignMembershipSchema,
 } from "@tableloom/core/campaigns";
 import { accessStatusSchema } from "@tableloom/core/access";
+import { documentSchema, documentPageSchema } from "@tableloom/core/documents";
 import {
   tableViewSchema,
   serverMessageSchema,
@@ -174,6 +175,56 @@ try {
     tableViewSchema.parse(await selectedTable.json()).systemId,
     "kids-on-brooms",
   );
+  const documentRoot = `${url}/api/campaigns/${campaign.id}/documents`;
+  const documentHeaders = {
+    Cookie: nextCookie,
+    Origin: url,
+    "Content-Type": "application/json",
+  };
+  const documentCreated = await fetch(documentRoot, {
+    method: "POST",
+    headers: documentHeaders,
+    body: JSON.stringify({ title: "Smoke scaffold", system: campaign.system }),
+  });
+  assert.equal(documentCreated.status, 201);
+  const document = documentSchema.parse(await documentCreated.json());
+  assert.deepEqual(document.data, { name: "", notes: "" });
+  const documentList = await fetch(documentRoot, {
+    headers: { Cookie: nextCookie },
+  });
+  assert.equal(documentList.status, 200);
+  assert.equal(
+    documentPageSchema.parse(await documentList.json()).documents[0]?.id,
+    document.id,
+  );
+  const documentEdited = await fetch(`${documentRoot}/${document.id}`, {
+    method: "POST",
+    headers: documentHeaders,
+    body: JSON.stringify({
+      expectedVersion: 1,
+      title: document.title,
+      visibility: "gm",
+      data: { name: "Scout", notes: "Smoke fixture only" },
+    }),
+  });
+  assert.equal(documentEdited.status, 200);
+  const savedDocument = documentSchema.parse(await documentEdited.json());
+  assert.equal(savedDocument.version, 2);
+  const documentRead = await fetch(`${documentRoot}/${document.id}`, {
+    headers: { Cookie: nextCookie },
+  });
+  assert.equal(documentRead.status, 200);
+  assert.deepEqual(
+    documentSchema.parse(await documentRead.json()),
+    savedDocument,
+  );
+  const documentDeleted = await fetch(`${documentRoot}/${document.id}/delete`, {
+    method: "POST",
+    headers: documentHeaders,
+    body: JSON.stringify({ expectedVersion: 2 }),
+  });
+  assert.equal(documentDeleted.status, 200);
+  await documentDeleted.json();
   const previousTable = await fetch(`${url}/api/table`, {
     headers: { Cookie: cookie },
   });
@@ -247,5 +298,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, scene activation, context-bound live dice, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, context-bound live dice, and clean shutdown.",
 );

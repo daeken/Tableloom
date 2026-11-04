@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { documentData } from "./document-data.js";
+export { documentData, MAX_DOCUMENT_BYTES } from "./document-data.js";
+export type { DocumentData } from "./document-data.js";
 
 export const systemIdSchema = z.string().regex(/^[a-z][a-z0-9-]{1,63}$/);
 export type SystemId = z.infer<typeof systemIdSchema>;
@@ -52,6 +55,7 @@ export interface OwnedInstance<T> {
 
 export interface SystemDefinition<T> {
   manifest: ModuleManifest;
+  documentVersion: number;
   documentSchema: z.ZodType<T>;
   createDocument: () => T;
 }
@@ -60,6 +64,9 @@ export function defineSystem<T>(
   definition: SystemDefinition<T>,
 ): SystemDefinition<T> {
   moduleManifestSchema.parse(definition.manifest);
-  definition.documentSchema.parse(definition.createDocument());
+  z.number().int().positive().parse(definition.documentVersion);
+  documentData(
+    definition.documentSchema.parse(documentData(definition.createDocument())),
+  );
   return definition;
 }

@@ -14,6 +14,8 @@ import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { installedModules } from "./modules.js";
 import { transaction } from "./database.js";
+import { DocumentStore } from "./documents.js";
+import { registerDocumentRoutes } from "./documents-http.js";
 import { AccessStore } from "./access.js";
 import {
   registerAccessRoutes,
@@ -54,10 +56,12 @@ export async function createApp(options: {
   const database = new DatabaseSync(options.databasePath);
   let store: TableStore;
   let access: AccessStore;
+  let documents: DocumentStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
     store.load();
+    documents = new DocumentStore(database, store);
   } catch (error) {
     database.close();
     throw error;
@@ -180,6 +184,7 @@ export async function createApp(options: {
     disconnectInvalid,
     refreshCampaign,
   });
+  registerDocumentRoutes(app, access, documents);
   app.get("/api/health", async () => ({
     status: "ok",
     protocolVersion: PROTOCOL_VERSION,

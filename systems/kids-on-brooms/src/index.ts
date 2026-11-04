@@ -12,10 +12,13 @@ export const system = defineSystem({
     description: "Strange magic. Shared secrets. Your story.",
     accent: "#aa8cd1",
   },
-  documentSchema: z.object({
-    name: z.string().max(100),
-    notes: z.string().max(10000),
-  }),
+  documentVersion: 1,
+  documentSchema: z
+    .object({
+      name: z.string().max(100),
+      notes: z.string().max(10000),
+    })
+    .strict(),
   createDocument: () => ({ name: "", notes: "" }),
 });
 export const manifest = system.manifest;
