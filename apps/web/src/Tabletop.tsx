@@ -14,7 +14,7 @@ import { canEditObject } from "@tableloom/core/permissions";
 export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
 type Gesture =
   | { kind: "draw"; drawing: DrawingInput }
-  | { kind: "move"; token: Token }
+  | { kind: "move"; token: Token; start: Point }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
   state: TableView;
@@ -209,7 +209,11 @@ export function Tabletop({
     if (tool === "erase") {
       if (token) {
         if (canEditObject(member, token))
-          send({ type: "object.delete", objectId: token.id });
+          send({
+            type: "object.delete",
+            objectId: token.id,
+            expectedVersion: token.version,
+          });
         return;
       }
       const drawing = [...state.drawings].reverse().find((d) => {
@@ -236,11 +240,20 @@ export function Tabletop({
         return d.points.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 15);
       });
       if (drawing && canEditObject(member, drawing))
-        send({ type: "object.delete", objectId: drawing.id });
+        send({
+          type: "object.delete",
+          objectId: drawing.id,
+          expectedVersion: drawing.version,
+        });
     } else if (tool === "select") {
       const editable = token && canEditObject(member, token) ? token : null;
       setSelected(editable?.id ?? null);
-      if (editable) setGesture({ kind: "move", token: editable });
+      if (editable)
+        setGesture({
+          kind: "move",
+          token: editable,
+          start: { ...editable.position },
+        });
     } else {
       setSelected(null);
       setGesture({
@@ -288,10 +301,15 @@ export function Tabletop({
   function up() {
     if (gesture?.kind === "draw")
       send({ type: "drawing.add", drawing: gesture.drawing });
-    if (gesture?.kind === "move")
+    if (
+      gesture?.kind === "move" &&
+      (gesture.token.position.x !== gesture.start.x ||
+        gesture.token.position.y !== gesture.start.y)
+    )
       send({
         type: "token.move",
         tokenId: gesture.token.id,
+        expectedVersion: gesture.token.version,
         position: gesture.token.position,
       });
     setGesture(null);

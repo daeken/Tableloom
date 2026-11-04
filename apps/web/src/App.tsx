@@ -295,7 +295,11 @@ export function App() {
                           : "Only the owner or GM can delete this token"
                       }
                       onClick={() =>
-                        send({ type: "object.delete", objectId: token.id })
+                        send({
+                          type: "object.delete",
+                          objectId: token.id,
+                          expectedVersion: token.version,
+                        })
                       }
                     >
                       <X size={13} />

@@ -25,6 +25,7 @@ function fixture() {
     position: { x: 0, y: 0 },
     color: "#445566",
     ownerId: alice.id,
+    version: 1,
   });
   state.drawings.push({
     id: randomUUID(),
@@ -35,6 +36,7 @@ function fixture() {
     ],
     color: "#445566",
     ownerId: null,
+    version: 1,
   });
   state.notes.push({
     id: randomUUID(),
@@ -52,6 +54,7 @@ test("only the GM can assign scene ownership to a verified recipient; stale expe
   const command: Command = {
     id: randomUUID(),
     type: "object.assign",
+    expectedVersion: 1,
     objectId: state.tokens[0]!.id,
     expectedOwnerId: alice.id,
     ownerId: bob.id,
@@ -73,12 +76,19 @@ test("only the GM can assign scene ownership to a verified recipient; stale expe
   assert.equal(next.revision, 1);
   assert.equal(canEditObject(alice, next.tokens[0]!), false);
   assert.equal(canEditObject(bob, next.tokens[0]!), true);
+  assert.throws(() => applyCommand(next, command, gm, bob), /object changed/);
   assert.throws(
-    () => applyCommand(next, command, gm, bob),
-    /Ownership changed/,
-  );
-  assert.throws(
-    () => applyCommand(next, { ...command, expectedOwnerId: bob.id }, gm, bob),
+    () =>
+      applyCommand(
+        next,
+        {
+          ...command,
+          expectedOwnerId: bob.id,
+          expectedVersion: next.tokens[0]!.version,
+        },
+        gm,
+        bob,
+      ),
     /already owns/,
   );
   const legacy = applyCommand(
@@ -211,6 +221,7 @@ test("shared notes keep their audience while edit rights move, and ownership pay
   const scene = {
     id: randomUUID(),
     type: "object.assign",
+    expectedVersion: 1,
     objectId: state.tokens[0]!.id,
     expectedOwnerId: alice.id,
     ownerId: bob.id,

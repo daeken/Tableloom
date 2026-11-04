@@ -90,6 +90,7 @@ export function applyCommand(
         (object) => object.id === command.objectId,
       )!;
       object.ownerId = command.ownerId;
+      object.version += 1;
       break;
     }
     case "note.assign": {
@@ -107,7 +108,7 @@ export function applyCommand(
         next.notes.some((n) => n.id === command.drawing.id)
       )
         throw new Error("An object with this ID already exists.");
-      next.drawings.push({ ...command.drawing, ownerId: actor.id });
+      next.drawings.push({ ...command.drawing, ownerId: actor.id, version: 1 });
       break;
     case "token.add":
       if (next.tokens.length >= 200)
@@ -118,12 +119,13 @@ export function applyCommand(
         next.notes.some((n) => n.id === command.token.id)
       )
         throw new Error("An object with this ID already exists.");
-      next.tokens.push({ ...command.token, ownerId: actor.id });
+      next.tokens.push({ ...command.token, ownerId: actor.id, version: 1 });
       break;
     case "token.move": {
       const token = next.tokens.find((t) => t.id === command.tokenId);
       if (!token) throw new Error("That token no longer exists.");
       token.position = command.position;
+      token.version += 1;
       break;
     }
     case "object.delete":

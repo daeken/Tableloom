@@ -57,7 +57,7 @@ test("legacy version 1 table atomically becomes a default campaign/scene without
     store = new TableStore(path);
     const state = store.load();
     assert.equal(state.tokens[0]?.ownerId, null);
-    assert.equal(state.schemaVersion, 4);
+    assert.equal(state.schemaVersion, 5);
     assert.equal(state.revision, 8);
     assert.equal(store.hasCommand(receipt), true);
     assert.deepEqual(store.getCampaign().system, {
@@ -144,7 +144,7 @@ test("version 4 migration preserves private notes/rolls, ownership, edit version
       { id: receipt, type: "dice.roll", expression: "d6", visibility: "gm" },
       player.member,
     );
-    legacyTables(db, state, receipt, state.revision);
+    legacyTables(db, { ...state, schemaVersion: 4 }, receipt, state.revision);
     store = new TableStore(path);
     assert.deepEqual(store.load(), state);
     assert.deepEqual(access.authenticate(player.token), player.member);

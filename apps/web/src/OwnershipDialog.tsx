@@ -77,7 +77,7 @@ export function OwnershipDialog({
       label: `Token: ${token.name}`,
       ownerId: token.ownerId,
       kind: "object",
-      version: null,
+      version: token.version,
       private: false,
     })),
     ...state.drawings.map((drawing): Subject => ({
@@ -85,7 +85,7 @@ export function OwnershipDialog({
       label: `Drawing: ${drawing.kind === "rectangle" ? "Room" : "Stroke"}`,
       ownerId: drawing.ownerId,
       kind: "object",
-      version: null,
+      version: drawing.version,
       private: false,
     })),
     ...state.notes.map((note): Subject => ({
@@ -150,6 +150,7 @@ export function OwnershipDialog({
             type: "object.assign",
             objectId: subject.id,
             expectedOwnerId: subject.ownerId,
+            expectedVersion: subject.version!,
             ownerId: recipient.id,
           };
     if (send(command)) {

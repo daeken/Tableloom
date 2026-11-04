@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -15,10 +15,11 @@ export const drawingSchema = z.object({
   points: z.array(pointSchema).min(2).max(2000),
   color: colorSchema,
   ownerId: z.uuid().nullable(),
+  version: z.number().int().positive(),
 });
 export type Drawing = z.infer<typeof drawingSchema>;
 export const drawingInputSchema = drawingSchema
-  .omit({ ownerId: true })
+  .omit({ ownerId: true, version: true })
   .strict();
 export type DrawingInput = z.infer<typeof drawingInputSchema>;
 export const tokenSchema = z.object({
@@ -27,9 +28,12 @@ export const tokenSchema = z.object({
   position: pointSchema,
   color: colorSchema,
   ownerId: z.uuid().nullable(),
+  version: z.number().int().positive(),
 });
 export type Token = z.infer<typeof tokenSchema>;
-export const tokenInputSchema = tokenSchema.omit({ ownerId: true }).strict();
+export const tokenInputSchema = tokenSchema
+  .omit({ ownerId: true, version: true })
+  .strict();
 
 export const diceResultSchema = z.object({
   id: z.uuid(),
@@ -72,7 +76,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(4),
+  schemaVersion: z.literal(5),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -118,7 +122,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 4,
+  schemaVersion: 5,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -127,11 +131,18 @@ export const createTable = (): TableState => ({
   notes: [],
 });
 
-const version3TableSchema = tableDataSchema
-  .omit({ notes: true })
+const legacyDrawingSchema = drawingSchema.omit({ version: true }).strict();
+const legacyTokenSchema = tokenSchema.omit({ version: true }).strict();
+const version4TableSchema = tableDataSchema
   .extend({
-    schemaVersion: z.literal(3),
+    schemaVersion: z.literal(4),
+    drawings: z.array(legacyDrawingSchema).max(2000),
+    tokens: z.array(legacyTokenSchema).max(200),
   })
+  .strict();
+const version3TableSchema = version4TableSchema
+  .omit({ notes: true })
+  .extend({ schemaVersion: z.literal(3) })
   .strict();
 const version2TableSchema = version3TableSchema.extend({
   schemaVersion: z.literal(2),
@@ -143,7 +154,7 @@ const version1TableSchema = version2TableSchema.extend({
   tokens: z.array(tokenInputSchema).max(200),
 });
 
-/** Pre-authentication objects stay GM-controlled; never guess an owner's identity. */
+/** Known legacy saves gain edit versions without guessing ownership or changing content. */
 export function restoreTable(value: unknown): {
   state: TableState;
   migrated: boolean;
@@ -151,22 +162,29 @@ export function restoreTable(value: unknown): {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
   const legacy = z
-    .union([version1TableSchema, version2TableSchema, version3TableSchema])
+    .union([
+      version1TableSchema,
+      version2TableSchema,
+      version3TableSchema,
+      version4TableSchema,
+    ])
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 4,
-    notes: [],
-    drawings:
-      legacy.schemaVersion === 1
-        ? legacy.drawings.map((drawing) => ({ ...drawing, ownerId: null }))
-        : legacy.drawings,
-    tokens:
-      legacy.schemaVersion === 1
-        ? legacy.tokens.map((token) => ({ ...token, ownerId: null }))
-        : legacy.tokens,
+    schemaVersion: 5,
+    notes: legacy.schemaVersion === 4 ? legacy.notes : [],
+    drawings: legacy.drawings.map((drawing) => ({
+      ...drawing,
+      ownerId: "ownerId" in drawing ? drawing.ownerId : null,
+      version: 1,
+    })),
+    tokens: legacy.tokens.map((token) => ({
+      ...token,
+      ownerId: "ownerId" in token ? token.ownerId : null,
+      version: 1,
+    })),
     rolls:
-      legacy.schemaVersion === 3
+      legacy.schemaVersion >= 3
         ? legacy.rolls
         : legacy.rolls.map((roll) => ({
             ...roll,
@@ -197,6 +215,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     .object({
       ...envelope,
       type: z.literal("token.move"),
+      expectedVersion: z.number().int().positive(),
       tokenId: z.uuid(),
       position: pointSchema,
     })
@@ -205,6 +224,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     .object({
       ...envelope,
       type: z.literal("object.delete"),
+      expectedVersion: z.number().int().positive(),
       objectId: z.uuid(),
     })
     .strict(),
@@ -212,6 +232,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     .object({
       ...envelope,
       type: z.literal("object.assign"),
+      expectedVersion: z.number().int().positive(),
       objectId: z.uuid(),
       expectedOwnerId: z.uuid().nullable(),
       ownerId: z.uuid(),

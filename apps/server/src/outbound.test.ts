@@ -255,6 +255,7 @@ test("large single snapshots remain supported without accumulating another seria
               id: crypto.randomUUID(),
               kind: "stroke" as const,
               ownerId: null,
+              version: 1,
               color: "#405f4d",
               points: Array.from({ length: 2000 }, () => ({
                 x: 1234.56789,

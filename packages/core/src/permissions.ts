@@ -46,6 +46,10 @@ export function authorizeCommand(
         (object) => object.id === command.objectId,
       );
       if (!object) throw new Error("That object no longer exists.");
+      if (object.version !== command.expectedVersion)
+        throw new Error(
+          "This object changed. Review the latest scene before transferring it.",
+        );
       if (object.ownerId !== command.expectedOwnerId)
         throw new Error(
           "Ownership changed. Review the latest owner before transferring.",
@@ -78,6 +82,10 @@ export function authorizeCommand(
       if (!token) throw new Error("That token no longer exists.");
       if (!canEditObject(member, token))
         throw new Error("Only the owner or GM can move this token.");
+      if (token.version !== command.expectedVersion)
+        throw new Error(
+          "This token changed. Review its latest position before moving it again.",
+        );
       return;
     }
     case "object.delete": {
@@ -87,6 +95,10 @@ export function authorizeCommand(
       if (!object) throw new Error("That object no longer exists.");
       if (!canEditObject(member, object))
         throw new Error("Only the owner or GM can delete this object.");
+      if (object.version !== command.expectedVersion)
+        throw new Error(
+          "This object changed. Review the latest scene before deleting it.",
+        );
       return;
     }
     case "drawing.add":

@@ -254,6 +254,7 @@ test("GM scene controls hide offstage metadata, preserve campaign data, and reje
     const delayed = {
       id: randomUUID(),
       type: "token.move",
+      expectedVersion: 1,
       tokenId,
       position: { x: 999, y: 999 },
     };

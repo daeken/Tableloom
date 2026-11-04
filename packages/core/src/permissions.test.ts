@@ -76,18 +76,29 @@ test("owner/other-player/GM permission matrix covers token movement and both obj
   const d = drawing();
   const state: TableState = {
     ...createTable(),
-    tokens: [{ ...t, ownerId: alice.id }],
-    drawings: [{ ...d, ownerId: alice.id }],
+    tokens: [{ ...t, version: 1, ownerId: alice.id }],
+    drawings: [{ ...d, version: 1, ownerId: alice.id }],
   };
   const commands: Command[] = [
     {
       id: randomUUID(),
       type: "token.move",
+      expectedVersion: 1,
       tokenId: t.id,
       position: { x: 50, y: 60 },
     },
-    { id: randomUUID(), type: "object.delete", objectId: t.id },
-    { id: randomUUID(), type: "object.delete", objectId: d.id },
+    {
+      id: randomUUID(),
+      type: "object.delete",
+      expectedVersion: 1,
+      objectId: t.id,
+    },
+    {
+      id: randomUUID(),
+      type: "object.delete",
+      expectedVersion: 1,
+      objectId: d.id,
+    },
   ];
   const original = structuredClone(state);
   for (const command of commands) {
@@ -142,8 +153,8 @@ test("legacy objects are GM-controlled and unavailable targets do not change sta
   const d = drawing();
   const state: TableState = {
     ...createTable(),
-    tokens: [{ ...t, ownerId: null }],
-    drawings: [{ ...d, ownerId: null }],
+    tokens: [{ ...t, version: 1, ownerId: null }],
+    drawings: [{ ...d, version: 1, ownerId: null }],
   };
   for (const actor of [alice, bob]) {
     assert.throws(
@@ -153,6 +164,7 @@ test("legacy objects are GM-controlled and unavailable targets do not change sta
           {
             id: randomUUID(),
             type: "token.move",
+            expectedVersion: 1,
             tokenId: t.id,
             position: { x: 0, y: 0 },
           },
@@ -165,7 +177,12 @@ test("legacy objects are GM-controlled and unavailable targets do not change sta
         () =>
           applyCommand(
             state,
-            { id: randomUUID(), type: "object.delete", objectId: object.id },
+            {
+              id: randomUUID(),
+              type: "object.delete",
+              expectedVersion: 1,
+              objectId: object.id,
+            },
             actor,
           ),
         /owner or GM/,
@@ -174,7 +191,12 @@ test("legacy objects are GM-controlled and unavailable targets do not change sta
   assert.equal(
     applyCommand(
       state,
-      { id: randomUUID(), type: "object.delete", objectId: d.id },
+      {
+        id: randomUUID(),
+        type: "object.delete",
+        expectedVersion: 1,
+        objectId: d.id,
+      },
       gm,
     ).drawings.length,
     0,
@@ -183,7 +205,12 @@ test("legacy objects are GM-controlled and unavailable targets do not change sta
     () =>
       applyCommand(
         state,
-        { id: randomUUID(), type: "object.delete", objectId: randomUUID() },
+        {
+          id: randomUUID(),
+          type: "object.delete",
+          expectedVersion: 1,
+          objectId: randomUUID(),
+        },
         gm,
       ),
     /no longer exists/,
@@ -225,7 +252,7 @@ test("tokens and drawings share an ID namespace, preventing ambiguous permission
   assert.equal(
     tableSchema.safeParse({
       ...withToken,
-      drawings: [{ ...d, ownerId: bob.id }],
+      drawings: [{ ...d, version: 1, ownerId: bob.id }],
     }).success,
     false,
   );
@@ -242,15 +269,15 @@ test("version 1 migration preserves data/revision and defaults to GM control wit
   Reflect.deleteProperty(legacy, "notes");
   const result = restoreTable(legacy);
   assert.equal(result.migrated, true);
-  assert.equal(result.state.schemaVersion, 4);
+  assert.equal(result.state.schemaVersion, 5);
   assert.equal(result.state.revision, 42);
   assert.deepEqual(
     result.state.tokens,
-    legacy.tokens.map((t) => ({ ...t, ownerId: null })),
+    legacy.tokens.map((t) => ({ ...t, ownerId: null, version: 1 })),
   );
   assert.deepEqual(
     result.state.drawings,
-    legacy.drawings.map((d) => ({ ...d, ownerId: null })),
+    legacy.drawings.map((d) => ({ ...d, ownerId: null, version: 1 })),
   );
   assert.equal(restoreTable(result.state).migrated, false);
   assert.throws(() => restoreTable({ ...legacy, schemaVersion: 2 }));

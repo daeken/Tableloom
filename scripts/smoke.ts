@@ -310,6 +310,62 @@ try {
     await confirmed;
     const result = (await rolled).state.rolls[0]!;
     assert.equal(result.expression, "1d6");
+    const tokenId = randomUUID(),
+      addId = randomUUID();
+    const added = acknowledgement(live, addId);
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: addId,
+          type: "token.add",
+          token: {
+            id: tokenId,
+            name: "Smoke scout",
+            position: { x: 10, y: 20 },
+            color: "#405f4d",
+          },
+        },
+      }),
+    );
+    await added;
+    const moveId = randomUUID(),
+      moved = acknowledgement(live, moveId);
+    const movedView = snapshot(
+      live,
+      (message) => message.state.tokens[0]?.version === 2,
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: moveId,
+          type: "token.move",
+          tokenId,
+          expectedVersion: 1,
+          position: { x: 50, y: 60 },
+        },
+      }),
+    );
+    await moved;
+    assert.deepEqual((await movedView).state.tokens[0]?.position, {
+      x: 50,
+      y: 60,
+    });
+    const deleteId = randomUUID(),
+      deleted = acknowledgement(live, deleteId);
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: deleteId,
+          type: "object.delete",
+          objectId: tokenId,
+          expectedVersion: 2,
+        },
+      }),
+    );
+    await deleted;
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -350,5 +406,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged context-bound live dice, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits, roll archive/cleanup, and clean shutdown.",
 );

@@ -72,6 +72,7 @@ test("commands validate IDs, finite coordinates, bounded payloads, and extension
     commandSchema.safeParse({
       id: randomUUID(),
       type: "token.move",
+      expectedVersion: 1,
       tokenId: randomUUID(),
       position: { x: Infinity, y: 2 },
     }).success,
@@ -81,6 +82,7 @@ test("commands validate IDs, finite coordinates, bounded payloads, and extension
     commandSchema.safeParse({
       id: randomUUID(),
       type: "token.move",
+      expectedVersion: 1,
       tokenId: randomUUID(),
       position: { x: 10001, y: 2 },
     }).success,
@@ -108,6 +110,7 @@ test("mutations do not mutate old snapshots and reject duplicate/missing objects
     {
       id: randomUUID(),
       type: "token.move",
+      expectedVersion: 1,
       tokenId: token.id,
       position: { x: 40, y: 50 },
     },
@@ -124,6 +127,7 @@ test("mutations do not mutate old snapshots and reject duplicate/missing objects
       {
         id: randomUUID(),
         type: "token.move",
+        expectedVersion: 1,
         tokenId: token.id,
         position: { x: 0, y: 0 },
       },
@@ -132,7 +136,12 @@ test("mutations do not mutate old snapshots and reject duplicate/missing objects
   );
   const removed = applyCommand(
     moved,
-    { id: randomUUID(), type: "object.delete", objectId: token.id },
+    {
+      id: randomUUID(),
+      type: "object.delete",
+      expectedVersion: moved.tokens[0]!.version,
+      objectId: token.id,
+    },
     player,
   );
   assert.equal(removed.tokens.length, 0);

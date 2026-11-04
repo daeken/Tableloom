@@ -26,7 +26,7 @@ import { transaction } from "./database.js";
 
 const campaignDataSchema = z
   .object({
-    schemaVersion: z.literal(4),
+    schemaVersion: z.literal(5),
     revision: tableSchema.shape.revision,
     rolls: tableSchema.shape.rolls,
     notes: tableSchema.shape.notes,
@@ -98,7 +98,7 @@ export class TableStore {
       const stored = this.db
         .prepare("SELECT version FROM campaign_storage_version WHERE id = 1")
         .get();
-      z.literal(1).parse(stored?.version);
+      z.union([z.literal(1), z.literal(2)]).parse(stored?.version);
       if (
         ["campaign_records", "scene_records", "campaign_receipts"].some(
           (name) => !this.hasTable(name),
@@ -109,6 +109,7 @@ export class TableStore {
         throw new Error(
           "Legacy and campaign storage coexist. Restore a consistent backup before starting.",
         );
+      if (stored?.version === 1) this.upgradeObjectVersions();
       return;
     }
     if (
@@ -172,9 +173,78 @@ export class TableStore {
     }
     this.db
       .prepare(
-        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 1)",
+        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 2)",
       )
       .run();
+  }
+
+  private upgradeObjectVersions() {
+    this.getCampaign(DEFAULT_CAMPAIGN_ID);
+    if (this.db.prepare("PRAGMA foreign_key_check(scene_records)").all().length)
+      throw new Error("Campaign scene storage is inconsistent.");
+    const legacyCampaign = campaignDataSchema.extend({
+      schemaVersion: z.literal(4),
+    });
+    const legacyScene = z
+      .object({
+        tokens: z
+          .array(
+            tableSchema.shape.tokens.element.omit({ version: true }).strict(),
+          )
+          .max(200),
+        drawings: z
+          .array(
+            tableSchema.shape.drawings.element.omit({ version: true }).strict(),
+          )
+          .max(2000),
+      })
+      .strict();
+    for (const row of this.db
+      .prepare("SELECT id, state_json FROM campaign_records")
+      .all()) {
+      const id = z.uuid().parse(row.id),
+        campaign = this.getCampaign(id);
+      const data = legacyCampaign.parse(json(row.state_json));
+      const scenes = this.db
+        .prepare(
+          "SELECT id, state_json FROM scene_records WHERE campaign_id = ?",
+        )
+        .all(id);
+      if (!scenes.some((scene) => scene.id === campaign.activeSceneId))
+        throw new Error("Campaign storage is incomplete.");
+      for (const scene of scenes) {
+        const state = restoreTable({
+          ...data,
+          ...legacyScene.parse(json(scene.state_json)),
+          systemId: campaign.system.id,
+        }).state;
+        this.db
+          .prepare(
+            "UPDATE scene_records SET state_json = ? WHERE campaign_id = ? AND id = ?",
+          )
+          .run(
+            JSON.stringify(
+              sceneDataSchema.parse({
+                tokens: state.tokens,
+                drawings: state.drawings,
+              }),
+            ),
+            id,
+            z.uuid().parse(scene.id),
+          );
+      }
+      this.db
+        .prepare("UPDATE campaign_records SET state_json = ? WHERE id = ?")
+        .run(
+          JSON.stringify(
+            campaignDataSchema.parse({ ...data, schemaVersion: 5 }),
+          ),
+          id,
+        );
+    }
+    this.db.exec(
+      "UPDATE campaign_storage_version SET version = 2 WHERE id = 1",
+    );
   }
 
   listCampaigns(): Campaign[] {
