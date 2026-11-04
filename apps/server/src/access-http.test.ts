@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { WebSocket } from "ws";
 import { createApp } from "./app.js";
+import { serverMessageSchema } from "@tableloom/core";
+import type { ServerMessage } from "@tableloom/core";
 import { sessionToken } from "./access-http.js";
 import { accessStatusSchema, invitationSchema } from "@tableloom/core/access";
 
@@ -42,27 +44,23 @@ async function socket(url: string, cookie: string) {
   const ws = new WebSocket(`${url.replace("http", "ws")}/api/live?name=Fake`, {
     headers: { Origin: url, Cookie: cookie },
   });
-  const messages: { type: string; state?: { revision: number } }[] = [];
+  const messages: ServerMessage[] = [];
   ws.on("message", (raw) =>
-    messages.push(JSON.parse(raw.toString()) as (typeof messages)[number]),
+    messages.push(serverMessageSchema.parse(JSON.parse(raw.toString()))),
   );
   await once(ws, "open");
   return { ws, messages };
 }
 
-async function waitForRevision(
-  messages: { type: string; state?: { revision: number } }[],
-  revision: number,
-) {
+async function waitForRoll(messages: ServerMessage[]) {
   const deadline = Date.now() + 3000;
   while (
     !messages.some(
       (message) =>
-        message.type === "snapshot" && message.state?.revision === revision,
+        message.type === "snapshot" && message.state.rolls.length === 1,
     )
   ) {
-    if (Date.now() > deadline)
-      throw new Error(`No table snapshot at revision ${revision}`);
+    if (Date.now() > deadline) throw new Error("No roll snapshot arrived");
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
@@ -240,7 +238,7 @@ test("live sockets lose access on logout and cannot receive later broadcasts", a
     assert.equal(code, 4001);
     assert.ok(
       !joined.messages.some(
-        (m) => m.type === "snapshot" && m.state?.revision === 1,
+        (m) => m.type === "snapshot" && m.state.rolls.length === 1,
       ),
     );
     host.ws.send(
@@ -250,7 +248,7 @@ test("live sockets lose access on logout and cannot receive later broadcasts", a
         expression: "d6",
       }),
     );
-    await waitForRevision(host.messages, 1);
+    await waitForRoll(host.messages);
     assert.equal(
       (
         await app.inject({ url: "/api/table", headers: { cookie: hostCookie } })
@@ -301,7 +299,7 @@ test("expired live sessions are rejected before accepting a mutation", async () 
       url: "/api/table",
       headers: { cookie: recovered },
     });
-    assert.equal(table.json().revision, 0);
+    assert.equal(table.json().rolls.length, 0);
   } finally {
     ws?.terminate();
     await app.close();
@@ -331,11 +329,11 @@ test("expired idle sockets receive no new snapshot when a valid member broadcast
         expression: "d6",
       }),
     );
-    await waitForRevision(host.messages, 1);
+    await waitForRoll(host.messages);
     assert.ok(
       joined.messages.every(
         (message) =>
-          message.type !== "snapshot" || message.state?.revision === 0,
+          message.type !== "snapshot" || message.state.rolls.length === 0,
       ),
     );
   } finally {

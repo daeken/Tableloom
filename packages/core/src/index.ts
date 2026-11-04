@@ -29,7 +29,7 @@ export const tokenSchema = z.object({
 export type Token = z.infer<typeof tokenSchema>;
 export const tokenInputSchema = tokenSchema.omit({ ownerId: true }).strict();
 
-export const rollSchema = z.object({
+export const diceResultSchema = z.object({
   id: z.uuid(),
   actor: z.string().min(1).max(32),
   expression: z.string().max(32),
@@ -39,15 +39,28 @@ export const rollSchema = z.object({
   total: z.number().int(),
   at: z.iso.datetime(),
 });
+export type DiceResult = z.infer<typeof diceResultSchema>;
+export const rollVisibilitySchema = z.enum(["public", "gm"]);
+export type RollVisibility = z.infer<typeof rollVisibilitySchema>;
+export const rollSchema = diceResultSchema
+  .extend({
+    ownerId: z.uuid().nullable(),
+    visibility: rollVisibilitySchema,
+  })
+  .refine((roll) => roll.visibility === "public" || roll.ownerId !== null, {
+    message: "A private roll must have an authenticated owner.",
+  });
 export type Roll = z.infer<typeof rollSchema>;
+export const MAX_ROLL_HISTORY = 100;
+export const MAX_TOTAL_ROLLS = 1100;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
   tokens: z.array(tokenSchema).max(200),
-  rolls: z.array(rollSchema).max(100),
+  rolls: z.array(rollSchema).max(MAX_TOTAL_ROLLS),
 });
 export const tableSchema = tableDataSchema.superRefine((state, context) => {
   const ids = new Set<string>();
@@ -59,10 +72,27 @@ export const tableSchema = tableDataSchema.superRefine((state, context) => {
       });
     ids.add(object.id);
   }
+  const audiences = new Map<string, number>();
+  for (const roll of state.rolls) {
+    const key = roll.visibility === "public" ? "public" : roll.ownerId!;
+    const count = (audiences.get(key) ?? 0) + 1;
+    if (count > MAX_ROLL_HISTORY)
+      context.addIssue({
+        code: "custom",
+        message: "Roll history exceeds an audience limit.",
+        path: ["rolls"],
+      });
+    audiences.set(key, count);
+  }
 });
 export type TableState = z.infer<typeof tableSchema>;
+// Public wire state has no global revision: that counter would reveal private activity.
+export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
+  version: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -70,7 +100,11 @@ export const createTable = (): TableState => ({
   rolls: [],
 });
 
-const legacyTableSchema = tableDataSchema.extend({
+const version2TableSchema = tableDataSchema.extend({
+  schemaVersion: z.literal(2),
+  rolls: z.array(diceResultSchema.strict()).max(100),
+});
+const version1TableSchema = version2TableSchema.extend({
   schemaVersion: z.literal(1),
   drawings: z.array(drawingInputSchema).max(2000),
   tokens: z.array(tokenInputSchema).max(200),
@@ -81,54 +115,77 @@ export function restoreTable(value: unknown): {
   state: TableState;
   migrated: boolean;
 } {
-  const legacy = legacyTableSchema.safeParse(value);
-  if (!legacy.success)
-    return { state: tableSchema.parse(value), migrated: false };
+  const current = tableSchema.safeParse(value);
+  if (current.success) return { state: current.data, migrated: false };
+  const legacy = z
+    .union([version1TableSchema, version2TableSchema])
+    .parse(value);
   const state = tableSchema.parse({
-    ...legacy.data,
-    schemaVersion: 2,
-    drawings: legacy.data.drawings.map((drawing) => ({
-      ...drawing,
+    ...legacy,
+    schemaVersion: 3,
+    drawings:
+      legacy.schemaVersion === 1
+        ? legacy.drawings.map((drawing) => ({ ...drawing, ownerId: null }))
+        : legacy.drawings,
+    tokens:
+      legacy.schemaVersion === 1
+        ? legacy.tokens.map((token) => ({ ...token, ownerId: null }))
+        : legacy.tokens,
+    rolls: legacy.rolls.map((roll) => ({
+      ...roll,
       ownerId: null,
+      visibility: "public",
     })),
-    tokens: legacy.data.tokens.map((token) => ({ ...token, ownerId: null })),
   });
   return { state, migrated: true };
 }
 
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
-  z.object({
-    ...envelope,
-    type: z.literal("drawing.add"),
-    drawing: drawingInputSchema,
-  }),
-  z.object({
-    ...envelope,
-    type: z.literal("token.add"),
-    token: tokenInputSchema,
-  }),
-  z.object({
-    ...envelope,
-    type: z.literal("token.move"),
-    tokenId: z.uuid(),
-    position: pointSchema,
-  }),
-  z.object({
-    ...envelope,
-    type: z.literal("object.delete"),
-    objectId: z.uuid(),
-  }),
-  z.object({
-    ...envelope,
-    type: z.literal("dice.roll"),
-    expression: z.string().trim().min(1).max(32),
-  }),
-  z.object({
-    ...envelope,
-    type: z.literal("system.set"),
-    systemId: systemIdSchema,
-  }),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("drawing.add"),
+      drawing: drawingInputSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("token.add"),
+      token: tokenInputSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("token.move"),
+      tokenId: z.uuid(),
+      position: pointSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("object.delete"),
+      objectId: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("dice.roll"),
+      expression: z.string().trim().min(1).max(32),
+      visibility: rollVisibilitySchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
+      type: z.literal("system.set"),
+      systemId: systemIdSchema,
+    })
+    .strict(),
 ]);
 export type Command = z.infer<typeof commandSchema>;
 export type CommandInput = Command extends infer C
@@ -140,7 +197,7 @@ export type CommandInput = Command extends infer C
 export const serverMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("snapshot"),
-    state: tableSchema,
+    state: tableViewSchema,
     participants: z.number().int().nonnegative(),
   }),
   z.object({

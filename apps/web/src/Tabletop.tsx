@@ -5,7 +5,7 @@ import type {
   CommandInput,
   DrawingInput,
   Point,
-  TableState,
+  TableView,
   Token,
 } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
@@ -17,7 +17,7 @@ type Gesture =
   | { kind: "move"; token: Token }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
-  state: TableState;
+  state: TableView;
   member: Member | null;
   tool: Tool;
   color: string;

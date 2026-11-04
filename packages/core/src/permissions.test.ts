@@ -241,7 +241,7 @@ test("version 1 migration preserves data/revision and defaults to GM control wit
   };
   const result = restoreTable(legacy);
   assert.equal(result.migrated, true);
-  assert.equal(result.state.schemaVersion, 2);
+  assert.equal(result.state.schemaVersion, 3);
   assert.equal(result.state.revision, 42);
   assert.deepEqual(
     result.state.tokens,

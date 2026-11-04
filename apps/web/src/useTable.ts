@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { serverMessageSchema } from "@tableloom/core";
-import type { CommandInput, TableState } from "@tableloom/core";
+import type { CommandInput, TableView } from "@tableloom/core";
 
 export function useTable(
-  memberId: string | null,
+  viewerKey: string | null,
   onUnauthorized: () => Promise<void>,
 ) {
-  const [state, setState] = useState<TableState | null>(null);
+  const [snapshot, setSnapshot] = useState<{
+    viewerKey: string;
+    state: TableView;
+  } | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "offline">(
     "connecting",
   );
@@ -14,11 +17,12 @@ export function useTable(
   const [error, setError] = useState("");
   const socket = useRef<WebSocket | null>(null);
   const ready = useRef(false);
+  const socketViewer = useRef<string | null>(null);
 
   useEffect(() => {
-    setState(null);
+    setSnapshot(null);
     setParticipants(0);
-    if (!memberId) return;
+    if (!viewerKey) return;
     let stopped = false;
     let retry: ReturnType<typeof setTimeout>;
     let attempts = 0;
@@ -28,6 +32,7 @@ export function useTable(
       const url = new URL("/api/live", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(url);
+      socketViewer.current = viewerKey;
       socket.current = ws;
       ws.onmessage = (event) => {
         if (stopped || socket.current !== ws) return;
@@ -36,7 +41,7 @@ export function useTable(
             JSON.parse(String(event.data)),
           );
           if (message.type === "snapshot") {
-            setState(message.state);
+            setSnapshot({ viewerKey, state: message.state });
             setParticipants(message.participants);
             ready.current = true;
             setStatus("connected");
@@ -53,7 +58,7 @@ export function useTable(
         ready.current = false;
         setStatus("offline");
         if (event.code === 4001) {
-          setState(null);
+          setSnapshot(null);
           setParticipants(0);
           void onUnauthorized();
           return;
@@ -67,28 +72,38 @@ export function useTable(
     return () => {
       stopped = true;
       ready.current = false;
+      socketViewer.current = null;
       clearTimeout(retry);
       socket.current?.close();
     };
-  }, [memberId, onUnauthorized]);
+  }, [viewerKey, onUnauthorized]);
 
-  const send = useCallback((command: CommandInput) => {
-    if (!ready.current || socket.current?.readyState !== WebSocket.OPEN) {
-      setError(
-        "The table is reconnecting. Try that change again once connected.",
+  const send = useCallback(
+    (command: CommandInput) => {
+      if (
+        !viewerKey ||
+        socketViewer.current !== viewerKey ||
+        !ready.current ||
+        socket.current?.readyState !== WebSocket.OPEN
+      ) {
+        setError(
+          "The table is reconnecting. Try that change again once connected.",
+        );
+        return false;
+      }
+      socket.current.send(
+        JSON.stringify({ ...command, id: crypto.randomUUID() }),
       );
-      return false;
-    }
-    socket.current.send(
-      JSON.stringify({ ...command, id: crypto.randomUUID() }),
-    );
-    return true;
-  }, []);
+      return true;
+    },
+    [viewerKey],
+  );
 
+  const current = snapshot?.viewerKey === viewerKey;
   return {
-    state,
-    status,
-    participants,
+    state: current ? snapshot.state : null,
+    status: current ? status : ("connecting" as const),
+    participants: current ? participants : 0,
     error,
     clearError: () => setError(""),
     send,

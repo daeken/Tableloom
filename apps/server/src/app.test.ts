@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import { serverMessageSchema, tableSchema } from "@tableloom/core";
+import { serverMessageSchema, tableViewSchema } from "@tableloom/core";
 import { accessStatusSchema } from "@tableloom/core/access";
-import type { ServerMessage } from "@tableloom/core";
+import type { ServerMessage, TableView } from "@tableloom/core";
 import { createApp } from "./app.js";
 import { TableStore } from "./store.js";
 
@@ -94,10 +94,7 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
     await until(() =>
       [alice, bob].every((c) =>
         c.messages.some(
-          (m) =>
-            m.type === "snapshot" &&
-            m.state.revision === 1 &&
-            m.state.tokens[0]?.name === "Hero",
+          (m) => m.type === "snapshot" && m.state.tokens[0]?.name === "Hero",
         ),
       ),
     );
@@ -119,10 +116,7 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
     );
     await until(() =>
       alice.messages.some(
-        (m) =>
-          m.type === "snapshot" &&
-          m.state.revision === 2 &&
-          m.state.drawings.length === 1,
+        (m) => m.type === "snapshot" && m.state.drawings.length === 1,
       ),
     );
     alice.ws.send(
@@ -135,10 +129,7 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
     );
     await until(() =>
       alice.messages.some(
-        (m) =>
-          m.type === "snapshot" &&
-          m.state.revision === 3 &&
-          m.state.tokens[0]?.position.x === 80,
+        (m) => m.type === "snapshot" && m.state.tokens[0]?.position.x === 80,
       ),
     );
     const rollCommand = {
@@ -171,13 +162,12 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
     await until(
       () => bob.messages.filter((m) => m.type === "error").length === 3,
     );
-    const data = (await (
-      await fetch(`${url}/api/table`, { headers: { cookie: aliceCookie } })
-    ).json()) as {
-      revision: number;
-      rolls: { actor: string; dice: number[]; total: number }[];
-    };
-    assert.equal(data.revision, 4);
+    const data = tableViewSchema.parse(
+      await (
+        await fetch(`${url}/api/table`, { headers: { cookie: aliceCookie } })
+      ).json(),
+    );
+    assert.equal("revision" in data, false);
     assert.equal(data.rolls.length, 1);
     assert.equal(data.rolls[0]?.actor, "Alice");
     assert.equal(
@@ -200,7 +190,7 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
     clients.push(reconnected.ws);
     await until(() =>
       reconnected.messages.some(
-        (m) => m.type === "snapshot" && m.state.revision === 4,
+        (m) => m.type === "snapshot" && m.state.version === data.version,
       ),
     );
     reconnected.ws.send(JSON.stringify(rollCommand));
@@ -209,16 +199,14 @@ test("two real clients synchronize changes, reject invalid commands, deduplicate
         reconnected.messages.filter((m) => m.type === "snapshot").length === 2,
     );
     assert.equal(
-      (
-        (await (
+      tableViewSchema.parse(
+        await (
           await fetch(`${restarted}/api/table`, {
             headers: { cookie: aliceCookie },
           })
-        ).json()) as {
-          revision: number;
-        }
-      ).revision,
-      4,
+        ).json(),
+      ).version,
+      data.version,
     );
   } finally {
     for (const ws of clients) ws.terminate();
@@ -296,11 +284,12 @@ test("real player sockets cannot edit other owners, spoof ownership, or change G
       connection.ws.send(JSON.stringify(payload));
       await until(() => connection.messages.slice(start).some(matches));
     }
-    const atRevision = (revision: number) => (message: ServerMessage) =>
-      message.type === "snapshot" && message.state.revision === revision;
+    const at =
+      (check: (view: TableView) => boolean) => (message: ServerMessage) =>
+        message.type === "snapshot" && check(message.state);
     const rejected = (message: ServerMessage) => message.type === "error";
     const read = async () =>
-      tableSchema.parse(
+      tableViewSchema.parse(
         (
           await app.inject({
             url: "/api/table",
@@ -322,9 +311,10 @@ test("real player sockets cannot edit other owners, spoof ownership, or change G
           color: "#405f4d",
         },
       },
-      atRevision(1),
+      at((view) => view.tokens[0]?.id === tokenId),
     );
     assert.equal((await read()).tokens[0]?.ownerId, alice.member.id);
+    const afterToken = (await read()).version;
     await issue(
       bob,
       {
@@ -361,7 +351,7 @@ test("real player sockets cannot edit other owners, spoof ownership, or change G
       },
       rejected,
     );
-    assert.equal((await read()).revision, 1);
+    assert.equal((await read()).version, afterToken);
     assert.deepEqual((await read()).tokens[0]?.position, { x: 20, y: 20 });
     await issue(
       bob,
@@ -378,15 +368,16 @@ test("real player sockets cannot edit other owners, spoof ownership, or change G
           color: "#405f4d",
         },
       },
-      atRevision(2),
+      at((view) => view.drawings[0]?.id === drawingId),
     );
     assert.equal((await read()).drawings[0]?.ownerId, bob.member.id);
+    const afterDrawing = (await read()).version;
     await issue(
       alice,
       { id: randomUUID(), type: "object.delete", objectId: drawingId },
       rejected,
     );
-    assert.equal((await read()).revision, 2);
+    assert.equal((await read()).version, afterDrawing);
     await issue(
       alice,
       {
@@ -395,7 +386,7 @@ test("real player sockets cannot edit other owners, spoof ownership, or change G
         tokenId,
         position: { x: 40, y: 40 },
       },
-      atRevision(3),
+      at((view) => view.tokens[0]?.position.x === 40),
     );
     await issue(
       host,
@@ -405,25 +396,32 @@ test("real player sockets cannot edit other owners, spoof ownership, or change G
         tokenId,
         position: { x: 60, y: 60 },
       },
-      atRevision(4),
+      at((view) => view.tokens[0]?.position.x === 60),
     );
     await issue(
       host,
       { id: randomUUID(), type: "object.delete", objectId: drawingId },
-      atRevision(5),
+      at(
+        (view) =>
+          view.drawings.length === 0 && view.tokens[0]?.position.x === 60,
+      ),
     );
     // A denied request does not consume its command receipt.
-    await issue(host, settings, atRevision(6));
+    await issue(
+      host,
+      settings,
+      at((view) => view.systemId === "kids-on-bikes"),
+    );
     await issue(
       bob,
       { id: randomUUID(), type: "dice.roll", expression: "d6" },
-      atRevision(7),
+      at((view) => view.rolls.length === 1),
     );
     assert.equal((await read()).rolls[0]?.actor, "Bob");
     await issue(
       alice,
       { id: randomUUID(), type: "object.delete", objectId: tokenId },
-      atRevision(8),
+      at((view) => view.tokens.length === 0 && view.rolls.length === 1),
     );
     const final = await read();
     assert.equal(final.tokens.length, 0);

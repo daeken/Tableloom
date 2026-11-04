@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import {
   ArrowUpRight,
@@ -23,6 +23,7 @@ import { SystemPanel as CyberpunkPanel } from "@tableloom/cyberpunk-red/client";
 import { SystemPanel as BikesPanel } from "@tableloom/kids-on-bikes/client";
 import { SystemPanel as BroomsPanel } from "@tableloom/kids-on-brooms/client";
 import { parseDice } from "@tableloom/core";
+import type { RollVisibility } from "@tableloom/core";
 import { Tabletop } from "./Tabletop.js";
 import type { Tool } from "./Tabletop.js";
 import { useTable } from "./useTable.js";
@@ -52,21 +53,38 @@ export function App() {
   const { access, error: accessError, refresh, accept } = useAccess();
   const member = access?.member ?? null;
   const name = member?.name ?? null;
+  const viewerKey = member ? `${member.id}:${member.role}` : null;
   const [inviteOpen, setInviteOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState(colors[0]!);
   const [tokenName, setTokenName] = useState("Adventurer");
-  const [expression, setExpression] = useState("2d6");
+  const emptyDraft = {
+    viewerKey,
+    expression: "2d6",
+    visibility: "public" as RollVisibility,
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+  const currentDraft = draft.viewerKey === viewerKey ? draft : emptyDraft;
+  const expression = currentDraft.expression;
+  const rollVisibility = currentDraft.visibility;
+  const setExpression = (value: string) =>
+    setDraft({ ...currentDraft, expression: value });
+  const setRollVisibility = (value: RollVisibility) =>
+    setDraft({ ...currentDraft, visibility: value });
   const [rollError, setRollError] = useState("");
   const [tab, setTab] = useState<"rolls" | "game">("rolls");
   const [copied, setCopied] = useState(false);
-  const table = useTable(member?.id ?? null, refresh);
+  const table = useTable(viewerKey, refresh);
   const { status, participants, error, clearError, send } = table;
   const state = member ? table.state : null;
   const connected = status === "connected";
   const currentModule =
     modules.find((m) => m.id === state?.systemId) ?? cyberpunk;
   const Panel = panels[currentModule.id as keyof typeof panels];
+  useEffect(() => {
+    setDraft({ viewerKey, expression: "2d6", visibility: "public" });
+    setRollError("");
+  }, [viewerKey]);
 
   async function logout() {
     try {
@@ -82,7 +100,11 @@ export function App() {
     try {
       parseDice(value);
       setRollError("");
-      send({ type: "dice.roll", expression: value });
+      send({
+        type: "dice.roll",
+        expression: value,
+        visibility: rollVisibility,
+      });
     } catch (err) {
       setRollError(err instanceof Error ? err.message : "Check your roll.");
     }
@@ -368,6 +390,20 @@ export function App() {
                 <h2>A roll of the dice.</h2>
                 <p className="muted">A little uncertainty goes a long way.</p>
                 <form onSubmit={roll}>
+                  <label htmlFor="roll-visibility">Who sees this roll?</label>
+                  <select
+                    id="roll-visibility"
+                    className="roll-visibility"
+                    value={rollVisibility}
+                    onChange={(event) =>
+                      setRollVisibility(
+                        event.target.value === "gm" ? "gm" : "public",
+                      )
+                    }
+                  >
+                    <option value="public">Everyone at the table</option>
+                    <option value="gm">You and the GM</option>
+                  </select>
                   <label htmlFor="dice-expression">Dice expression</label>
                   <div className="roll-input">
                     <Dice5 size={19} />
@@ -440,6 +476,9 @@ export function App() {
                             <span className="roll-expression">
                               {result.expression}
                             </span>
+                            {result.visibility === "gm" && (
+                              <span className="roll-private">Private roll</span>
+                            )}
                             <p className="roll-breakdown">
                               [{result.dice.join(", ")}]
                               {result.modifier

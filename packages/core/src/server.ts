@@ -1,14 +1,25 @@
-import { randomInt, randomUUID } from "node:crypto";
-import { parseDice } from "./index.js";
-import type { Command, Roll, TableState } from "./index.js";
+import { createHash, randomInt, randomUUID } from "node:crypto";
+import {
+  MAX_ROLL_HISTORY,
+  MAX_TOTAL_ROLLS,
+  parseDice,
+  tableViewSchema,
+} from "./index.js";
+import type {
+  Command,
+  DiceResult,
+  Roll,
+  TableState,
+  TableView,
+} from "./index.js";
 import type { Member } from "./access.js";
-import { authorizeCommand } from "./permissions.js";
+import { authorizeCommand, canSeeRoll } from "./permissions.js";
 
 export function rollDice(
   expression: string,
   actor: string,
   random: (min: number, max: number) => number = randomInt,
-): Roll {
+): DiceResult {
   const { count, sides, modifier } = parseDice(expression);
   const dice = Array.from({ length: count }, () => random(1, sides + 1));
   return {
@@ -21,6 +32,33 @@ export function rollDice(
     total: dice.reduce((sum, value) => sum + value, modifier),
     at: new Date().toISOString(),
   };
+}
+
+/** Every outbound table payload must pass through this per-member projection. */
+export function projectTable(state: TableState, member: Member): TableView {
+  const visible = {
+    schemaVersion: state.schemaVersion,
+    systemId: state.systemId,
+    drawings: state.drawings,
+    tokens: state.tokens,
+    rolls: state.rolls.filter((roll) => canSeeRoll(member, roll)),
+  };
+  const version = createHash("sha256")
+    .update(JSON.stringify(visible))
+    .digest("hex");
+  return tableViewSchema.parse({ ...visible, version });
+}
+
+function appendRoll(history: Roll[], roll: Roll): Roll[] {
+  const sameAudience = (other: Roll) =>
+    other.visibility === roll.visibility &&
+    (roll.visibility === "public" || other.ownerId === roll.ownerId);
+  const bucket = history.filter(sameAudience);
+  const evicted = bucket.length >= MAX_ROLL_HISTORY ? bucket[0]?.id : undefined;
+  const retained = history.filter((other) => other.id !== evicted);
+  if (retained.length >= MAX_TOTAL_ROLLS)
+    throw new Error("The table has reached its roll history limit.");
+  return [...retained, roll];
 }
 
 export function applyCommand(
@@ -65,10 +103,11 @@ export function applyCommand(
       next.systemId = command.systemId;
       break;
     case "dice.roll":
-      next.rolls = [
-        ...next.rolls,
-        rollDice(command.expression, actor.name),
-      ].slice(-100);
+      next.rolls = appendRoll(next.rolls, {
+        ...rollDice(command.expression, actor.name),
+        ownerId: actor.id,
+        visibility: command.visibility ?? "public",
+      });
       break;
   }
   next.revision += 1;

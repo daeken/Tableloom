@@ -6,7 +6,7 @@ import type { WebSocket } from "ws";
 import { z } from "zod";
 import { commandSchema } from "@tableloom/core";
 import type { ServerMessage } from "@tableloom/core";
-import { applyCommand } from "@tableloom/core/server";
+import { applyCommand, projectTable } from "@tableloom/core/server";
 import { TableStore } from "./store.js";
 import { manifest as cyberpunk } from "@tableloom/cyberpunk-red";
 import { manifest as bikes } from "@tableloom/kids-on-bikes";
@@ -52,6 +52,7 @@ export async function createApp(options: {
   const access = new AccessStore(options.databasePath, options.hostKey, now);
   let state = store.load();
   const clients = new Map<WebSocket, string>();
+  const sentVersions = new Map<WebSocket, string>();
   const send = (socket: WebSocket, message: ServerMessage) => {
     if (socket.readyState !== 1) return;
     if (!access.authenticate(clients.get(socket) ?? "")) {
@@ -67,11 +68,17 @@ export async function createApp(options: {
   const broadcast = (message: ServerMessage) => {
     for (const socket of clients.keys()) send(socket, message);
   };
-  const snapshot = (): ServerMessage => ({
-    type: "snapshot",
-    state,
-    participants: clients.size,
-  });
+  const sendSnapshot = (socket: WebSocket, force = false) => {
+    const member = access.authenticate(clients.get(socket) ?? "");
+    if (!member) {
+      socket.close(4001, "Sign in again.");
+      return;
+    }
+    const view = projectTable(state, member);
+    if (!force && sentVersions.get(socket) === view.version) return;
+    send(socket, { type: "snapshot", state: view, participants: clients.size });
+    sentVersions.set(socket, view.version);
+  };
   await app.register(websocket, {
     options: { maxPayload: 256 * 1024 },
     preClose: function (done) {
@@ -92,11 +99,12 @@ export async function createApp(options: {
           socket.close(4001, "You signed out of the table.");
     },
   });
-  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 2 }));
+  app.get("/api/health", async () => ({ status: "ok", protocolVersion: 3 }));
   app.get("/api/table", async (request, reply) => {
-    if (!access.authenticate(sessionToken(request.headers.cookie)))
+    const member = access.authenticate(sessionToken(request.headers.cookie));
+    if (!member)
       return reply.code(401).send({ error: "Sign in to the table first." });
-    return state;
+    return projectTable(state, member);
   });
   app.get(
     "/api/live",
@@ -116,7 +124,7 @@ export async function createApp(options: {
         return;
       }
       clients.set(socket, credential);
-      send(socket, snapshot());
+      sendSnapshot(socket, true);
       broadcast({ type: "presence", participants: clients.size });
       let windowStart = Date.now();
       let count = 0;
@@ -162,13 +170,13 @@ export async function createApp(options: {
           )
             throw new Error("That system is not installed.");
           if (store.hasCommand(command.id)) {
-            send(socket, snapshot());
+            sendSnapshot(socket, true);
             return;
           }
           const next = applyCommand(state, command, member);
           store.save(next, command.id);
           state = next;
-          broadcast(snapshot());
+          for (const client of clients.keys()) sendSnapshot(client);
         } catch (error) {
           app.log.debug({ err: error }, "Rejected table command");
           const message =
@@ -186,6 +194,7 @@ export async function createApp(options: {
       socket.on("close", () => {
         clearInterval(heartbeat);
         clients.delete(socket);
+        sentVersions.delete(socket);
         broadcast({ type: "presence", participants: clients.size });
       });
     },

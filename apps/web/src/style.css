@@ -1191,3 +1191,21 @@ p {
 .invite-dialog input {
   font-size: 10px;
 }
+
+.roll-visibility {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 14px;
+  background: #fffef7;
+  color: #526b42;
+  border: 1px solid #d8ddcd;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 11px;
+}
+.roll-private {
+  display: block;
+  font-size: 9px;
+  color: #7d816c;
+  margin-top: 5px;
+}

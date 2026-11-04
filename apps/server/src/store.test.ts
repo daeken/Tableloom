@@ -36,7 +36,7 @@ test("loading a version 1 database durably migrates ownership without adding rev
     );
     const state = store.load();
     assert.equal(state.tokens[0]?.ownerId, null);
-    assert.equal(state.schemaVersion, 2);
+    assert.equal(state.schemaVersion, 3);
     assert.equal(state.revision, 8);
     assert.deepEqual(
       JSON.parse(

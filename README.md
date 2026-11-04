@@ -2,7 +2,7 @@
 
 A self-hosted, web-based virtual tabletop for the systems you actually play. TypeScript throughout, a shared sketchable battlefield, and code-first game modules with custom sheets, rules, and content packs.
 
-**Status:** authenticated tabletop with server-enforced GM/player permissions and object ownership. Private documents and secret rolls are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
+**Status:** authenticated tabletop with object permissions and server-filtered private rolls. Private documents and GM notes are next. This README is the authoritative work queue. Cyberpunk RED, Kids on Bikes, and Kids on Brooms are the initial module targets; their rulebooks have not been supplied and no published mechanics or catalog content are implemented yet.
 
 ## Run locally
 
@@ -31,7 +31,9 @@ Configuration: `PORT` (default `3001`), `HOST` (default `127.0.0.1`), `DATA_DIR`
 
 Only authenticated members can fetch or connect to the table. Everyone can draw, create tokens, and roll dice. Players can move/delete their own tokens and delete their own drawings; the GM can edit every object and change the game system. The server assigns ownership to the creator, and clients cannot supply or change that ownership. Older objects without a recorded owner stay under GM control. Ownership reassignment is still queued.
 
-All members currently receive the entire shared scene. No private/GM-only data exists yet. Backup of the private host key and player identity recovery still need a complete recovery workflow.
+Scene objects are currently public to all table members. Before rolling, choose **Everyone at the table** or **You and the GM**. Private rolls are visible only to the roller and the GM; a GM's private rolls stay with the GM. The history marks private results explicitly. Public is the default, and already-recorded roll visibility cannot be changed. Sign-out/identity changes clear the local roll draft.
+
+Private documents and GM notes are not implemented yet. Backup of the private host key and player identity recovery still need a complete recovery workflow.
 
 ## Architecture
 
@@ -45,7 +47,11 @@ All members currently receive the entire shared scene. No private/GM-only data e
 | `systems/kids-on-bikes`  | Independent Kids on Bikes module scaffold                           |
 | `systems/kids-on-brooms` | Independent Kids on Brooms module scaffold                          |
 
-The server serializes mutations, commits before broadcasting, and sends a current snapshot on connection. Commands have IDs for retry deduplication over the last 10,000 revisions; clients do not automatically replay commands after reconnecting. Dragging and unfinished strokes are local previews; committed changes synchronize. This first protocol sends full snapshots and is deliberately small. It is not an offline-first or CRDT implementation. Table schema/protocol version 2 adds server-owned object permissions. Version 1 saves upgrade automatically on load, preserving scene content, revision, and command receipts; legacy objects receive null ownership (GM control), and the upgraded state is saved immediately. Unsupported/incomplete versions and duplicate scene object IDs fail validation rather than silently discarding data. Reload older browser tabs after upgrading.
+The server serializes mutations and commits before sending updates. Commands have IDs for retry deduplication over the last 10,000 internal revisions; clients do not automatically replay commands after reconnecting. Every HTTP table response, initial/reconnect snapshot, mutation update, and retry response uses a per-member projection. Global revision counters stay on the server. Client views use a content fingerprint computed only from visible fields, and unchanged views are not broadcast when someone else makes a private roll.
+
+Dragging and unfinished strokes are local previews; committed changes synchronize. This first protocol sends complete projected snapshots and is deliberately small. It is not an offline-first or CRDT implementation. Table schema/protocol version 3 adds roll visibility and separates internal state from client views. Version 1/2 saves upgrade automatically, preserving scene content, internal revisions, command receipts, and version 2 ownership. Older rolls remain public; ownerless legacy objects stay GM-controlled. Unsupported/incomplete saves and ambiguous object IDs fail validation. Reload older browser tabs after upgrading.
+
+Roll retention is separate for the public audience and each private roller: 100 results per audience, at most 1,100 records overall. Private rolling never evicts public history or another player's private results. A full overall history rejects growth until archive/cleanup support is added; those controls remain queued.
 
 SQLite currently uses Node 24's built-in `node:sqlite` and prepared SQL, behind a small store boundary. This avoids a native package build for self-hosters; Drizzle can be introduced when normalized campaign/document storage warrants it. The Node 24 SQLite API may emit an experimental warning.
 
@@ -74,9 +80,11 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
   - [x] Wire host-key generation/storage, setup/recovery/join/logout/invitation APIs and UI, HttpOnly session cookies, request-origin checks, and HTTP/WebSocket authentication. Recheck session expiry/revocation for live sockets, and test unauthorized access end to end.
 - [x] Enforce GM/player roles and object ownership for every command; add permission tests.
 - [ ] Introduce server-filtered private documents, GM notes, and secret rolls; test that hidden data never reaches unauthorized clients.
+  - [x] Separate internal state from per-member client views; implement persistent private rolls and visibility controls, with raw-wire/HTTP/retry/reconnect/restart leakage tests.
+  - [ ] Add bounded private/public note documents, GM notes, authorization, migrations, and a notes editor; include document visibility changes/deletion in recipient-filtering tests.
 - [ ] Add identity-preserving returning-player recovery, member management, invitation revocation, and GM ownership reassignment APIs/UI.
 - [ ] Add multiple campaigns/scenes, campaign settings, and pinned system/content-pack versions.
-- [ ] Add bounded document collections and normalized storage with schema migrations; avoid unlimited snapshot growth.
+- [ ] Add bounded document collections and normalized storage with schema migrations; add roll-history archive/cleanup controls and avoid unlimited snapshot growth.
 - [ ] Add graceful reconnect behavior for concurrent edits, protocol versions, conflict feedback, and backpressure.
 
 ### 2 — Comfortable tabletop tools
@@ -87,7 +95,7 @@ Work top to bottom unless an item is blocked. Check off only verified behavior. 
 - [ ] Add text, shape styling, layers, grid settings, measurement, and keyboard shortcuts.
 - [ ] Extend the participant count into named presence; add transient cursors, chat, and roll visibility controls.
 - [ ] Improve touch/keyboard accessibility and verify narrow-screen layouts.
-- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 639 kB before gzip).
+- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle (currently approximately 640 kB before gzip).
 
 ### 3 — Module development and character sheets
 
@@ -153,6 +161,15 @@ The **Keep building Tableloom** heartbeat is active every five minutes in this C
 - Updated browser affordances to match the policy: system selection is GM-only, delete controls are disabled for other owners, and token dragging/eraser gestures act only on editable objects. These affordances reuse the shared policy; server authorization remains authoritative.
 - Verification: `npm run check` passed with **32 tests**, strict typecheck, production builds, and the distribution smoke check. Added owner/other-player/GM matrices, ownership-spoof rejection, shared-ID collision checks, migration/restart checks, and a real three-client WebSocket test covering denied cross-owner moves/deletes, GM overrides, authenticated ownership/roll attribution, and a denied command ID subsequently used by an authorized GM. Existing two-client persistence/restart tests now operate within the permission policy. No new manual browser/layout pass was needed for these control restrictions.
 - Remaining limits: ownership is assigned at creation; GM reassignment and identity-preserving player recovery remain queued. All scene objects and public rolls are still visible to every member; private documents, GM notes, secret rolls, and per-recipient projections are the next item. There are still no published game rules or content packs. Existing third-party annotation and bundle-size notices remain.
+
+### 2026-11-04 — Per-member projections and private rolls
+
+- Split persistent `TableState` from the validated `TableView` wire contract. HTTP reads and every WebSocket snapshot path now project data for the authenticated recipient. Global revision counters are internal; visible content fingerprints remain stable when hidden results change, and unchanged views are not broadcast. The retry path also returns only the requester's projected view.
+- Added explicit public/private roll visibility and server-assigned roll ownership. A private result goes to its roller and the GM; GM-owned private results reach only the GM. The dice panel has an audience selector, applies it to quick rolls too, and labels private history entries. Cached views and roll drafts are scoped to member ID and role; identity changes hide stale data immediately, clear drafts, and prevent sends through a previous viewer's socket.
+- Commands reject unknown fields and invalid visibility, including a misspelled visibility key, instead of silently publishing an intended secret roll. Visibility is fixed when a result is recorded. Public and private retention are separate (100 public, 100 private per roller; 1,100 records total), so private churn cannot evict another audience's history. Growth at the total cap is rejected; archive/cleanup UI is still queued.
+- Added durable schema 1/2 → 3 migration. Existing object ownership and content are preserved, legacy rolls explicitly remain public, and unknown/incomplete/downgraded private save shapes fail validation. Client protocol version is 3; older browser tabs need a reload.
+- Verification: `npm run check` passed with **38 tests**, strict typecheck, production builds, and the authenticated distribution smoke check. New tests cover projection/visibility policy, unchanged fingerprints under hidden activity, audience retention, overall capacity, migration, and a real GM/Alice/Bob session that inspects raw JSON frames and HTTP bodies before/after private rolls, public ordering barriers, a guessed/replayed private command ID, reconnects, and a full server/database restart. Private result IDs/expressions and internal revisions are absent from unauthorized payloads; permitted recipients retain their results after restart.
+- Scope remains explicit: this completes private roll transport/controls, while the parent privacy work item stays unchecked until private document/GM-note CRUD, authorization, editor, and visibility-transition tests are implemented. All battlefield objects remain public. No published game rules/content were added. Existing third-party annotation and bundle-size notices remain; no deployment occurred.
 
 ## License
 

@@ -1,5 +1,13 @@
 import type { Member } from "./access.js";
-import type { Command, TableState } from "./index.js";
+import type { Command, Roll, TableState } from "./index.js";
+
+export function canSeeRoll(member: Member, roll: Roll): boolean {
+  return (
+    roll.visibility === "public" ||
+    member.role === "gm" ||
+    roll.ownerId === member.id
+  );
+}
 
 export function canEditObject(
   member: Member | null,
