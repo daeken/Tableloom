@@ -115,7 +115,7 @@ function legacy() {
   return { db, tables, access, host, bindings, first, context, a, b };
 }
 
-test("move-history 1 to scene-history 3 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
+test("move-history 1 to scene-history 4 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -125,7 +125,7 @@ test("move-history 1 to scene-history 3 preserves IDs, cursors, links, active/of
     const history = new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      3,
+      4,
     );
     assert.equal(
       f.db
@@ -233,7 +233,7 @@ test("history migration SQL failure rolls back the table replacement, copied row
     new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      3,
+      4,
     );
   } finally {
     f.db.close();
@@ -316,7 +316,7 @@ function toVersionTwo(f: ReturnType<typeof legacy>) {
   return { status, rows };
 }
 
-test("scene history 2 to 3 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
+test("scene history 2 to 4 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -341,7 +341,7 @@ test("scene history 2 to 3 preserves existing payloads, reservations and per-obj
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      3,
+      4,
     );
     assert.equal(
       f.db
@@ -393,5 +393,145 @@ test("failed schema-2 history upgrade keeps the original entries and marker for 
     );
   } finally {
     f.db.close();
+  }
+});
+
+function versionThree(f: ReturnType<typeof legacy>) {
+  const history = new SceneHistoryStore(f.db, f.tables),
+    tokenId = crypto.randomUUID();
+  const run = (command: Command) =>
+    transaction(f.db, () => {
+      const before = f.tables.load(),
+        next = applyCommand(before, command, f.host.member);
+      history.record(f.host.member, before, next, command);
+      f.tables.save(next, command.id);
+    });
+  run({
+    id: randomUUID(),
+    type: "token.add",
+    token: {
+      id: tokenId,
+      name: "Second",
+      position: { x: 50, y: 60 },
+      color: "#405f4d",
+    },
+  });
+  run({
+    id: randomUUID(),
+    type: "tokens.move",
+    moves: f.tables
+      .load()
+      .tokens.map((token) => ({
+        tokenId: token.id,
+        expectedVersion: token.version,
+        position: { x: token.position.x + 10, y: token.position.y + 20 },
+      })),
+  });
+  const status = history.status(f.host.member);
+  f.db.exec("UPDATE scene_history_version SET version=3");
+  return status;
+}
+
+test("scene history 3 to 4 preserves token groups, expired predecessor links, saved state and reservation IDs", () => {
+  const f = legacy();
+  try {
+    const status = versionThree(f),
+      before = f.tables.load();
+    const target = JSON.parse(
+      String(
+        f.db
+          .prepare("SELECT targets_json FROM scene_history_entries WHERE id=?")
+          .get(f.a)!.targets_json,
+      ),
+    );
+    target[0].previousId = randomUUID();
+    f.db
+      .prepare("UPDATE scene_history_entries SET targets_json=? WHERE id=?")
+      .run(JSON.stringify(target), f.a);
+    const rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      reserved = f.db
+        .prepare("SELECT * FROM object_id_reservations ORDER BY campaign_id,id")
+        .all();
+    const history = new SceneHistoryStore(f.db, f.tables);
+    assert.deepEqual(history.status(f.host.member), status);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM object_id_reservations ORDER BY campaign_id,id")
+        .all(),
+      reserved,
+    );
+    assert.equal(
+      f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
+      4,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("failed schema-3 marker writes and malformed causal links leave the old history intact", () => {
+  for (const failure of ["sql", "link"]) {
+    const f = legacy();
+    try {
+      versionThree(f);
+      if (failure === "sql")
+        f.db.exec(
+          "CREATE TRIGGER reject_v4 BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture v4 failure'); END;",
+        );
+      else {
+        const target = JSON.parse(
+          String(
+            f.db
+              .prepare(
+                "SELECT targets_json FROM scene_history_entries WHERE id=?",
+              )
+              .get(f.a)!.targets_json,
+          ),
+        );
+        target[0].previousId = f.db
+          .prepare(
+            "SELECT id FROM scene_history_entries ORDER BY sequence DESC LIMIT 1",
+          )
+          .get()!.id;
+        f.db
+          .prepare("UPDATE scene_history_entries SET targets_json=? WHERE id=?")
+          .run(JSON.stringify(target), f.a);
+      }
+      const rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+      assert.throws(() => new SceneHistoryStore(f.db, f.tables));
+      assert.equal(
+        f.db.prepare("SELECT version FROM scene_history_version").get()!
+          .version,
+        3,
+      );
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        rows,
+      );
+      if (failure === "sql") {
+        f.db.exec("DROP TRIGGER reject_v4");
+        new SceneHistoryStore(f.db, f.tables);
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          4,
+        );
+      }
+    } finally {
+      f.db.close();
+    }
   }
 });

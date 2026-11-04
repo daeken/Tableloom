@@ -1,6 +1,35 @@
 import { z } from "zod";
-import { pointSchema, tokenSchema, drawingSchema } from "@tableloom/core";
+import {
+  pointSchema,
+  tokenSchema,
+  drawingSchema,
+  translationSchema,
+} from "@tableloom/core";
+const originalGeometrySchema = z.union([
+  z
+    .object({
+      objectId: z.uuid(),
+      objectType: z.literal("token"),
+      position: pointSchema,
+    })
+    .strict(),
+  z
+    .object({
+      objectId: z.uuid(),
+      objectType: z.literal("drawing"),
+      points: drawingSchema.shape.points,
+    })
+    .strict(),
+]);
 export const payloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal("translate"),
+      objectType: z.enum(["token", "drawing", "mixed"]),
+      delta: translationSchema,
+      originals: z.array(originalGeometrySchema).min(1).max(100),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("move"),
@@ -80,7 +109,27 @@ export function entryOf(row: unknown): Entry {
   const entry = rowSchema.parse(row),
     payload = payloadSchema.parse(JSON.parse(entry.payload_json)),
     targets = targetsSchema.parse(JSON.parse(entry.targets_json));
-  if (payload.kind === "move-many") {
+  if (payload.kind === "translate") {
+    if (
+      payload.originals.length !== targets.length ||
+      new Set(payload.originals.map((original) => original.objectId)).size !==
+        targets.length ||
+      payload.originals.some(
+        (original) =>
+          !targets.some((target) => target.objectId === original.objectId),
+      )
+    )
+      throw new Error("Translated history targets are inconsistent.");
+    const kind = payload.originals.every(
+      (original) => original.objectType === "token",
+    )
+      ? "token"
+      : payload.originals.every((original) => original.objectType === "drawing")
+        ? "drawing"
+        : "mixed";
+    if (kind !== payload.objectType)
+      throw new Error("Translated history types are inconsistent.");
+  } else if (payload.kind === "move-many") {
     if (
       payload.moves.length !== targets.length ||
       new Set(payload.moves.map((move) => move.objectId)).size !==
@@ -98,6 +147,7 @@ export function entryOf(row: unknown): Entry {
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "translate" ||
   entry.payload.kind === "move" ||
   entry.payload.kind === "move-many" ||
   (entry.payload.kind === "create"

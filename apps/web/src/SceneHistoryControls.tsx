@@ -20,6 +20,7 @@ export function SceneHistoryControls({
       [
         "token.move",
         "tokens.move",
+        "objects.move",
         "token.add",
         "drawing.add",
         "object.delete",
@@ -46,7 +47,7 @@ export function SceneHistoryControls({
             disabled={!enabled || pending || !entry?.available}
             title={
               entry
-                ? `${label}: ${entry.action} ${entry.objectType === "drawing" ? "drawing" : entry.name}`
+                ? `${label}: ${entry.action} ${entry.objectType === "drawing" && entry.objectCount === 1 ? "drawing" : entry.name}`
                 : `No edit to ${action}`
             }
             onClick={() =>

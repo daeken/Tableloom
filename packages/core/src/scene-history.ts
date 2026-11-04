@@ -6,7 +6,7 @@ export const sceneHistoryEntrySchema = z
     objectId: z.uuid(),
     objectCount: z.number().int().min(1).max(100),
     action: z.enum(["move", "create", "delete"]),
-    objectType: z.enum(["token", "drawing"]),
+    objectType: z.enum(["token", "drawing", "mixed"]),
     name: z.string().min(1).max(32),
     available: z.boolean(),
   })

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -213,8 +213,43 @@ export const tokenMovesSchema = z
     (moves) => new Set(moves.map((move) => move.tokenId)).size === moves.length,
     "Each token may appear only once.",
   );
+export const MAX_SCENE_MOVE_OBJECTS = 100;
+export const translationSchema = z
+  .object({
+    x: z.number().finite().min(-20000).max(20000),
+    y: z.number().finite().min(-20000).max(20000),
+  })
+  .strict()
+  .refine(
+    (delta) => delta.x !== 0 || delta.y !== 0,
+    "Move at least one coordinate.",
+  );
+export const objectMoveTargetsSchema = z
+  .array(
+    z
+      .object({
+        objectId: z.uuid(),
+        expectedVersion: z.number().int().positive(),
+      })
+      .strict(),
+  )
+  .min(1)
+  .max(MAX_SCENE_MOVE_OBJECTS)
+  .refine(
+    (objects) =>
+      new Set(objects.map((object) => object.objectId)).size === objects.length,
+    "Each object may appear only once.",
+  );
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("objects.move"),
+      objects: objectMoveTargetsSchema,
+      delta: translationSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

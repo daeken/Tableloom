@@ -473,6 +473,96 @@ try {
             ],
       );
     }
+    const roomId = randomUUID(),
+      roomAdd = randomUUID(),
+      roomAck = acknowledgement(live, roomAdd);
+    const roomView = snapshot(live, (message) =>
+      message.state.drawings.some((drawing) => drawing.id === roomId),
+    );
+    const roomPoints = [
+      { x: 10.1, y: 20.2 },
+      { x: 40.3, y: 50.4 },
+    ];
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: roomAdd,
+          type: "drawing.add",
+          drawing: {
+            id: roomId,
+            kind: "rectangle",
+            points: roomPoints,
+            color: "#405f4d",
+          },
+        },
+      }),
+    );
+    await roomAck;
+    await roomView;
+    const mixedId = randomUUID(),
+      mixedAck = acknowledgement(live, mixedId);
+    const mixedView = snapshot(
+      live,
+      (message) =>
+        message.history.undo?.objectType === "mixed" &&
+        message.state.tokens.find((token) => token.id === tokenId)?.version ===
+          8,
+    );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: mixedId,
+          type: "objects.move",
+          objects: [
+            { objectId: tokenId, expectedVersion: 7 },
+            { objectId: roomId, expectedVersion: 1 },
+          ],
+          delta: { x: 10, y: 20 },
+        },
+      }),
+    );
+    await mixedAck;
+    let mixedState = await mixedView;
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+        type === "scene.undo"
+          ? mixedState.history.undo!
+          : mixedState.history.redo!;
+      const id = randomUUID(),
+        ack = acknowledgement(live, id),
+        view = snapshot(
+          live,
+          (message) =>
+            message.state.tokens.find((token) => token.id === tokenId)
+              ?.version === (type === "scene.undo" ? 9 : 10),
+        );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      await ack;
+      mixedState = await view;
+      assert.deepEqual(
+        mixedState.state.drawings.find((drawing) => drawing.id === roomId)
+          ?.points,
+        type === "scene.undo"
+          ? roomPoints
+          : roomPoints.map((point) => ({ x: point.x + 10, y: point.y + 20 })),
+      );
+      assert.deepEqual(
+        mixedState.state.tokens.find((token) => token.id === tokenId)?.position,
+        type === "scene.undo" ? { x: 70, y: 80 } : { x: 80, y: 100 },
+      );
+    }
     const deleteId = randomUUID(),
       deleted = acknowledgement(live, deleteId);
     const deletedView = snapshot(
@@ -486,7 +576,7 @@ try {
           id: deleteId,
           type: "object.delete",
           objectId: tokenId,
-          expectedVersion: 7,
+          expectedVersion: 10,
         },
       }),
     );
@@ -498,7 +588,7 @@ try {
       live,
       (message) =>
         message.state.tokens.find((token) => token.id === tokenId)?.version ===
-        9,
+        12,
     );
     live.send(
       JSON.stringify({
@@ -571,5 +661,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/group history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed history, roll archive/cleanup, and clean shutdown.",
 );

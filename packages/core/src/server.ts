@@ -85,6 +85,24 @@ export function applyCommand(
   }
   const next = structuredClone(state);
   switch (command.type) {
+    case "objects.move": {
+      const ids = new Set(command.objects.map((object) => object.objectId));
+      const translate = (point: { x: number; y: number }) => ({
+        x: point.x + command.delta.x,
+        y: point.y + command.delta.y,
+      });
+      for (const token of next.tokens)
+        if (ids.has(token.id)) {
+          token.position = translate(token.position);
+          token.version += 1;
+        }
+      for (const drawing of next.drawings)
+        if (ids.has(drawing.id)) {
+          drawing.points = drawing.points.map(translate);
+          drawing.version += 1;
+        }
+      break;
+    }
     case "tokens.move": {
       for (const move of command.moves) {
         const token = next.tokens.find((token) => token.id === move.tokenId)!;

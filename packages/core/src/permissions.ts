@@ -1,4 +1,9 @@
-import { tokenMovesSchema } from "./index.js";
+import {
+  tokenMovesSchema,
+  objectMoveTargetsSchema,
+  translationSchema,
+  pointSchema,
+} from "./index.js";
 import type { Member } from "./access.js";
 import type { Command, Roll, TableState } from "./index.js";
 
@@ -40,6 +45,35 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "objects.move": {
+      const objects = objectMoveTargetsSchema.parse(command.objects),
+        delta = translationSchema.parse(command.delta);
+      for (const target of objects) {
+        const object =
+          state.tokens.find((object) => object.id === target.objectId) ??
+          state.drawings.find((object) => object.id === target.objectId);
+        if (!object) throw new Error("That scene object no longer exists.");
+        if (!canEditObject(member, object))
+          throw new Error("Only the owner or GM can move this object.");
+        if (object.version !== target.expectedVersion)
+          throw new Error(
+            "An object changed. Review the selection before moving it again.",
+          );
+        for (const point of "position" in object
+          ? [object.position]
+          : object.points)
+          if (
+            !pointSchema.safeParse({
+              x: point.x + delta.x,
+              y: point.y + delta.y,
+            }).success
+          )
+            throw new Error(
+              "This move would take part of the selection outside the board.",
+            );
+      }
+      return;
+    }
     case "tokens.move": {
       for (const move of tokenMovesSchema.parse(command.moves))
         authorizeCommand(

@@ -956,3 +956,325 @@ test("a bounded hundred-token move and its undo remain one persisted history ent
     f.db.close();
   }
 });
+
+test("drawing and mixed translations preserve geometry and ownership through complete create/move/delete undo cycles", () => {
+  const f = fixture();
+  try {
+    const drawingId = randomUUID(),
+      tokenId = f.add(),
+      drawing = {
+        id: drawingId,
+        kind: "stroke" as const,
+        points: [
+          { x: 10, y: 20 },
+          { x: 40, y: 50 },
+          { x: 70, y: 60 },
+        ],
+        color: "#405f4d",
+      };
+    f.run({ type: "drawing.add", drawing });
+    f.run({
+      type: "objects.move",
+      objects: [{ objectId: drawingId, expectedVersion: 1 }],
+      delta: { x: 20, y: -10 },
+    });
+    assert.equal(f.history.status(f.player.member).undo!.objectType, "drawing");
+    assert.equal(f.history.status(f.player.member).undo!.available, true);
+    f.run({
+      type: "objects.move",
+      objects: [
+        { objectId: drawingId, expectedVersion: 2 },
+        { objectId: tokenId, expectedVersion: 1 },
+      ],
+      delta: { x: 50, y: 30 },
+    });
+    const cursor = f.history.status(f.player.member).undo!;
+    assert.equal(cursor.objectType, "mixed");
+    assert.equal(cursor.objectCount, 2);
+    assert.equal(cursor.name, "2 objects");
+    assert.equal(cursor.available, true);
+    assert.deepEqual(
+      f.tables.load().drawings[0]!.points,
+      drawing.points.map((point) => ({ x: point.x + 70, y: point.y + 20 })),
+    );
+    assert.equal(f.tables.load().drawings[0]!.ownerId, f.player.member.id);
+    assert.equal(f.tables.load().drawings[0]!.kind, "stroke");
+    assert.equal(f.tables.load().drawings[0]!.color, drawing.color);
+    f.run({ type: "object.delete", objectId: drawingId, expectedVersion: 3 });
+    f.action("scene.undo");
+    f.action("scene.undo");
+    f.action("scene.undo");
+    assert.deepEqual(f.tables.load().drawings[0]!.points, drawing.points);
+    assert.deepEqual(f.tables.load().tokens[0]!.position, { x: 0, y: 0 });
+    f.action("scene.undo");
+    f.action("scene.undo");
+    assert.equal(
+      f.tables.load().drawings.length + f.tables.load().tokens.length,
+      0,
+    );
+    for (let i = 0; i < 4; i++) f.action("scene.redo");
+    assert.deepEqual(
+      f.tables.load().drawings[0]!.points,
+      drawing.points.map((point) => ({ x: point.x + 70, y: point.y + 20 })),
+    );
+    assert.equal(f.tables.load().drawings[0]!.version, 11);
+    assert.equal(f.tables.load().tokens[0]!.version, 6);
+    f.action("scene.redo");
+    assert.equal(f.tables.load().drawings.length, 0);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("mixed movement rejects a stale, unauthorized, missing, duplicate or out-of-bounds target as a whole", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID(),
+      otherId = randomUUID();
+    const drawing = (id: string) => ({
+      id,
+      kind: "rectangle" as const,
+      points: [
+        { x: 9990, y: 10 },
+        { x: 10000, y: 50 },
+      ],
+      color: "#405f4d",
+    });
+    f.run({ type: "drawing.add", drawing: drawing(drawingId) });
+    f.run({ type: "drawing.add", drawing: drawing(otherId) }, f.gm.member);
+    const token = { objectId: tokenId, expectedVersion: 1 },
+      own = { objectId: drawingId, expectedVersion: 1 };
+    const reject = (objects: (typeof token)[], delta = { x: -10, y: 5 }) => {
+      const before = f.tables.load(),
+        history = f.history.status(f.player.member);
+      assert.throws(() => f.run({ type: "objects.move", objects, delta }));
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(f.history.status(f.player.member), history);
+    };
+    reject([token, { ...own, expectedVersion: 2 }]);
+    reject([token, { ...own, objectId: otherId }]);
+    reject([token, { ...own, objectId: randomUUID() }]);
+    reject([own, own]);
+    reject([token, own], { x: 1, y: 0 });
+    for (const bad of [
+      { delta: { x: 0, y: 0 }, objects: [own] },
+      { delta: { x: 20001, y: 0 }, objects: [own] },
+      { delta: { x: 1, y: 0 }, objects: [] },
+      { delta: { x: 1, y: 0 }, objects: [{ ...own, points: [] }] },
+      { delta: { x: 1, y: 0 }, objects: [{ ...own, ownerId: f.gm.member.id }] },
+    ])
+      assert.equal(
+        commandSchema.safeParse({
+          id: randomUUID(),
+          type: "objects.move",
+          ...bad,
+        }).success,
+        false,
+      );
+    f.run({
+      type: "objects.move",
+      objects: [token, own],
+      delta: { x: -10, y: 5 },
+    });
+    assert.equal(f.tables.load().revision, 4); // Three creations plus one atomic move.
+    assert.deepEqual(f.tables.load().tokens[0]!.position, { x: -10, y: 5 });
+    assert.deepEqual(
+      f.tables.load().drawings.find((drawing) => drawing.id === drawingId)!
+        .points,
+      [
+        { x: 9980, y: 15 },
+        { x: 9990, y: 55 },
+      ],
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("remote drawing transfers block mixed undo, while neighboring token-only edits remain independent", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: drawingId,
+        kind: "rectangle",
+        points: [
+          { x: 10, y: 20 },
+          { x: 30, y: 40 },
+        ],
+        color: "#405f4d",
+      },
+    });
+    f.run({
+      type: "objects.move",
+      objects: [
+        { objectId: tokenId, expectedVersion: 1 },
+        { objectId: drawingId, expectedVersion: 1 },
+      ],
+      delta: { x: 10, y: 10 },
+    });
+    f.move(tokenId, 100);
+    f.run(
+      {
+        type: "object.assign",
+        objectId: drawingId,
+        expectedVersion: 2,
+        expectedOwnerId: f.player.member.id,
+        ownerId: f.gm.member.id,
+      },
+      f.gm.member,
+    );
+    f.action("scene.undo");
+    const before = f.tables.load();
+    assert.equal(f.history.status(f.player.member).undo!.available, false);
+    assert.throws(() => f.action("scene.undo"), /ownership changes/);
+    assert.deepEqual(f.tables.load(), before);
+    f.run(
+      {
+        type: "objects.move",
+        objects: [{ objectId: drawingId, expectedVersion: 3 }],
+        delta: { x: 10, y: 10 },
+      },
+      f.gm.member,
+    );
+    assert.equal(f.history.status(f.gm.member).undo!.objectType, "drawing");
+    f.action("scene.undo", f.gm.member);
+    assert.equal(f.tables.load().drawings[0]!.version, 5);
+    assert.equal(f.tables.load().drawings[0]!.ownerId, f.gm.member.id);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("mixed history and causal rebases roll back with failed writes, and malformed saved translations fail closed", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: drawingId,
+        kind: "stroke",
+        points: [
+          { x: 0, y: 0 },
+          { x: 30, y: 40 },
+        ],
+        color: "#405f4d",
+      },
+    });
+    f.run({
+      type: "objects.move",
+      objects: [
+        { objectId: tokenId, expectedVersion: 1 },
+        { objectId: drawingId, expectedVersion: 1 },
+      ],
+      delta: { x: 50, y: 60 },
+    });
+    const before = f.tables.load(),
+      rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+    f.db.exec(
+      "CREATE TRIGGER reject_mixed_receipt BEFORE INSERT ON campaign_receipts BEGIN SELECT RAISE(ABORT,'fixture mixed failure'); END;",
+    );
+    assert.throws(() => f.action("scene.undo"), /fixture mixed failure/);
+    assert.deepEqual(f.tables.load(), before);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      rows,
+    );
+    f.db.exec("DROP TRIGGER reject_mixed_receipt");
+    const cursor = f.history.status(f.player.member).undo!,
+      payload = JSON.parse(
+        String(
+          f.db
+            .prepare(
+              "SELECT payload_json FROM scene_history_entries WHERE id=?",
+            )
+            .get(cursor.id)!.payload_json,
+        ),
+      );
+    payload.delta.x = NaN;
+    f.db
+      .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+      .run(JSON.stringify(payload), cursor.id);
+    assert.throws(() => f.history.status(f.player.member));
+  } finally {
+    f.db.close();
+  }
+});
+
+test("drawing translation undo/redo restores exact decimal coordinates without accumulating rounding drift", () => {
+  const f = fixture();
+  try {
+    const id = randomUUID(),
+      points = [
+        { x: 0.1, y: -0.1 },
+        { x: 0.7, y: 0.9 },
+      ];
+    f.run({
+      type: "drawing.add",
+      drawing: { id, kind: "stroke", points, color: "#405f4d" },
+    });
+    f.run({
+      type: "objects.move",
+      objects: [{ objectId: id, expectedVersion: 1 }],
+      delta: { x: 0.2, y: 0.3 },
+    });
+    const moved = f.tables.load().drawings[0]!.points;
+    for (let i = 0; i < 5; i++) {
+      f.action("scene.undo");
+      assert.deepEqual(f.tables.load().drawings[0]!.points, points);
+      f.action("scene.redo");
+      assert.deepEqual(f.tables.load().drawings[0]!.points, moved);
+    }
+    assert.equal(f.tables.load().drawings[0]!.version, 12);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a full-size stroke moves with a token through compact commands and history cursors without losing points", () => {
+  const f = fixture();
+  try {
+    const tokenId = f.add(),
+      drawingId = randomUUID(),
+      points = Array.from({ length: 2000 }, (_, i) => ({
+        x: i / 10,
+        y: (i % 5) / 10,
+      }));
+    f.run({
+      type: "drawing.add",
+      drawing: { id: drawingId, kind: "stroke", points, color: "#405f4d" },
+    });
+    const command = {
+      type: "objects.move" as const,
+      objects: [
+        { objectId: drawingId, expectedVersion: 1 },
+        { objectId: tokenId, expectedVersion: 1 },
+      ],
+      delta: { x: 100, y: 200 },
+    };
+    assert.ok(JSON.stringify(command).length < 400);
+    f.run(command);
+    assert.deepEqual(
+      f.tables.load().drawings[0]!.points,
+      points.map((point) => ({ x: point.x + 100, y: point.y + 200 })),
+    );
+    const cursor = f.history.status(f.player.member);
+    assert.ok(JSON.stringify(cursor).length < 600);
+    assert.ok(!JSON.stringify(cursor).includes("points"));
+    f.action("scene.undo");
+    assert.deepEqual(f.tables.load().drawings[0]!.points, points);
+    assert.deepEqual(f.tables.load().tokens[0]!.position, { x: 0, y: 0 });
+  } finally {
+    f.db.close();
+  }
+});

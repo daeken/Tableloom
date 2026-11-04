@@ -49,7 +49,7 @@ const panels = {
   "kids-on-brooms": BroomsPanel,
 };
 const tools = [
-  { id: "select", label: "Select & move tokens", Icon: MousePointer2 },
+  { id: "select", label: "Select & move objects", Icon: MousePointer2 },
   { id: "hand", label: "Pan the table", Icon: Hand },
   { id: "pen", label: "Freehand drawing", Icon: Pencil },
   { id: "rectangle", label: "Draw a room", Icon: Square },

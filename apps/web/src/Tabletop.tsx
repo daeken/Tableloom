@@ -6,20 +6,24 @@ import type {
   DrawingInput,
   Point,
   TableView,
-  Token,
 } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
+import { translateTokens } from "./token-selection.js";
 import {
-  translateTokens,
-  tokensInBox,
-  selectTokens,
-} from "./token-selection.js";
+  selectionDelta,
+  translateObject,
+  hitDrawing,
+  objectBounds,
+  objectsInBox,
+  selectObjects,
+} from "./scene-selection.js";
+import type { SceneObject } from "./scene-selection.js";
 import { canEditObject } from "@tableloom/core/permissions";
 
 export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
 type Gesture =
   | { kind: "draw"; drawing: DrawingInput }
-  | { kind: "move"; tokens: Token[]; start: Point; delta: Point }
+  | { kind: "move"; objects: SceneObject[]; start: Point; delta: Point }
   | { kind: "marquee"; start: Point; end: Point; base: string[] }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
@@ -54,8 +58,8 @@ export function Tabletop({
   useEffect(() => {
     setSelected((previous) =>
       previous.filter((id) =>
-        state.tokens.some(
-          (token) => token.id === id && canEditObject(member, token),
+        [...state.tokens, ...state.drawings].some(
+          (object) => object.id === id && canEditObject(member, object),
         ),
       ),
     );
@@ -120,11 +124,19 @@ export function Tabletop({
       grid.moveTo(-2400, y).lineTo(4800, y);
     grid.stroke({ color: "#c7c6b9", width: 1, alpha: 0.5 });
     world.addChild(grid);
+    const previews = new Map<string, SceneObject>();
+    if (gesture?.kind === "move") {
+      const delta = selectionDelta(gesture.objects, gesture.delta);
+      for (const object of gesture.objects)
+        previews.set(object.id, translateObject(object, delta));
+    }
     const drawings =
       gesture?.kind === "draw"
         ? [...state.drawings, gesture.drawing]
         : state.drawings;
-    for (const drawing of drawings) {
+    for (const original of drawings) {
+      const preview = previews.get(original.id);
+      const drawing = preview && "points" in preview ? preview : original;
       const first = drawing.points[0];
       const last = drawing.points.at(-1);
       if (!first || !last) continue;
@@ -150,17 +162,23 @@ export function Tabletop({
         join: "round",
       });
       world.addChild(graphic);
+      if (selected.includes(drawing.id)) {
+        const box = objectBounds(drawing),
+          padding = 6 / view.scale;
+        const outline = new Graphics()
+          .rect(
+            box.left - padding,
+            box.top - padding,
+            Math.max(1, box.right - box.left) + 2 * padding,
+            Math.max(1, box.bottom - box.top) + 2 * padding,
+          )
+          .stroke({ color: "#405f4d", width: 1.5 / view.scale });
+        world.addChild(outline);
+      }
     }
     for (const original of state.tokens) {
-      const preview =
-        gesture?.kind === "move"
-          ? translateTokens(gesture.tokens, gesture.delta).find(
-              (move) => move.tokenId === original.id,
-            )
-          : undefined;
-      const token = preview
-        ? { ...original, position: preview.position }
-        : original;
+      const preview = previews.get(original.id);
+      const token = preview && "position" in preview ? preview : original;
       const { x, y } = token.position;
       const graphic = new Graphics();
       graphic.circle(x + 2, y + 4, 24).fill({ color: "#242e29", alpha: 0.18 });
@@ -240,6 +258,15 @@ export function Tabletop({
     const token = [...state.tokens]
       .reverse()
       .find((t) => Math.hypot(p.x - t.position.x, p.y - t.position.y) <= 28);
+    const drawing =
+      (tool === "select" || tool === "erase") && !token
+        ? [...state.drawings]
+            .reverse()
+            .find((drawing) =>
+              hitDrawing(drawing, p, Math.max(3, 8 / view.scale)),
+            )
+        : undefined;
+    const target = token ?? drawing;
     if (tool === "erase") {
       if (token) {
         if (canEditObject(member, token))
@@ -250,29 +277,6 @@ export function Tabletop({
           });
         return;
       }
-      const drawing = [...state.drawings].reverse().find((d) => {
-        const first = d.points[0]!;
-        const last = d.points.at(-1)!;
-        if (d.kind === "rectangle") {
-          const left = Math.min(first.x, last.x),
-            right = Math.max(first.x, last.x);
-          const top = Math.min(first.y, last.y),
-            bottom = Math.max(first.y, last.y);
-          return (
-            p.x >= left - 10 &&
-            p.x <= right + 10 &&
-            p.y >= top - 10 &&
-            p.y <= bottom + 10 &&
-            Math.min(
-              Math.abs(p.x - left),
-              Math.abs(p.x - right),
-              Math.abs(p.y - top),
-              Math.abs(p.y - bottom),
-            ) < 10
-          );
-        }
-        return d.points.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 15);
-      });
       if (drawing && canEditObject(member, drawing))
         send({
           type: "object.delete",
@@ -281,23 +285,23 @@ export function Tabletop({
         });
     } else if (tool === "select") {
       setSelectionError("");
-      const editable = token && canEditObject(member, token) ? token : null;
+      const editable = target && canEditObject(member, target) ? target : null;
       if (editable) {
         if (event.shiftKey) {
           const next = selected.includes(editable.id)
             ? selected.filter((id) => id !== editable.id)
-            : selectTokens(selected, [editable.id]);
+            : selectObjects(selected, [editable.id]);
           if (next) setSelected(next);
-          else setSelectionError("Select at most 100 tokens at once.");
+          else setSelectionError("Select at most 100 objects at once.");
           return;
         }
         const ids = selected.includes(editable.id) ? selected : [editable.id];
         setSelected(ids);
-        const tokens = state.tokens.filter(
-          (token) => ids.includes(token.id) && canEditObject(member, token),
+        const objects = [...state.tokens, ...state.drawings].filter(
+          (object) => ids.includes(object.id) && canEditObject(member, object),
         );
-        setGesture({ kind: "move", tokens, start: p, delta: { x: 0, y: 0 } });
-      } else if (!token) {
+        setGesture({ kind: "move", objects, start: p, delta: { x: 0, y: 0 } });
+      } else if (!target) {
         setGesture({
           kind: "marquee",
           start: p,
@@ -358,34 +362,37 @@ export function Tabletop({
     if (gesture?.kind === "draw")
       send({ type: "drawing.add", drawing: gesture.drawing });
     if (gesture?.kind === "marquee") {
-      const editable = state.tokens.filter((token) =>
-        canEditObject(member, token),
+      const editable = [...state.tokens, ...state.drawings].filter((object) =>
+        canEditObject(member, object),
       );
-      const next = selectTokens(
+      const next = selectObjects(
         gesture.base,
-        tokensInBox(editable, gesture.start, point(event)),
+        objectsInBox(editable, gesture.start, point(event)),
       );
       if (next) setSelected(next);
-      else setSelectionError("Select at most 100 tokens at once.");
+      else setSelectionError("Select at most 100 objects at once.");
     }
     if (gesture?.kind === "move") {
       const p = point(event),
-        moves = translateTokens(gesture.tokens, {
+        delta = selectionDelta(gesture.objects, {
           x: p.x - gesture.start.x,
           y: p.y - gesture.start.y,
         });
-      const changed = moves.some((move) => {
-        const original = gesture.tokens.find(
-          (token) => token.id === move.tokenId,
-        )!;
-        return (
-          original.position.x !== move.position.x ||
-          original.position.y !== move.position.y
-        );
-      });
-      if (changed) {
-        if (moves.length === 1) send({ type: "token.move", ...moves[0]! });
-        else if (moves.length > 1) send({ type: "tokens.move", moves });
+      if (delta.x !== 0 || delta.y !== 0) {
+        const tokens = gesture.objects.filter((object) => "position" in object);
+        if (tokens.length === gesture.objects.length) {
+          const moves = translateTokens(tokens, delta);
+          if (moves.length === 1) send({ type: "token.move", ...moves[0]! });
+          else if (moves.length > 1) send({ type: "tokens.move", moves });
+        } else
+          send({
+            type: "objects.move",
+            objects: gesture.objects.map((object) => ({
+              objectId: object.id,
+              expectedVersion: object.version,
+            })),
+            delta,
+          });
       }
     }
     setGesture(null);
@@ -404,6 +411,14 @@ export function Tabletop({
       };
     });
   }
+  const selectedObjects = [...state.tokens, ...state.drawings].filter(
+    (object) => selected.includes(object.id),
+  );
+  const selectionType = selectedObjects.every((object) => "position" in object)
+    ? "token"
+    : selectedObjects.every((object) => "points" in object)
+      ? "drawing"
+      : "object";
   return (
     <div
       ref={host}
@@ -454,7 +469,7 @@ export function Tabletop({
         >
           <span role="status">
             {selectionError ||
-              `${selected.length} ${selected.length === 1 ? "token" : "tokens"} selected`}
+              `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
           </span>
           <button
             onClick={() => {

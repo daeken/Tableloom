@@ -456,3 +456,208 @@ test("live token groups commit once, reject partial conflicts, preserve private 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("live mixed movement is atomic, private in history, conflict-safe, retryable and exact after restart", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-live-mixed-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, body: Record<string, unknown>, cookie = "") =>
+    app.inject({
+      method: "POST",
+      url: `/api/access/${route}`,
+      headers: { origin: "http://localhost", cookie },
+      payload: body,
+    });
+  const cookieOf = (response: { headers: Record<string, unknown> }) =>
+    String(response.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      player = cookieOf(
+        await post("join", {
+          name: "Player",
+          code: (await post("invitations", {}, gm)).json().token,
+        }),
+      );
+    let p = await connect(url, player);
+    const g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    const tokenId = randomUUID(),
+      drawingId = randomUUID(),
+      points = [
+        { x: 0.1, y: 0.2 },
+        { x: 10.3, y: 20.4 },
+      ];
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "token.add",
+          token: {
+            id: tokenId,
+            name: "Scout",
+            position: { x: 1, y: 2 },
+            color: "#405f4d",
+          },
+        })
+      ).type,
+      "ack",
+    );
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: { id: drawingId, kind: "stroke", points, color: "#405f4d" },
+        })
+      ).type,
+      "ack",
+    );
+    const command = {
+        id: randomUUID(),
+        type: "objects.move",
+        objects: [
+          { objectId: tokenId, expectedVersion: 1 },
+          { objectId: drawingId, expectedVersion: 1 },
+        ],
+        delta: { x: 20, y: 30 },
+      },
+      revision = store.load().revision;
+    assert.equal((await p.send(command)).type, "ack");
+    await until(() => p.latest().history.undo?.objectType === "mixed");
+    const cursor = p.latest().history.undo!;
+    assert.equal(store.load().revision, revision + 1);
+    assert.ok(!JSON.stringify(g.messages).includes(cursor.id));
+    assert.equal(g.latest().history.undo, null);
+    assert.ok(!JSON.stringify(cursor).includes("originals"));
+    const accepted = store.load();
+    assert.equal((await p.send(command)).type, "ack");
+    assert.deepEqual(store.load(), accepted);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "objects.move",
+          objects: [{ objectId: drawingId, expectedVersion: 2 }],
+          delta: { x: 10, y: 0 },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().history.undo?.available === false);
+    const changed = store.load(),
+      reject = {
+        id: randomUUID(),
+        type: "scene.undo",
+        historyId: cursor.id,
+        expectedVersion: cursor.version,
+      };
+    assert.equal((await p.send(reject)).type, "error");
+    assert.deepEqual(store.load(), changed);
+    assert.equal(store.hasCommand(reject.id), false);
+    const fresh = {
+      ...command,
+      id: randomUUID(),
+      objects: [
+        { objectId: tokenId, expectedVersion: 2 },
+        { objectId: drawingId, expectedVersion: 3 },
+      ],
+      delta: { x: -5, y: 5 },
+    };
+    assert.equal((await p.send(fresh)).type, "ack");
+    await until(() => p.latest().state.tokens[0]?.version === 3);
+    const afterFresh = store.load(),
+      edge = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: edge.id,
+          expectedVersion: edge.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.tokens[0]?.version === 4);
+    const redo = p.latest().history.redo!;
+    assert.deepEqual(
+      store.load().drawings[0]!.points,
+      changed.drawings[0]!.points,
+    );
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    sockets.push(p.ws);
+    assert.deepEqual(p.latest().history.redo, redo);
+    const beforeRetry = store.load();
+    assert.equal((await p.send(fresh)).type, "ack");
+    assert.deepEqual(store.load(), beforeRetry);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.tokens[0]?.version === 5);
+    assert.deepEqual(
+      store.load().tokens[0]!.position,
+      afterFresh.tokens[0]!.position,
+    );
+    assert.deepEqual(
+      store.load().drawings[0]!.points,
+      afterFresh.drawings[0]!.points,
+    );
+    const beforeFailure = store.load(),
+      rows = db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all(),
+      top = p.latest().history.undo!;
+    db.exec(
+      "CREATE TRIGGER reject_mixed_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture mixed binding'); END;",
+    );
+    const failed = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: top.id,
+      expectedVersion: top.version,
+    };
+    assert.equal((await p.send(failed)).type, "error");
+    assert.deepEqual(store.load(), beforeFailure);
+    assert.deepEqual(
+      db.prepare("SELECT * FROM scene_history_entries ORDER BY sequence").all(),
+      rows,
+    );
+    assert.equal(store.hasCommand(failed.id), false);
+    db.exec("DROP TRIGGER reject_mixed_binding");
+    const stale = randomUUID();
+    p.ws.sendRaw(
+      JSON.stringify({
+        context: { ...p.ws.context, generation: 999 },
+        command: { ...fresh, id: stale },
+      }),
+    );
+    await until(() =>
+      p.messages.some(
+        (message) => message.type === "error" && message.commandId === stale,
+      ),
+    );
+    assert.equal(store.hasCommand(stale), false);
+    assert.deepEqual(store.load(), beforeFailure);
+  } finally {
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 3;
+          ?.version === 4;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -113,14 +113,28 @@ export class SceneHistoryStore {
         const object = objectOf(state, target.objectId);
         return (
           object &&
-          (payload.objectType === "token"
-            ? "name" in object
-            : "points" in object) &&
+          (payload.objectType === "mixed" ||
+            (payload.objectType === "token"
+              ? "name" in object
+              : "points" in object)) &&
+          (payload.kind !== "translate" ||
+            payload.originals.some(
+              (original) =>
+                original.objectId === target.objectId &&
+                (original.objectType === "token"
+                  ? "position" in object
+                  : "points" in object),
+            )) &&
           canEditObject(member, object) &&
           object.version === target.expectedVersion
         );
       });
-    if (payload.kind === "move" || payload.kind === "move-many") return false;
+    if (
+      payload.kind === "move" ||
+      payload.kind === "move-many" ||
+      payload.kind === "translate"
+    )
+      return false;
     const target = entry.targets[0]!;
     return (
       !objectOf(state, target.objectId) &&
@@ -145,16 +159,26 @@ export class SceneHistoryStore {
           version: entry.version,
           objectId: target.objectId,
           objectCount: entry.targets.length,
-          action: payload.kind === "move-many" ? "move" : payload.kind,
+          action:
+            payload.kind === "move-many" || payload.kind === "translate"
+              ? "move"
+              : payload.kind,
           objectType: payload.objectType,
           name:
-            payload.kind === "move-many"
-              ? `${entry.targets.length} tokens`
-              : payload.objectType === "drawing"
-                ? "Drawing"
-                : ((objectOf(state, target.objectId) as Token | undefined)
-                    ?.name ??
-                  (payload.kind === "move" ? "Token" : payload.object.name)),
+            payload.kind === "translate"
+              ? entry.targets.length > 1
+                ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
+                : payload.objectType === "drawing"
+                  ? "Drawing"
+                  : ((objectOf(state, target.objectId) as Token | undefined)
+                      ?.name ?? "Token")
+              : payload.kind === "move-many"
+                ? `${entry.targets.length} tokens`
+                : payload.objectType === "drawing"
+                  ? "Drawing"
+                  : ((objectOf(state, target.objectId) as Token | undefined)
+                      ?.name ??
+                    (payload.kind === "move" ? "Token" : payload.object.name)),
           available: this.available(entry, state, member),
         };
       };
@@ -196,6 +220,7 @@ export class SceneHistoryStore {
         "drawing.add",
         "token.move",
         "tokens.move",
+        "objects.move",
         "object.delete",
         "note.add",
       ].includes(command.type)
@@ -218,7 +243,44 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "tokens.move") {
+      if (command.type === "objects.move") {
+        ids = command.objects.map((object) => object.objectId);
+        const kinds = ids.map((id) => {
+          const from = objectOf(before, id),
+            to = objectOf(after, id);
+          if (
+            !from ||
+            !to ||
+            from.version + 1 !== to.version ||
+            from.ownerId !== to.ownerId
+          )
+            throw new Error("Invalid translated history transition.");
+          return "position" in from ? "token" : "drawing";
+        });
+        payload = {
+          kind: "translate",
+          objectType: kinds.every((kind) => kind === "token")
+            ? "token"
+            : kinds.every((kind) => kind === "drawing")
+              ? "drawing"
+              : "mixed",
+          delta: command.delta,
+          originals: ids.map((objectId) => {
+            const object = objectOf(before, objectId)!;
+            return "position" in object
+              ? {
+                  objectId,
+                  objectType: "token" as const,
+                  position: object.position,
+                }
+              : {
+                  objectId,
+                  objectType: "drawing" as const,
+                  points: object.points,
+                };
+          }),
+        };
+      } else if (command.type === "tokens.move") {
         ids = command.moves.map((move) => move.tokenId);
         payload = {
           kind: "move-many",
@@ -353,7 +415,36 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "move-many")
+      if (payload.kind === "translate") {
+        // Restore exact originals; redo repeats the original addition rather than
+        // subtracting from rounded coordinates. Ownership/style remain untouched.
+        next = structuredClone(state);
+        const point = (point: { x: number; y: number }) =>
+          undo
+            ? { ...point }
+            : { x: point.x + payload.delta.x, y: point.y + payload.delta.y };
+        for (const original of payload.originals) {
+          if (original.objectType === "token") {
+            const object = next.tokens.find(
+              (object) => object.id === original.objectId,
+            );
+            if (!object)
+              throw new Error("Translated history type is inconsistent.");
+            object.position = point(original.position);
+            object.version += 1;
+          } else {
+            const object = next.drawings.find(
+              (object) => object.id === original.objectId,
+            );
+            if (!object)
+              throw new Error("Translated history type is inconsistent.");
+            object.points = original.points.map(point);
+            object.version += 1;
+          }
+        }
+        next.revision += 1;
+        next = tableSchema.parse(next);
+      } else if (payload.kind === "move-many")
         next = applyCommand(
           state,
           {
