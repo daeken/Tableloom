@@ -410,9 +410,16 @@ export function App() {
           className="table-name campaign-picker"
           disabled={!member}
           aria-label="Choose campaign"
+          aria-describedby={
+            table.campaignName ? "current-campaign-name" : undefined
+          }
+          title={table.campaignName || undefined}
           onClick={() => setCampaignOpen(true)}
         >
-          {table.campaignName || "Campaigns"} <ChevronDown size={12} />
+          <span id="current-campaign-name">
+            {table.campaignName || "Campaigns"}
+          </span>
+          <ChevronDown size={12} />
         </button>
         <span className="prototype-badge">EARLY ACCESS</span>
         {compact && (

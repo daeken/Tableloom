@@ -58,7 +58,7 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Restore compact campaign controls, fit the phone toolbar and add keyboard skip navigation.
 - [x] Guard pointer gestures with one owner, second-contact cancellation and release-only tap actions.
 - [x] Fit dense selection actions and resize/review dialogs on narrow screens.
-- [ ] **Needs device access:** verify touch/pen behavior on real hardware.
+- [ ] **Needs hands-on checks:** real screen-reader, full-page zoom, mobile-keyboard and touch/pen verification.
 - [x] Add keyboard object selection and bounded arrow-key movement with existing undo/redo.
 - [x] Add keyboard creation of tokens, rooms and text labels using exact coordinate entry.
 - [x] Add exact coordinate positioning for selected tokens, drawings and mixed groups.
@@ -68,8 +68,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Expose named panel tabs with keyboard navigation and preserved editor drafts.
 - [x] Isolate sign-in as an accessible page with mode/error focus and authenticated handoff.
 - [x] Make the drawing toolbar keyboard navigable with readable color labels.
-- [ ] **Next:** finish screen-reader navigation, zoom and mobile-keyboard checks.
-- [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
+- [x] Fix long campaign-name reflow and check narrow/short viewport layouts.
+- [ ] **Next:** measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
 ### Make game modules playable
 

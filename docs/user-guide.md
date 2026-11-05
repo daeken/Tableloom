@@ -36,6 +36,8 @@ To create objects without pointing at the canvas, Tab to **Shared battlefield** 
 
 Tab into **Drawing tools** once. Left/Right and Home/End move between tools and named colors; Enter or Space chooses one. Tab leaves, and returning remembers the last focused control. Moving focus alone changes no tool or object.
 
+Long campaign names are shortened only in the header. Open **Choose campaign** to read the full name; the header also exposes it as a description and tooltip.
+
 In the **Table panels** tabs (Dice & rolls, Your game, Notes and Chat), Left/Right move between choices and Home/End jump to the first/last. Press Enter or Space to open the focused panel, then Tab to enter it. Unsaved note, chat and dice drafts survive panel changes.
 
 Keyboard focus is marked with a dark-and-pale ring. Fields use an inset ring so the focus cue stays clear of their labels. Built-in labels, hints and metadata use a darker text palette for readability.

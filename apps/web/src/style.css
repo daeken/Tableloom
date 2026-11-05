@@ -1439,7 +1439,17 @@ p {
   font: inherit;
   font-size: 11px;
   max-width: 230px;
+  min-width: 0;
   text-align: left;
+}
+.campaign-picker > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-picker > svg {
+  flex-shrink: 0;
 }
 .campaign-picker:disabled {
   opacity: 0.6;
