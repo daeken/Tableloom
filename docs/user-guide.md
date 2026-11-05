@@ -34,6 +34,8 @@ Only authenticated members can fetch or connect to the table. Everyone can draw,
 
 To create objects without pointing at the canvas, Tab to **Shared battlefield** and press **N**, or choose **Create object…**. Pick Token, Room or Text label, enter X/Y and any dimensions/text, then choose **Create shared object**. Coordinates use canvas units (right/down), with a token center or a room/label upper-left corner. Snap and zoom do not change entered coordinates. Cancel/Escape discards the draft; saved creations support the usual undo/redo. Press **L** to select existing objects and use arrow keys to move them. In Select mode, press **G** or choose **Position selection…** to enter an exact position. For one token this sets its center; for drawings/groups, the dialog explains the shared anchor. If someone changes a selected object while the dialog is open, cancel and reopen it to review the latest position.
 
+Tab into **Drawing tools** once. Left/Right and Home/End move between tools and named colors; Enter or Space chooses one. Tab leaves, and returning remembers the last focused control. Moving focus alone changes no tool or object.
+
 In the **Table panels** tabs (Dice & rolls, Your game, Notes and Chat), Left/Right move between choices and Home/End jump to the first/last. Press Enter or Space to open the focused panel, then Tab to enter it. Unsaved note, chat and dice drafts survive panel changes.
 
 Keyboard focus is marked with a dark-and-pale ring. Fields use an inset ring so the focus cue stays clear of their labels. Built-in labels, hints and metadata use a darker text palette for readability.

@@ -340,6 +340,14 @@ At phone widths, a selected object shows a collapsed **Actions…** disclosure b
 
 Synthetic browser checks cover **320, 390, 701, 768 and 1,280 CSS-pixel widths**, keyboard dialog/skip navigation and retained local drafts. This is an initial layout/navigation increment, not a complete accessibility or touchscreen certification. Real-device touch/pen verification, pinch behavior, fully keyboard-driven geometry editing, assistive-technology audits, physical mobile keyboards and real-device touch testing remain queued. The battlefield still reserves its surface for drawing/dragging, so scroll the page using surrounding content or use the skip links to reach panels.
 
+## Drawing toolbar navigation
+
+The named horizontal **Drawing tools** toolbar has one Tab stop across its eight tools and five colors. Tab enters the first control initially and remembers the last focused control on later visits. Left/Right wrap through tools and colors, including row boundaries in the phone layout; Home/End focus the first/last control. Enter, Space or clicking activates the focused button. Focus movement alone does not choose a tool/color or edit selected objects. Tab/Shift-Tab leave normally; vertical arrows, modifiers, composition and form editing retain native behavior. This follows the [W3C toolbar focus pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/).
+
+Tool and color choices retain independent pressed states. The color group is named **Drawing color**, and each swatch exposes a readable color name plus its unchanged hex value. Local selection and focus memory survive ordinary scene updates; identity sign-out unmounts the controls. Existing battlefield letter shortcuts remain scoped to the focused battlefield. Selecting a toolbar button stays on that button; Tab after the Token tool reaches its name field. Offline tool/color choices remain local as before, with authoritative edits still guarded by the connection.
+
+The toolbar and panel tabs share a small pure horizontal-focus helper; their activation and return-focus behavior remain separate. Native accessibility-tree, keyboard and 320-pixel layout checks cover this change; actual screen-reader and mobile-keyboard verification remains outstanding. No commands, permissions or saved formats change.
+
 ## Access page and focus handoff
 
 Until a validated access response contains a member, the app renders only the access form inside a named **Table access** `main` landmark. Campaign panels, battlefield controls and the header are absent from the rendered page and accessibility tree. This uses the [W3C main-landmark pattern](https://www.w3.org/WAI/ARIA/apg/patterns/landmarks/examples/main.html); the access flow is a standalone page with normal browser navigation.

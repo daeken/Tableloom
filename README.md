@@ -67,6 +67,7 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Improve built-in text, field boundaries and keyboard-focus contrast.
 - [x] Expose named panel tabs with keyboard navigation and preserved editor drafts.
 - [x] Isolate sign-in as an accessible page with mode/error focus and authenticated handoff.
+- [x] Make the drawing toolbar keyboard navigable with readable color labels.
 - [ ] **Next:** finish screen-reader navigation, zoom and mobile-keyboard checks.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 

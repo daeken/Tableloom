@@ -128,6 +128,11 @@ export function KeyboardShortcutsDialog({
         </tbody>
       </table>
       <p>
+        Tab into Drawing tools once; Left/Right and Home/End move between tools
+        and colors. Enter or Space chooses one. Tab leaves the toolbar;
+        returning remembers the last focused control.
+      </p>
+      <p>
         After selecting objects, Tab to the selection actions for Resize
         drawing, Resize token or Resize selection. These dialogs accept numeric
         sizes without dragging.

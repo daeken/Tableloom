@@ -1,3 +1,5 @@
+import { DrawingToolbar } from "./DrawingToolbar.js";
+import { drawingColors } from "./drawing-toolbar.js";
 import { PanelTabs } from "./PanelTabs.js";
 import type { PanelTab } from "./panel-tabs.js";
 import {
@@ -6,7 +8,6 @@ import {
 } from "./CompactControlsDialog.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { TablePresence } from "./TablePresence.js";
-import { toolKeys } from "./tabletop-shortcuts.js";
 import { GridSettingsDialog } from "./GridSettingsDialog.js";
 import { SceneMapDialog } from "./SceneMapDialog.js";
 import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
@@ -16,17 +17,9 @@ import {
   ArrowUpRight,
   Check,
   ChevronDown,
-  Circle,
   Dice5,
-  Eraser,
-  Hand,
   Layers2,
-  MousePointer2,
-  Pencil,
   Plus,
-  Square,
-  Ruler,
-  Type,
   Users,
   X,
 } from "lucide-react";
@@ -61,17 +54,6 @@ const panels = {
   "kids-on-bikes": BikesPanel,
   "kids-on-brooms": BroomsPanel,
 };
-const tools = [
-  { id: "select", label: "Select & move objects", Icon: MousePointer2 },
-  { id: "hand", label: "Pan the table", Icon: Hand },
-  { id: "measure", label: "Measure distance", Icon: Ruler },
-  { id: "pen", label: "Freehand drawing", Icon: Pencil },
-  { id: "rectangle", label: "Draw a room", Icon: Square },
-  { id: "text", label: "Place a text label", Icon: Type },
-  { id: "token", label: "Place a token", Icon: Circle },
-  { id: "erase", label: "Delete an object", Icon: Eraser },
-] as const;
-const colors = ["#405f4d", "#b45f4e", "#627d9c", "#a27a44", "#8c6c9c"];
 
 export function App() {
   const { access, error: accessError, refresh, accept } = useAccess();
@@ -138,7 +120,7 @@ export function App() {
     return () => cancelAnimationFrame(frame);
   }, [controlsOpen, sceneOpen, assetsOpen, mapOpen, gridOpen, ownershipOpen]);
   const [tool, setTool] = useState<Tool>("select");
-  const [color, setColor] = useState(colors[0]!);
+  const [color, setColor] = useState<string>(drawingColors[0].value);
   const [tokenName, setTokenName] = useState("Adventurer");
   const emptyDraft = {
     viewerKey,
@@ -558,34 +540,12 @@ export function App() {
             ) : (
               <div className="table-loading">Setting a place for you…</div>
             )}
-            <div className="toolbar" role="toolbar" aria-label="Drawing tools">
-              {tools.map(({ id, label, Icon }) => (
-                <button
-                  key={id}
-                  title={`${label} (${toolKeys[id]})`}
-                  aria-keyshortcuts={toolKeys[id]}
-                  aria-label={label}
-                  aria-pressed={tool === id}
-                  className={tool === id ? "active" : ""}
-                  onClick={() => setTool(id)}
-                >
-                  <Icon size={19} strokeWidth={1.7} />
-                </button>
-              ))}
-              <span className="tool-divider" />
-              <div className="color-options">
-                {colors.map((c) => (
-                  <button
-                    key={c}
-                    className={`color-swatch ${color === c ? "selected" : ""}`}
-                    style={{ background: c }}
-                    aria-label={`Use ${c}`}
-                    aria-pressed={color === c}
-                    onClick={() => setColor(c)}
-                  />
-                ))}
-              </div>
-            </div>
+            <DrawingToolbar
+              tool={tool}
+              setTool={setTool}
+              color={color}
+              setColor={setColor}
+            />
             {tool === "token" && (
               <div className="token-options">
                 <label htmlFor="token-name">Token name</label>
