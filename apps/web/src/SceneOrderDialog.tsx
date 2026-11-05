@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { CommandInput, Drawing, TableView } from "@tableloom/core";
+import type { CommandInput, TableView } from "@tableloom/core";
+import type { SceneObject } from "./scene-selection.js";
 import type { Member } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
 import {
-  captureDrawingOrder,
-  drawingOrderCurrent,
-  drawingOrderCommand,
-  drawingOrderName,
-} from "./drawing-order.js";
+  captureSceneOrder,
+  sceneOrderCurrent,
+  sceneOrderCommand,
+  sceneOrderName,
+} from "./scene-order.js";
 const PAGE_SIZE = 12;
-export function DrawingOrderDialog({
+export function SceneOrderDialog({
+  kind,
   initial,
   state,
   member,
@@ -19,7 +21,8 @@ export function DrawingOrderDialog({
   send,
   close,
 }: {
-  initial: Drawing | null;
+  kind: "drawing" | "token";
+  initial: SceneObject | null;
   state: TableView;
   member: Member | null;
   enabled: boolean;
@@ -30,7 +33,7 @@ export function DrawingOrderDialog({
   const dialog = useRef<HTMLDialogElement>(null),
     cancel = useRef<HTMLButtonElement>(null),
     [review, setReview] = useState(() =>
-      initial ? captureDrawingOrder(initial, state) : null,
+      initial ? captureSceneOrder(initial, state) : null,
     ),
     [page, setPage] = useState(0),
     [error, setError] = useState("");
@@ -39,13 +42,16 @@ export function DrawingOrderDialog({
     cancel.current?.focus();
     return () => dialog.current?.close();
   }, []);
-  const list = [...state.drawings].reverse(),
+  const title = kind === "drawing" ? "Drawing" : "Token";
+  const list = [
+      ...(kind === "drawing" ? state.drawings : state.tokens),
+    ].reverse(),
     lastPage = Math.max(0, Math.ceil(list.length / PAGE_SIZE) - 1),
     visiblePage = Math.min(page, lastPage),
-    current = review ? drawingOrderCurrent(review, state, member) : false;
+    current = review ? sceneOrderCurrent(review, state, member) : false;
   function arrange(direction: "front" | "back") {
     if (!review || !enabled || pending) return;
-    const command = drawingOrderCommand(review, state, member, direction);
+    const command = sceneOrderCommand(review, state, member, direction);
     if (!command) return;
     if (send(command)) close();
     else
@@ -66,27 +72,29 @@ export function DrawingOrderDialog({
       onPointerUp={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      <span className="eyebrow">DRAWINGS LAYER</span>
-      <h1 id="drawing-order-title">Drawing order</h1>
+      <span className="eyebrow">{title.toUpperCase()}S LAYER</span>
+      <h1 id="drawing-order-title">{title} order</h1>
       <p>
-        Above background maps, below tokens. Drawings at the front cover and are
-        picked before drawings behind them.
+        {kind === "drawing"
+          ? "Above background maps, below tokens."
+          : "Above drawings and background maps."}{" "}
+        {title}s at the front cover and are picked before {kind}s behind them.
       </p>
       {review ? (
         <>
           <h2 className="drawing-order-target">
-            {drawingOrderName(review.drawing)}
+            {sceneOrderName(review.object)}
           </h2>
           <p>
             Position{" "}
-            {review.order.length - review.order.indexOf(review.drawing.id)} of{" "}
-            {review.order.length}, counting from the front. Change this
-            drawing’s position for everyone; Undo restores the previous stack.
+            {review.order.length - review.order.indexOf(review.object.id)} of{" "}
+            {review.order.length}, counting from the front. Change this {kind}’s
+            position for everyone; Undo restores the previous stack.
           </p>
           {!current && (
             <p role="alert" className="form-error">
-              This drawing or its stack changed, or it is no longer editable.
-              The review is retained. Choose again to review the latest order.
+              This {kind} or its stack changed, or it is no longer editable. The
+              review is retained. Choose again to review the latest order.
             </p>
           )}
           <div className="drawing-order-actions">
@@ -96,7 +104,7 @@ export function DrawingOrderDialog({
                 disabled={
                   !enabled ||
                   pending ||
-                  !drawingOrderCommand(review, state, member, direction)
+                  !sceneOrderCommand(review, state, member, direction)
                 }
                 onClick={() => arrange(direction)}
               >
@@ -111,13 +119,13 @@ export function DrawingOrderDialog({
               setError("");
             }}
           >
-            Choose another drawing
+            Choose another {kind}
           </button>
         </>
       ) : (
         <>
           <p>
-            Choose a drawing you can edit, including one covered on the
+            Choose a {kind} you can edit, including one covered on the
             battlefield. The list runs from front to back.
           </p>
           <ol
@@ -131,7 +139,7 @@ export function DrawingOrderDialog({
                   <button
                     disabled={!canEditObject(member, d)}
                     onClick={() => {
-                      setReview(captureDrawingOrder(d, state));
+                      setReview(captureSceneOrder(d, state));
                       setError("");
                     }}
                   >
@@ -139,13 +147,13 @@ export function DrawingOrderDialog({
                       className="drawing-order-color"
                       style={{ background: d.color }}
                     />
-                    {drawingOrderName(d)}
+                    {sceneOrderName(d)}
                     {!canEditObject(member, d) && <small> · Read only</small>}
                   </button>
                 </li>
               ))}
           </ol>
-          {!list.length && <p>No drawings in this scene yet.</p>}
+          {!list.length && <p>No {kind}s in this scene yet.</p>}
           <div className="drawing-order-pages">
             <button
               disabled={visiblePage === 0}

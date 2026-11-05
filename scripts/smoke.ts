@@ -1258,6 +1258,107 @@ try {
           fill: { color: "#627d9c", opacity: 0.35 },
         });
     }
+    const orderTokenIds = [randomUUID(), randomUUID(), randomUUID()];
+    for (const id of orderTokenIds) {
+      const result = snapshot(live, (message) =>
+        message.state.tokens.some((token) => token.id === id),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type: "token.add",
+            token: {
+              id,
+              name: "Order scout",
+              position: { x: 180, y: 120 },
+              color: "#405f4d",
+            },
+          },
+        }),
+      );
+      shapeState = await result;
+    }
+    const orderTokenId = orderTokenIds[0]!,
+      originalTokenOrder = shapeState.state.tokens.map((token) => token.id);
+    const arrangedToken = snapshot(
+      live,
+      (message) => message.state.tokens.at(-1)?.id === orderTokenId,
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "token.reorder",
+          tokenId: orderTokenId,
+          expectedVersion: 1,
+          expectedOrder: originalTokenOrder,
+          direction: "front",
+        },
+      }),
+    );
+    shapeState = await arrangedToken;
+    assert.equal(shapeState.history.undo!.action, "reorder");
+    assert.equal(shapeState.history.undo!.objectType, "token");
+    const arrangedTokenOrder = shapeState.state.tokens.map((token) => token.id);
+    const deletedOrderToken = snapshot(
+      live,
+      (message) =>
+        !message.state.tokens.some((token) => token.id === orderTokenIds[1]),
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "object.delete",
+          objectId: orderTokenIds[1],
+          expectedVersion: 1,
+        },
+      }),
+    );
+    shapeState = await deletedOrderToken;
+    for (const [type, expected] of [
+      ["scene.undo", arrangedTokenOrder],
+      ["scene.undo", originalTokenOrder],
+      ["scene.redo", arrangedTokenOrder],
+      [
+        "scene.redo",
+        arrangedTokenOrder.filter((id) => id !== orderTokenIds[1]),
+      ],
+      ["scene.undo", arrangedTokenOrder],
+    ] as const) {
+      const edge =
+        type === "scene.undo"
+          ? shapeState.history.undo!
+          : shapeState.history.redo!;
+      assert.equal(edge.available, true);
+      const result = snapshot(
+        live,
+        (message) =>
+          JSON.stringify(message.state.tokens.map((token) => token.id)) ===
+          JSON.stringify(expected),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      assert.deepEqual(
+        shapeState.state.tokens.find((token) => token.id === orderTokenId)!
+          .position,
+        { x: 180, y: 120 },
+      );
+    }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(
@@ -1481,5 +1582,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing front/back order and exact history, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

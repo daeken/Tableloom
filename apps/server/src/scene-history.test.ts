@@ -589,6 +589,24 @@ test("full scenes block restoration without consuming history, and rejected crea
   const f = fixture();
   try {
     const id = f.add();
+    const fillers = Array.from({ length: 200 }, () => ({
+      id: randomUUID(),
+      name: "Filler",
+      radius: 24,
+      position: { x: 0, y: 0 },
+      color: "#405f4d",
+      ownerId: f.gm.member.id,
+      version: 1,
+    }));
+    const initial = f.tables.load();
+    f.tables.save(
+      {
+        ...initial,
+        revision: initial.revision + 1,
+        tokens: [...fillers.slice(1), ...initial.tokens],
+      },
+      randomUUID(),
+    );
     f.run({ type: "object.delete", objectId: id, expectedVersion: 1 });
     const cursor = f.history.status(f.player.member);
     const before = f.tables.load();
@@ -596,15 +614,7 @@ test("full scenes block restoration without consuming history, and rejected crea
       {
         ...before,
         revision: before.revision + 1,
-        tokens: Array.from({ length: 200 }, () => ({
-          id: randomUUID(),
-          name: "Filler",
-          radius: 24,
-          position: { x: 0, y: 0 },
-          color: "#405f4d",
-          ownerId: f.gm.member.id,
-          version: 1,
-        })),
+        tokens: fillers,
       },
       randomUUID(),
     );
@@ -1916,6 +1926,7 @@ test("schema-6 token snapshots gain fixed legacy radius atomically, including gr
         .prepare("SELECT id,payload_json FROM scene_history_entries")
         .all()) {
         const payload = JSON.parse(String(row.payload_json));
+        delete payload.tokenOrder;
         if (payload.kind === "create" || payload.kind === "delete")
           delete payload.object.radius;
         if (payload.kind === "delete-many")
@@ -1954,7 +1965,7 @@ test("schema-6 token snapshots gain fixed legacy radius atomically, including gr
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        14,
+        15,
       );
       const restored = f.action("scene.undo");
       assert.deepEqual(
@@ -2094,6 +2105,9 @@ test("schema-7 sized token and scalar resize histories upgrade intact to 8; fail
           scale: 1.25,
         });
       }
+      f.db.exec(
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.tokenOrder') WHERE json_type(payload_json,'$.tokenOrder') IS NOT NULL",
+      );
       f.db.exec("UPDATE scene_history_version SET version=7");
       if (failure === "marker")
         f.db.exec(
@@ -2116,7 +2130,7 @@ test("schema-7 sized token and scalar resize histories upgrade intact to 8; fail
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          14,
+          15,
         );
       }
       assert.deepEqual(

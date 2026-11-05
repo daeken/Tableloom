@@ -3,17 +3,19 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 import {
   drawingOrderSchema,
-  drawingOrderDirectionSchema,
-} from "./drawing-order.js";
+  tokenOrderSchema,
+  orderDirectionSchema,
+} from "./object-order.js";
 export {
   drawingOrderSchema,
-  drawingOrderDirectionSchema,
-  drawingOrderMatches,
-  reorderedDrawings,
-} from "./drawing-order.js";
+  tokenOrderSchema,
+  orderDirectionSchema,
+  objectOrderMatches,
+  reorderedObjects,
+} from "./object-order.js";
 import { shapeStyleSchema, shapeContentSchema } from "./shape-style.js";
 import type { ShapeStyle } from "./shape-style.js";
 export {
@@ -464,11 +466,21 @@ export const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...envelope,
+      type: z.literal("token.reorder"),
+      tokenId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      expectedOrder: tokenOrderSchema.min(1),
+      direction: orderDirectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...envelope,
       type: z.literal("drawing.reorder"),
       drawingId: z.uuid(),
       expectedVersion: z.number().int().positive(),
       expectedOrder: drawingOrderSchema.min(1),
-      direction: drawingOrderDirectionSchema,
+      direction: orderDirectionSchema,
     })
     .strict(),
   z

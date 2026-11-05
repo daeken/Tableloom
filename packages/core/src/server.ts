@@ -4,7 +4,7 @@ import {
   MAX_ROLL_HISTORY,
   DEFAULT_TOKEN_RADIUS,
   DEFAULT_TEXT_STYLE,
-  reorderedDrawings,
+  reorderedObjects,
   MAX_TOTAL_ROLLS,
   MAX_TABLE_NOTES,
   parseDice,
@@ -109,8 +109,17 @@ export function applyCommand(
       }
       break;
     }
+    case "token.reorder": {
+      next.tokens = reorderedObjects(
+        next.tokens,
+        command.tokenId,
+        command.direction,
+      );
+      next.tokens.find((d) => d.id === command.tokenId)!.version += 1;
+      break;
+    }
     case "drawing.reorder": {
-      next.drawings = reorderedDrawings(
+      next.drawings = reorderedObjects(
         next.drawings,
         command.drawingId,
         command.direction,

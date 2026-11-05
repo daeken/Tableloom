@@ -9,7 +9,8 @@ import {
   sameTextStyle,
   shapeSnapshotSchema,
   drawingOrderSchema,
-  drawingOrderMatches,
+  tokenOrderSchema,
+  objectOrderMatches,
 } from "@tableloom/core";
 const originalGeometrySchema = z.union([
   z
@@ -62,6 +63,22 @@ const basePayloadSchema = z.union([
   z
     .object({
       kind: z.literal("reorder"),
+      objectType: z.literal("token"),
+      before: tokenOrderSchema,
+      after: tokenOrderSchema,
+    })
+    .strict()
+    .refine((p) => {
+      const after = new Set(p.after);
+      return (
+        p.before.length === p.after.length &&
+        p.before.every((id) => after.has(id)) &&
+        !objectOrderMatches(p.before, p.after)
+      );
+    }, "Order history must preserve the token set and change its order."),
+  z
+    .object({
+      kind: z.literal("reorder"),
       objectType: z.literal("drawing"),
       before: drawingOrderSchema,
       after: drawingOrderSchema,
@@ -72,7 +89,7 @@ const basePayloadSchema = z.union([
       return (
         p.before.length === p.after.length &&
         p.before.every((id) => after.has(id)) &&
-        !drawingOrderMatches(p.before, p.after)
+        !objectOrderMatches(p.before, p.after)
       );
     }, "Order history must preserve the drawing set and change its order."),
   z
@@ -134,6 +151,7 @@ const basePayloadSchema = z.union([
       kind: z.literal("delete-many"),
       objectType: z.enum(["token", "drawing", "mixed"]),
       objects: z.array(deletedObjectSchema).min(1).max(100),
+      tokenOrder: tokenOrderSchema.min(1).optional(),
       drawingOrder: drawingOrderSchema.min(1).optional(),
     })
     .strict(),
@@ -176,6 +194,7 @@ const basePayloadSchema = z.union([
       kind: z.enum(["create", "delete"]),
       objectType: z.literal("token"),
       object: tokenSchema,
+      tokenOrder: tokenOrderSchema.min(1).optional(),
     })
     .strict(),
   z
@@ -187,29 +206,48 @@ const basePayloadSchema = z.union([
     })
     .strict(),
 ]);
+type BasePayload = z.infer<typeof basePayloadSchema>;
+function savedIds(payload: BasePayload, kind: "token" | "drawing"): string[] {
+  return payload.kind === "delete-many"
+    ? payload.objects
+        .filter((saved) => saved.objectType === kind)
+        .map((saved) => saved.object.id)
+    : (payload.kind === "create" || payload.kind === "delete") &&
+        payload.objectType === kind
+      ? [payload.object.id]
+      : [];
+}
+export function savedOrder(
+  payload: BasePayload,
+  kind: "token" | "drawing",
+): string[] | undefined {
+  return kind === "drawing"
+    ? "drawingOrder" in payload
+      ? payload.drawingOrder
+      : undefined
+    : "tokenOrder" in payload
+      ? payload.tokenOrder
+      : undefined;
+}
 export const payloadSchema = basePayloadSchema.refine((payload) => {
-  if (!("drawingOrder" in payload) || !payload.drawingOrder) return true;
-  const ids =
-    payload.kind === "delete-many"
-      ? payload.objects
-          .filter((saved) => saved.objectType === "drawing")
-          .map((saved) => saved.object.id)
-      : [payload.object.id];
-  const order = new Set(payload.drawingOrder);
-  return ids.length > 0 && ids.every((id) => order.has(id));
-}, "Restoration order must include every saved drawing and at least one drawing.");
+  return (["token", "drawing"] as const).every((kind) => {
+    const full = savedOrder(payload, kind);
+    if (!full) return true;
+    const ids = savedIds(payload, kind),
+      order = new Set(full);
+    return ids.length > 0 && ids.every((id) => order.has(id));
+  });
+}, "Restoration order must include every saved object of its type and at least one target.");
 export type Payload = z.infer<typeof payloadSchema>;
 /** Legacy inverses lack slots. Never reconstruct an order they did not record. */
-export function restorationOrder(payload: Payload): string[] | undefined {
-  if (!("drawingOrder" in payload) || !payload.drawingOrder) return undefined;
-  const removed = new Set(
-    payload.kind === "delete-many"
-      ? payload.objects
-          .filter((saved) => saved.objectType === "drawing")
-          .map((saved) => saved.object.id)
-      : [payload.object.id],
-  );
-  return payload.drawingOrder.filter((id) => !removed.has(id));
+export function restorationOrder(
+  payload: Payload,
+  kind: "token" | "drawing" = "drawing",
+): string[] | undefined {
+  const full = savedOrder(payload, kind);
+  if (!full) return undefined;
+  const removed = new Set(savedIds(payload, kind));
+  return full.filter((id) => !removed.has(id));
 }
 export const targetsSchema = z
   .array(
@@ -254,12 +292,12 @@ export function entryOf(row: unknown): Entry {
       targets.length !== 1 ||
       !id ||
       !payload.before.includes(id) ||
-      !drawingOrderMatches(
+      !objectOrderMatches(
         payload.before.filter((other) => other !== id),
         payload.after.filter((other) => other !== id),
       )
     )
-      throw new Error("Drawing order history must move only its target.");
+      throw new Error("Scene order history must move only its target.");
   } else if (payload.kind === "resize-many") {
     if (
       payload.changes.length !== targets.length ||

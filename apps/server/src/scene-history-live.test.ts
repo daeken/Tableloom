@@ -2175,3 +2175,186 @@ test("drawing order is publicly synchronized with requester-only cursors, stack/
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("token order is publicly synchronized with requester-only cursors, stack/version conflicts, atomic retries and restart-safe inverses", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-token-order-live-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, payload: Record<string, unknown>, cookie = "") =>
+      app.inject({
+        method: "POST",
+        url: `/api/access/${route}`,
+        headers: { cookie, origin: "http://localhost" },
+        payload,
+      }),
+    cookieOf = (r: { headers: Record<string, unknown> }) =>
+      String(r.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      invite = async (name: string) =>
+        cookieOf(
+          await post("join", {
+            name,
+            code: (await post("invitations", {}, gm)).json().token,
+          }),
+        ),
+      player = await invite("Editor"),
+      other = await invite("Other");
+    let p = await connect(url, player),
+      g = await connect(url, gm),
+      q = await connect(url, other);
+    sockets.push(p.ws, g.ws, q.ws);
+    const [a, b, c] = [randomUUID(), randomUUID(), randomUUID()] as [
+      string,
+      string,
+      string,
+    ];
+    for (const id of [a, b, c])
+      assert.equal(
+        (
+          await p.send({
+            id: randomUUID(),
+            type: "token.add",
+            token: {
+              id,
+              name: "Scout",
+              color: "#405f4d",
+              position: { x: 160, y: 160 },
+            },
+          })
+        ).type,
+        "ack",
+      );
+    await until(() => q.latest().state.tokens.length === 3);
+    const edit = {
+      id: randomUUID(),
+      type: "token.reorder",
+      tokenId: a,
+      expectedVersion: 1,
+      expectedOrder: [a, b, c],
+      direction: "front",
+    };
+    assert.equal((await q.send(edit)).type, "error");
+    assert.equal((await p.send(edit)).type, "ack");
+    await until(
+      () =>
+        g.latest().state.tokens.at(-1)?.id === a &&
+        q.latest().state.tokens.at(-1)?.id === a,
+    );
+    assert.deepEqual(
+      store.load().tokens.map((d) => d.id),
+      [b, c, a],
+    );
+    const cursor = p.latest().history.undo!;
+    assert.equal(cursor.action, "reorder");
+    assert.equal(g.latest().history.undo, null);
+    assert.equal(q.latest().history.undo, null);
+    assert.ok(
+      !JSON.stringify([...g.messages, ...q.messages]).includes(cursor.id),
+    );
+    const saved = store.load();
+    assert.equal((await p.send(edit)).type, "ack");
+    assert.deepEqual(store.load(), saved);
+    const stale = { ...edit, id: randomUUID(), tokenId: b };
+    assert.equal((await p.send(stale)).type, "error");
+    assert.deepEqual(store.load(), saved);
+    assert.equal(store.hasCommand(stale.id), false);
+    const next = {
+      ...edit,
+      id: randomUUID(),
+      tokenId: b,
+      expectedOrder: [b, c, a],
+    };
+    db.exec(
+      "CREATE TRIGGER reject_order_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture order binding'); END",
+    );
+    assert.equal((await p.send(next)).type, "error");
+    assert.deepEqual(store.load(), saved);
+    assert.equal(store.hasCommand(next.id), false);
+    assert.equal(p.latest().history.undo!.id, cursor.id);
+    db.exec("DROP TRIGGER reject_order_binding");
+    assert.equal((await p.send(next)).type, "ack");
+    assert.deepEqual(
+      store.load().tokens.map((d) => d.id),
+      [c, a, b],
+    );
+    const edge = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: edge.id,
+          expectedVersion: edge.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.deepEqual(
+      store.load().tokens.map((d) => d.id),
+      [b, c, a],
+    );
+    const redo = p.latest().history.redo!;
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    assert.equal(p.latest().history.redo!.id, redo.id);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => g.latest().state.tokens.at(-1)?.id === b);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "token.reorder",
+          tokenId: c,
+          expectedVersion: 1,
+          expectedOrder: [c, a, b],
+          direction: "front",
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.tokens.at(-1)?.id === c);
+    assert.equal(p.latest().history.undo!.available, false);
+    assert.equal(
+      (
+        await p.send({
+          ...edit,
+          id: randomUUID(),
+          expectedVersion: 2,
+          expectedOrder: [c, a, b],
+          direction: "back",
+        })
+      ).type,
+      "error",
+    );
+    assert.equal((await p.send(next)).type, "ack");
+    assert.deepEqual(
+      store.load().tokens.map((d) => d.id),
+      [a, b, c],
+    );
+  } finally {
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -302,7 +302,7 @@ test("campaign 3/history 8 upgrade existing scenes/inverses exactly and roll bac
           assert.equal(
             f.db.prepare("SELECT version FROM scene_history_version").get()!
               .version,
-            14,
+            15,
           );
         }
       }
@@ -500,6 +500,7 @@ test("history 9 to 11 retains text snapshots/links while seeding only legacy sty
       // Reconstruct real history-9 snapshots: text existed, style fields did not.
       for (const row of rows) {
         const payload = JSON.parse(String(row.payload_json));
+        delete payload.tokenOrder;
         if (payload.kind === "create" || payload.kind === "delete")
           delete payload.object.textStyle;
         f.db
@@ -553,7 +554,7 @@ test("history 9 to 11 retains text snapshots/links while seeding only legacy sty
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        14,
+        15,
       );
       assert.deepEqual(
         f.db
@@ -739,7 +740,7 @@ test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse 
       f.run({ type: "object.delete", objectId: third, expectedVersion: 1 });
       // Reconstruct legacy history: drawing slots were not recorded yet.
       f.db.exec(
-        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL",
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL",
       );
       const current = f.tables.load(),
         status = f.history.status(f.player.member),
@@ -886,7 +887,7 @@ test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse 
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        14,
+        15,
       );
       assert.deepEqual(history.status(f.player.member), status);
       assert.deepEqual(

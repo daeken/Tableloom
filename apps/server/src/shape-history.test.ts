@@ -250,7 +250,7 @@ test("campaign 5/history 11 upgrades preserve active/offstage shapes, exact inve
       });
       // Reconstruct legacy history: drawing slots were not recorded yet.
       f.db.exec(
-        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL",
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL",
       );
       const state = f.tables.load(),
         status = f.history.status(f.player.member),
@@ -372,7 +372,7 @@ test("campaign 5/history 11 upgrades preserve active/offstage shapes, exact inve
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        14,
+        15,
       );
       assert.deepEqual(
         f.db

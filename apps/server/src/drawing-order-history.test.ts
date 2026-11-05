@@ -215,7 +215,7 @@ test("history 12 to 13 preserves shape payload bytes/cursors and rejects future 
       f.run({ type: "object.delete", objectId: a, expectedVersion: 2 });
       // Reconstruct legacy history: drawing slots were not recorded yet.
       f.db.exec(
-        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL",
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL",
       );
       const state = f.tables.load(),
         status = f.history.status(f.player.member),
@@ -268,7 +268,7 @@ test("history 12 to 13 preserves shape payload bytes/cursors and rejects future 
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        14,
+        15,
       );
       assert.deepEqual(
         f.db
@@ -537,7 +537,7 @@ test("history 13 upgrades reorder and legacy deletion inverses byte-for-byte wit
       });
       f.run({ type: "object.delete", objectId: b, expectedVersion: 1 });
       f.db.exec(
-        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL",
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL",
       );
       const cursor = f.history.status(f.player.member),
         state = f.tables.load();
@@ -579,7 +579,7 @@ test("history 13 upgrades reorder and legacy deletion inverses byte-for-byte wit
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        14,
+        15,
       );
       assert.deepEqual(rows(), original);
       assert.deepEqual(migrated.status(f.player.member), cursor);

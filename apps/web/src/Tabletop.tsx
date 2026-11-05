@@ -1,4 +1,4 @@
-import { DrawingOrderDialog } from "./DrawingOrderDialog.js";
+import { SceneOrderDialog } from "./SceneOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
 import { shapeStyleOf } from "@tableloom/core";
 import type { BackgroundView } from "@tableloom/core/scene-map";
@@ -138,8 +138,9 @@ export function Tabletop({
   const [resizeSelection, setResizeSelection] = useState<SceneObject[] | null>(
     null,
   );
-  const [drawingOrder, setDrawingOrder] = useState<{
-    initial: Drawing | null;
+  const [sceneOrder, setSceneOrder] = useState<{
+    initial: SceneObject | null;
+    kind: "drawing" | "token";
   } | null>(null);
   const [editShape, setEditShape] = useState<Drawing | null>(null);
   const [editText, setEditText] = useState<Drawing | null>(null);
@@ -772,17 +773,27 @@ export function Tabletop({
         Snap to grid
       </label>
       {selected.length === 0 && (
-        <button
+        <div
           className="drawing-order-open"
-          disabled={!enabled || pending || !state.drawings.length}
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            setGesture(null);
-            setDrawingOrder({ initial: null });
-          }}
         >
-          Drawing order…
-        </button>
+          {(["drawing", "token"] as const).map((kind) => (
+            <button
+              key={kind}
+              disabled={
+                !enabled ||
+                pending ||
+                !(kind === "drawing" ? state.drawings : state.tokens).length
+              }
+              onClick={() => {
+                setGesture(null);
+                setSceneOrder({ initial: null, kind });
+              }}
+            >
+              {kind === "drawing" ? "Drawing" : "Token"} order…
+            </button>
+          ))}
+        </div>
       )}
       {(selected.length > 0 || selectionError) && (
         <div
@@ -835,15 +846,18 @@ export function Tabletop({
                 Style shape…
               </button>
             )}
-          {selectedObjects.length === 1 && "points" in selectedObjects[0]! && (
+          {selectedObjects.length === 1 && (
             <button
               disabled={!enabled || pending}
               onClick={() => {
                 setGesture(null);
-                setDrawingOrder({ initial: selectedObjects[0] as Drawing });
+                setSceneOrder({
+                  initial: selectedObjects[0]!,
+                  kind: "points" in selectedObjects[0]! ? "drawing" : "token",
+                });
               }}
             >
-              Arrange drawing…
+              Arrange {"points" in selectedObjects[0]! ? "drawing" : "token"}…
             </button>
           )}
           {selectedObjects.length > 1 && (
@@ -888,18 +902,21 @@ export function Tabletop({
           close={() => setResizeSelection(null)}
         />
       )}
-      {drawingOrder && (
-        <DrawingOrderDialog
-          initial={drawingOrder.initial}
+      {sceneOrder && (
+        <SceneOrderDialog
+          kind={sceneOrder.kind}
+          initial={sceneOrder.initial}
           state={state}
           member={member}
           enabled={enabled}
           pending={pending}
-          close={() => setDrawingOrder(null)}
+          close={() => setSceneOrder(null)}
           send={(command) => {
             const queued = send(command);
             if (queued && command.type === "drawing.reorder")
               setSelected([command.drawingId]);
+            if (queued && command.type === "token.reorder")
+              setSelected([command.tokenId]);
             return queued;
           }}
         />

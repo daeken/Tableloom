@@ -10,7 +10,7 @@ import {
   shapeContentSchema,
   shapeStyleOf,
   sameShapeStyle,
-  drawingOrderMatches,
+  objectOrderMatches,
 } from "./index.js";
 import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -75,6 +75,31 @@ export function authorizeCommand(
       resizedObjects(objects, command.scale);
       return;
     }
+    case "token.reorder": {
+      const token = state.tokens.find((d) => d.id === command.tokenId);
+      if (!token) throw new Error("That token is unavailable.");
+      if (!canEditObject(member, token))
+        throw new Error("Only the owner or GM can arrange this token.");
+      if (token.version !== command.expectedVersion)
+        throw new Error(
+          "This token changed. Review it before arranging again.",
+        );
+      if (
+        !objectOrderMatches(
+          state.tokens.map((d) => d.id),
+          command.expectedOrder,
+        )
+      )
+        throw new Error(
+          "Token order changed. Review the current stack before arranging again.",
+        );
+      if (
+        (command.direction === "front" ? state.tokens.at(-1) : state.tokens[0])
+          ?.id === token.id
+      )
+        throw new Error("This token is already at that end of the layer.");
+      return;
+    }
     case "drawing.reorder": {
       const drawing = state.drawings.find((d) => d.id === command.drawingId);
       if (!drawing) throw new Error("That drawing is unavailable.");
@@ -85,7 +110,7 @@ export function authorizeCommand(
           "This drawing changed. Review it before arranging again.",
         );
       if (
-        !drawingOrderMatches(
+        !objectOrderMatches(
           state.drawings.map((d) => d.id),
           command.expectedOrder,
         )
