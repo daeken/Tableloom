@@ -13,8 +13,10 @@ import { CampaignImageInspector } from "./campaign-image-inspection.js";
 import {
   MAX_OWNERSHIP_REVIEW_BYTES,
   parseOwnershipReviewEnvelope,
+  parsePreparationEnvelope,
   reviewCampaignOwnership,
 } from "./campaign-ownership-plan.js";
+import { prepareCampaignCandidate } from "./campaign-prepare.js";
 
 export async function registerCampaignPreflightRoutes(
   app: FastifyInstance,
@@ -106,6 +108,34 @@ export async function registerCampaignPreflightRoutes(
           options.database,
           host(request).id,
         );
+      },
+    );
+    api.post(
+      "/api/campaign-imports/prepare",
+      {
+        bodyLimit: MAX_OWNERSHIP_REVIEW_BYTES,
+        onRequest: guard,
+      },
+      async (request, reply) => {
+        host(request);
+        const input = parsePreparationEnvelope(body(request)),
+          source = await inspect(request, reply, input.file),
+          reviewed = reviewCampaignOwnership(
+            source,
+            input.plan,
+            options.database,
+            host(request).id,
+          ),
+          candidate = prepareCampaignCandidate(
+            input.file,
+            reviewed,
+            options.catalog,
+            options.contentCatalog,
+            options.systems,
+            options.database,
+          );
+        host(request);
+        return candidate.report;
       },
     );
   });

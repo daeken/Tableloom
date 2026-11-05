@@ -6,6 +6,7 @@ import type { CampaignDataTransfer } from "./transfer-references.js";
 export {
   defineCampaignDataTransfer,
   inspectCampaignDataReferences,
+  remapCampaignDataReferences,
 } from "./transfer-references.js";
 export type {
   CampaignDataTransfer,

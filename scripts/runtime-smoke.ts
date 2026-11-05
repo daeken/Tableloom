@@ -59,6 +59,7 @@ async function verifyCampaignExport(
       version: z.literal(1),
       privacy: z.literal("all-campaign-content-including-private"),
       identityPolicy: z.literal("source-identifiers-without-access-grants"),
+      campaign: z.object({ id: z.uuid() }),
       records: z.object({
         module_documents: z.array(
           z.object({ id: z.uuid(), owner_id: z.uuid(), data_json: z.string() }),
@@ -189,6 +190,33 @@ async function verifyCampaignExport(
   assert.ok(!reviewed.pendingValidation.includes("ownership-plan"));
   assert.ok(reviewed.pendingValidation.includes("resource-id-plan"));
   assert.ok(reviewed.pendingValidation.includes("atomic-import"));
+  const preparation = await request(
+    url,
+    "/api/campaign-imports/prepare",
+    cookie,
+    {
+      file: serialized,
+      plan: ownershipPlan,
+      resourcePolicy: "fresh-campaign-and-resource-identifiers",
+    },
+  );
+  assert.equal(preparation.status, 200);
+  const candidate = z
+    .object({
+      status: z.literal("candidate-preflight-only"),
+      importReady: z.literal(false),
+      blockers: z.array(z.unknown()).max(0),
+      pendingValidation: z.array(z.string()),
+      resourcePlan: z.object({
+        complete: z.literal(true),
+        targetCampaignId: z.uuid(),
+        candidateSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      }),
+      candidateValidation: z.object({ complete: z.literal(true) }),
+    })
+    .parse(await preparation.json());
+  assert.notEqual(candidate.resourcePlan.targetCampaignId, archive.campaign.id);
+  assert.deepEqual(candidate.pendingValidation, ["atomic-import"]);
   const stalePlan = await request(
     url,
     "/api/campaign-imports/ownership-review",

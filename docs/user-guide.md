@@ -198,7 +198,7 @@ Campaigns pin exact system and pack versions. The server installs **one version 
 
 ## Campaign transfer: current limits
 
-**Campaign export, read-only preflight and ownership review have administrator APIs; import and transfer UI/CLI are not implemented.** The export is an initial versioned private snapshot, not a tested recovery/round-trip format. Keep using [whole-instance backups](#backup-and-recovery) for recovery until import and destination validation are available.
+**Campaign export, read-only preflight, ownership review and candidate preparation have administrator APIs; import writes and transfer UI/CLI are not implemented.** The export is an initial versioned private snapshot, not a tested recovery/round-trip format. Keep using [whole-instance backups](#backup-and-recovery) for recovery until import and destination validation are available.
 
 An authenticated GM with the campaign active can request `POST /api/campaigns/<campaign-id>/export` from the same origin, with JSON:
 
@@ -226,7 +226,7 @@ Preflight returns `status: "preflight-only"` and **always** `importReady: false`
 
 The response contains resource counts, package statuses, source identities, source-ID collision counts, blockers, pending checks and a SHA-256 of the exact file bytes. It omits private document/map/chat bodies and makes no persistent changes, consumes no invitations and runs no module actions, migrations or instance factories. The fingerprint identifies the inspected bytes; it is not an import token or a compatibility guarantee. File content is still untrusted and private.
 
-**An empty blocker list is not permission to import.** Ownership review is a separate step; resource-ID plans, post-mapping module/history/quota checks and an atomic import are still pending. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
+**An empty blocker list is not permission to import.** Ownership review and fresh-ID candidate preparation are separate steps. They can check the mapped candidate in memory, but atomic import writes remain unfinished. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
 
 
 Preflight now applies the live stores' source-data limits as well as file limits: 100 chat messages per public/private audience and 1,100 per campaign; 100 object-history entries per person per scene, 10,000 per campaign and 32 MiB of stored payload/target JSON; 100 map-history entries per scene, 10,000 per campaign, 4 KiB per entry and 8 MiB in total. Image-library totals and the existing scene/document/content/instance/roll/object-ID limits are checked too. Raw JSON byte budgets use UTF-8, including whitespace; oversized files are rejected without silently pruning data.
@@ -278,11 +278,36 @@ The result is `status: "ownership-review-only"`, **always** `importReady: false`
 This endpoint allocates no IDs, creates no people/memberships/invitations/sessions, copies no source credentials and saves nothing. There is no import writer or review UI yet. It accepts a 65-MiB JSON envelope to accommodate escaping a file of at most 32 MiB, plus a bounded plan (at most 1,000 assignments and 512 KiB of normalized JSON). Existing proxies capped at 32 MiB may reject larger wrapped reviews; use the current 65-MiB example. Raw preflight/image/ordinary JSON limits remain unchanged.
 
 
+### Prepare a fresh campaign candidate
+
+The server host can call `POST /api/campaign-imports/prepare` with the same exact `file` text and complete ownership `plan`, plus the required `resourcePolicy: "fresh-campaign-and-resource-identifiers"`. The request uses the same 65-MiB envelope limit as ownership review. This creates a private **in-memory candidate**, with no writes, accounts, memberships, invitations or live refresh.
+
+```ts
+await fetch("/api/campaign-imports/prepare", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    file,
+    plan,
+    resourcePolicy: "fresh-campaign-and-resource-identifiers",
+  }),
+});
+```
+
+Campaigns, scenes, objects, documents, instances, assets, rolls, chat and history receive fresh server-generated IDs. Explicitly selected existing people retain their local user IDs; new/unclaimed source identities get distinct fresh IDs. New/unclaimed choices still create no database rows. Image access keys are replaced, with separate keys per scene even if a source file reused one. Private/public visibility, geometry, versions, dice outcomes, historical display names and content-package pins stay intact. Only declared module links are rewritten; UUID-looking text remains text.
+
+Old command retry receipts and digest bindings are omitted from the candidate: they belong to the source command context and cannot be rebound without the original commands. Editing history itself is retained and remapped, including expired predecessor links. Source commands/actions/migrations/factories are never replayed. The source file and image bytes remain unchanged, and no private candidate records or image keys are returned.
+
+The response is `status: "candidate-preflight-only"` and **always** `importReady: false`. `resourcePlan` gives completion, policy, a preview campaign UUID, candidate fingerprint, mapping counts and dropped retry counts. `candidateValidation` reports mapped history/module checks. A complete candidate has only `atomic-import` pending. Preparation rechecks mapped storage quotas, identity inventory, module schemas/references, history graphs and destination capacity/package bindings. Candidate IDs are checked against global destination keys; no existing campaign or resource is overwritten. Merges that exceed storage limits or break editing-stack order are blocked, without silently pruning data.
+
+Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **No import writer or transfer UI/CLI exists yet.** Eventual execution must repeat checks under its atomic write transaction.
+
+
 ### Module references during preflight
 
 Saved module documents, homebrew definition data, owned instance state and saved definition snapshots need explicit transfer declarations from their installed server packages. A declaration lists resource-reference fields or explicitly states there are none. Missing declarations add `module_transfer_unavailable` and retain the `module-external-references` pending check; ordinary play and existing records are unaffected. The bundled name/notes scaffolds declare plain text only. No published game rules or content are added.
 
-Declared links must refer to the correct kind of resource inside the source file. Existing destination IDs and deleted object reservations do not satisfy missing links. Module-declared member IDs join the source ownership review, including departed people without names/roles, and never become access grants. UUID-looking ordinary text is left alone. Reports add `moduleReferenceValidation: { records, references, complete }`, without field paths or private data. Successful inspection removes the source reference placeholder, while `mapped-module-references` remains pending: a future importer must rewrite and validate declared links after the reviewed mapping. No data is rewritten by preflight.
+Declared links must refer to the correct kind of resource inside the source file. Existing destination IDs and deleted object reservations do not satisfy missing links. Module-declared member IDs join the source ownership review, including departed people without names/roles, and never become access grants. UUID-looking ordinary text is left alone. Reports add `moduleReferenceValidation: { records, references, complete }`, without field paths or private data. Successful inspection removes the source reference placeholder; raw preflight still leaves `mapped-module-references` pending. Candidate preparation rewrites declared links and checks the mapped copy. A future writer must repeat validation atomically. No data is rewritten by preflight.
 
 
 ### PNG decoding during preflight

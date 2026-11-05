@@ -80,3 +80,47 @@ export function inspectCampaignDataReferences(
       : { ...reference, kind: reference.kind, value: z.uuid().parse(value) };
   });
 }
+
+/** Rewrite declared fields only; callers must revalidate the pinned output schema and relations. */
+export function remapCampaignDataReferences(
+  policy: CampaignDataTransfer,
+  raw: unknown,
+  resolve: (
+    reference: ReturnType<typeof inspectCampaignDataReferences>[number],
+  ) => unknown,
+) {
+  let mapped = documentData(raw);
+  const references = inspectCampaignDataReferences(policy, raw);
+  for (const reference of references) {
+    const rawValue = resolve(reference),
+      value =
+        reference.kind === "content"
+          ? contentReferenceSchema.parse(rawValue)
+          : z.uuid().parse(rawValue);
+    if (!reference.path.length) {
+      mapped = value;
+      continue;
+    }
+    let parent: unknown = mapped;
+    for (const part of reference.path.slice(0, -1))
+      parent = (parent as Record<string | number, unknown>)[part];
+    // defineProperty also treats literal own __proto__/constructor keys as data.
+    Object.defineProperty(parent, reference.path.at(-1)!, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  const output = documentData(mapped),
+    rewritten = inspectCampaignDataReferences(policy, output),
+    keys = (refs: typeof references) =>
+      refs
+        .map((reference) => JSON.stringify([reference.kind, reference.path]))
+        .sort();
+  if (JSON.stringify(keys(references)) !== JSON.stringify(keys(rewritten)))
+    throw new Error(
+      "Transfer declarations changed during identifier rewriting.",
+    );
+  return output;
+}

@@ -179,7 +179,7 @@ try {
     body: JSON.stringify({ key: hostKey, name: "Smoke host" }),
   });
   assert.equal(setup.status, 200);
-  await setup.json();
+  const hostIdentity = accessStatusSchema.parse(await setup.json()).member!;
   const cookie = setup.headers.get("set-cookie")?.split(";")[0];
   assert.ok(cookie);
   const table = await fetch(`${url}/api/table`, {
@@ -2028,10 +2028,11 @@ try {
       }),
     });
     assert.equal(exported.status, 200);
+    const exportedFile = await exported.text();
     const preflight = await fetch(`${url}/api/campaign-imports/preflight`, {
       method: "POST",
       headers: documentHeaders,
-      body: await exported.text(),
+      body: exportedFile,
     });
     assert.equal(preflight.status, 200);
     const inspected = z
@@ -2043,6 +2044,10 @@ try {
         }),
         moduleReferenceValidation: z.object({ complete: z.literal(true) }),
         pendingValidation: z.array(z.string()),
+        archiveSha256: z.string(),
+        ownership: z.object({
+          subjects: z.array(z.object({ sourceId: z.uuid() })),
+        }),
       })
       .parse(await preflight.json());
     assert.ok(
@@ -2053,6 +2058,38 @@ try {
       !inspected.pendingValidation.includes("module-external-references"),
     );
     assert.ok(inspected.pendingValidation.includes("mapped-module-references"));
+    const preparation = await fetch(`${url}/api/campaign-imports/prepare`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        file: exportedFile,
+        resourcePolicy: "fresh-campaign-and-resource-identifiers",
+        plan: {
+          version: 1,
+          archiveSha256: inspected.archiveSha256,
+          acknowledge: "reviewed-private-content-and-access",
+          acknowledgeMerges: false,
+          assignments: inspected.ownership.subjects.map((subject) => ({
+            sourceId: subject.sourceId,
+            target:
+              subject.sourceId === hostIdentity.id
+                ? { kind: "existing", userId: hostIdentity.id, role: "gm" }
+                : { kind: "new", name: "Imported person", role: "player" },
+          })),
+        },
+      }),
+    });
+    assert.equal(preparation.status, 200);
+    const candidate = z
+      .object({
+        importReady: z.literal(false),
+        blockers: z.array(z.unknown()).max(0),
+        resourcePlan: z.object({ complete: z.literal(true) }),
+        candidateValidation: z.object({ complete: z.literal(true) }),
+        pendingValidation: z.array(z.string()),
+      })
+      .parse(await preparation.json());
+    assert.deepEqual(candidate.pendingValidation, ["atomic-import"]);
   } finally {
     live.terminate();
   }

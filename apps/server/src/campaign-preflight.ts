@@ -53,7 +53,7 @@ function moduleValidation<T>(validate: () => T): T {
     throw new StoreError("Campaign module data is invalid.", 400);
   }
 }
-const campaignDataSchema = z
+export const campaignDataSchema = z
   .object({
     schemaVersion: z.literal(11),
     revision: tableSchema.shape.revision,
@@ -61,7 +61,7 @@ const campaignDataSchema = z
     notes: tableSchema.shape.notes,
   })
   .strict();
-const sceneDataSchema = z
+export const sceneDataSchema = z
   .object({
     tokens: tableSchema.shape.tokens,
     drawings: tableSchema.shape.drawings,

@@ -260,7 +260,15 @@ test("ownership selection and host authorization are refreshed after image work;
     const unavailable = await second;
     assert.equal(unavailable.statusCode, 409);
     assert.ok(!unavailable.body.includes(player.id));
-    const third = f.post(root, f.payload(), f.cookie);
+    const third = f.post(
+      "/api/campaign-imports/prepare",
+      JSON.stringify({
+        file: f.file,
+        plan: f.plan,
+        resourcePolicy: "fresh-campaign-and-resource-identifiers",
+      }),
+      f.cookie,
+    );
     await until(() => control.inspector.busy);
     assert.equal(
       (await f.post("/api/access/logout", "{}", f.cookie)).statusCode,
@@ -272,6 +280,127 @@ test("ownership selection and host authorization are refreshed after image work;
       f.db.prepare("SELECT COUNT(*) AS n FROM campaign_records").get()!.n,
       1,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test("candidate preflight is host-only, requires the fresh-ID policy, returns summary only and never reserves or writes a campaign", async () => {
+  const f = await setup();
+  try {
+    const path = "/api/campaign-imports/prepare",
+      input = {
+        file: f.file,
+        plan: f.plan,
+        resourcePolicy: "fresh-campaign-and-resource-identifiers",
+      },
+      payload = JSON.stringify(input),
+      player = await f.player(),
+      oversized = { "content-length": String(MAX_OWNERSHIP_REVIEW_BYTES + 1) };
+    assert.equal((await f.post(path, "{}", "", oversized)).statusCode, 401);
+    assert.equal(
+      (await f.post(path, "{}", player.cookie, oversized)).statusCode,
+      403,
+    );
+    assert.equal(
+      (await f.post(path, "{}", f.cookie, oversized)).statusCode,
+      413,
+    );
+    assert.equal((await f.post(path, f.payload(), f.cookie)).statusCode, 400);
+    assert.equal(
+      (
+        await f.post(
+          path,
+          JSON.stringify({
+            ...input,
+            resourcePolicy: "reuse-source-identifiers",
+          }),
+          f.cookie,
+        )
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await f.post(path, payload, f.cookie, {
+          origin: "https://foreign.invalid",
+        })
+      ).statusCode,
+      403,
+    );
+    const before = contents(f.db),
+      sourceBefore = contents(f.source.db),
+      response = await f.post(path, payload, f.cookie);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.headers["cache-control"], "no-store");
+    const report = response.json();
+    assert.equal(report.status, "candidate-preflight-only");
+    assert.equal(report.importReady, false);
+    assert.equal(report.resourcePlan.complete, true);
+    assert.equal(report.candidateValidation.complete, true);
+    assert.deepEqual(report.pendingValidation, ["atomic-import"]);
+    assert.match(report.resourcePlan.candidateSha256, /^[a-f0-9]{64}$/);
+    assert.equal(
+      f.db
+        .prepare("SELECT 1 FROM campaign_records WHERE id=?")
+        .get(report.resourcePlan.targetCampaignId),
+      undefined,
+    );
+    for (const privateKey of ["prepared", "candidate", "records", "newUsers"])
+      assert.ok(!Object.hasOwn(report, privateKey));
+    for (const secret of ["PRIVATE FIELD", "PRIVATE CHAT", key, f.file])
+      assert.ok(!response.body.includes(secret));
+    const again = await f.post(path, payload, f.cookie);
+    assert.equal(again.statusCode, 200, again.body);
+    assert.notEqual(
+      again.json().resourcePlan.targetCampaignId,
+      report.resourcePlan.targetCampaignId,
+    );
+    assert.equal(contents(f.db), before);
+    assert.equal(contents(f.source.db), sourceBefore);
+  } finally {
+    await f.close();
+  }
+});
+
+test("candidate preparation leaves all mapped checks pending when ownership still requires merge acknowledgement", async () => {
+  const f = await setup();
+  try {
+    const plan = {
+        ...f.plan,
+        assignments: f.plan.assignments.map((a) => ({
+          sourceId: a.sourceId,
+          target: { kind: "existing", userId: f.hostId, role: "gm" },
+        })),
+      },
+      before = contents(f.db),
+      response = await f.post(
+        "/api/campaign-imports/prepare",
+        JSON.stringify({
+          file: f.file,
+          plan,
+          resourcePolicy: "fresh-campaign-and-resource-identifiers",
+        }),
+        f.cookie,
+      );
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().resourcePlan.complete, false);
+    assert.equal(response.json().resourcePlan.targetCampaignId, null);
+    assert.ok(
+      response
+        .json()
+        .blockers.includes("identity_merge_acknowledgement_required"),
+    );
+    for (const pending of [
+      "ownership-plan",
+      "resource-id-plan",
+      "mapped-history-graph",
+      "mapped-storage-quotas",
+      "mapped-module-references",
+      "atomic-import",
+    ])
+      assert.ok(response.json().pendingValidation.includes(pending));
+    assert.equal(contents(f.db), before);
   } finally {
     await f.close();
   }

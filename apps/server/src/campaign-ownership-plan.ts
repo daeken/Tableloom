@@ -7,6 +7,8 @@ import type { inspectCampaignTransfer } from "./campaign-preflight.js";
 import { MAX_CAMPAIGN_EXPORT_BYTES } from "./campaign-export.js";
 
 export const MAX_OWNERSHIP_REVIEW_BYTES = 65 * 1024 * 1024;
+export const FRESH_RESOURCE_POLICY =
+  "fresh-campaign-and-resource-identifiers" as const;
 const MAX_PLAN_BYTES = 512 * 1024;
 const assignmentSchema = z
   .object({
@@ -63,16 +65,26 @@ export function parseOwnershipPlan(raw: unknown): OwnershipPlan {
 
 /** Preserve the exact source file, rather than reserializing an embedded object. */
 export function parseOwnershipReviewEnvelope(serialized: string) {
+  return parseEnvelope(serialized, false);
+}
+export function parsePreparationEnvelope(serialized: string) {
+  return parseEnvelope(serialized, true);
+}
+function parseEnvelope(serialized: string, preparation: boolean) {
   try {
     if (Buffer.byteLength(serialized) > MAX_OWNERSHIP_REVIEW_BYTES)
       throw new Error("Ownership review envelope is too large.");
-    const raw = z
+    const schema = z
       .object({
         file: z.string().max(MAX_CAMPAIGN_EXPORT_BYTES),
         plan: z.unknown(),
       })
-      .strict()
-      .parse(JSON.parse(serialized));
+      .strict();
+    const raw = (
+      preparation
+        ? schema.extend({ resourcePolicy: z.literal(FRESH_RESOURCE_POLICY) })
+        : schema
+    ).parse(JSON.parse(serialized));
     if (
       Buffer.byteLength(raw.file) > MAX_CAMPAIGN_EXPORT_BYTES ||
       Buffer.from(raw.file).toString("utf8") !== raw.file
@@ -201,3 +213,6 @@ export function reviewCampaignOwnership<T extends SourceReport>(
     throw error;
   }
 }
+export type CampaignOwnershipReview = ReturnType<
+  typeof reviewCampaignOwnership<SourceReport>
+>;
