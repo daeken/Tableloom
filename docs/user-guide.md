@@ -198,7 +198,17 @@ Campaigns pin exact system and pack versions. The server installs **one version 
 
 ## Campaign transfer: current limits
 
-**Campaign export, preflight, ownership review, candidate preparation and atomic import have administrator APIs. The transfer UI/CLI is unfinished.** Import creates a separate campaign on a compatible installation; it does not replace [whole-instance backups](#backup-and-recovery), which also preserve credentials, recovery keys and server configuration.
+**Campaign export, preflight, ownership review, candidate preparation and atomic import have administrator APIs. Browser export is available; the import UI/CLI is unfinished.** Import creates a separate campaign on a compatible installation; it does not replace [whole-instance backups](#backup-and-recovery), which also preserve credentials, recovery keys and server configuration.
+
+### Download a campaign from the browser
+
+Open the campaign picker by selecting the campaign name, then choose **Export campaign…** on the current campaign. This action is available to GMs, including campaign GMs who are not the server host. The review loads current campaign settings and explains the private scope. Confirm **I understand this file includes private and unrevealed campaign content**, choose **Prepare private file**, then **Save private campaign file**. Preparing the file does not automatically save it. If your browser opens it instead, use its save option.
+
+The exported file preserves the server's exact UTF-8 bytes, including embedded images. Keep it private: all scenes, unrevealed maps, private notes/chat/records and history are included. Secrets written into campaign content remain in the file. Stored sign-in credentials, invitations and host-key configuration are excluded. It is an unencrypted campaign transfer file, not a player handout or whole-instance backup. Compatible game code and an explicit ownership review are still required for import.
+
+If settings or access change, export fails without offering a file. **Review latest campaign** reloads settings and resets your confirmation. Closing the review cancels pending requests and releases the prepared save link; reopening requires confirmation again. It leaves campaign settings drafts and the campaign selector open. No private file is saved in browser storage by the app. Requests time out after 30 seconds, and both declared and streamed file size are bounded to 32 MiB. Use a whole-instance backup if portable export is too large.
+
+### Export API
 
 An authenticated GM with the campaign active can request `POST /api/campaigns/<campaign-id>/export` from the same origin, with JSON:
 
@@ -209,7 +219,7 @@ An authenticated GM with the campaign active can request `POST /api/campaigns/<c
 }
 ```
 
-Use the campaign's current version from its settings response, not a fixed version of 1. A stale version returns 409. The response is a `no-store` JSON attachment named with the campaign UUID. There is no download button yet. Players, signed-out sessions, foreign origins and other inactive campaigns cannot request this export.
+Use the campaign's current version from its settings response, not a fixed version of 1. A stale version returns 409. The response is a `no-store` JSON attachment named with the campaign UUID. The GM browser review below provides a download link. Players, signed-out sessions, foreign origins and other inactive campaigns cannot request this export.
 
 **Treat the file as private administrator data.** It includes all scenes (including inactive ones), maps and library images, notes, current/archived rolls, private chat, module records, homebrew, owned content and durable edit history for that campaign. It includes source ownership identifiers and the current member names/roles as descriptors, but no login sessions, invitation/recovery codes, private host key or other campaigns' records. User-entered secrets in notes/module fields remain content and are included. This is not a player-safe share file. Files are plaintext, unsigned and unencrypted.
 
@@ -300,7 +310,7 @@ Old command retry receipts and digest bindings are omitted from the candidate: t
 
 The response is `status: "candidate-preflight-only"` and **always** `importReady: false`. `resourcePlan` gives completion, policy, a preview campaign UUID, candidate fingerprint, mapping counts and dropped retry counts. `candidateValidation` reports mapped history/module checks. A complete candidate has only `atomic-import` pending. Preparation rechecks mapped storage quotas, identity inventory, module schemas/references, history graphs and destination capacity/package bindings. Candidate IDs are checked against global destination keys; no existing campaign or resource is overwritten. Merges that exceed storage limits or break editing-stack order are blocked, without silently pruning data.
 
-Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **Preparation saves nothing.** The import endpoint repeats checks under its atomic write transaction; the transfer UI/CLI remains unfinished.
+Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **Preparation saves nothing.** The import endpoint repeats checks under its atomic write transaction; the import UI/CLI remains unfinished.
 
 
 ### Import a reviewed campaign
@@ -330,7 +340,7 @@ A new import returns **201**, `status: "imported"`, `replayed: false`, the new `
 
 An exact retry with the **same request ID, file and normalized plan** returns **200**, `replayed: true`, and the original result, including after restart, backup/restore or container replacement. Reusing the ID with different choices/file returns 409; removing the target or host's GM membership also returns 409 without recreating it or restoring grants. Current host authorization is always required. Keep the original request body after a timeout; using a new ID can create another campaign. The server retains at most **1,000** import results (each at most 256 KiB); at capacity it rejects new requests while existing retries remain available. There is no receipt-pruning API yet. Results are server operational metadata, included in whole-instance backups but excluded from campaign exports.
 
-Preflight/review/prepare continue to return `importReady: false` because they authorize no writes. Import succeeds only through the confirmed endpoint. There is no campaign overwrite, automatic package download, migration, action replay or transfer UI yet. Existing live permissions/version checks still determine whether an imported undo edge is usable.
+Preflight/review/prepare continue to return `importReady: false` because they authorize no writes. Import succeeds only through the confirmed endpoint. There is no campaign overwrite, automatic package download, migration, action replay or import UI yet. Existing live permissions/version checks still determine whether an imported undo edge is usable.
 
 
 ### Module references during preflight

@@ -11,6 +11,7 @@ import type { Member, AccessStatus } from "@tableloom/core/access";
 import type { ModuleManifest } from "@tableloom/module-sdk";
 import { accessRequest } from "./useAccess.js";
 import type { z } from "zod";
+import { CampaignExportDialog } from "./CampaignExportDialog.js";
 
 type Listing = z.infer<typeof campaignListSchema>;
 export function CampaignDialog({
@@ -27,6 +28,7 @@ export function CampaignDialog({
   const dialog = useRef<HTMLDialogElement>(null),
     reads = useRef(0);
   const [campaigns, setCampaigns] = useState<Listing>([]);
+  const [exportOpen, setExportOpen] = useState(false);
   const [busy, setBusy] = useState(true),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
@@ -170,9 +172,14 @@ export function CampaignDialog({
               </button>
             )}
             {campaign.id === member.tableId && campaign.role === "gm" && (
-              <button disabled={busy} onClick={() => edit(campaign)}>
-                Edit settings
-              </button>
+              <div className="access-actions">
+                <button disabled={busy} onClick={() => edit(campaign)}>
+                  Edit settings
+                </button>
+                <button disabled={busy} onClick={() => setExportOpen(true)}>
+                  Export campaign…
+                </button>
+              </div>
             )}
           </li>
         ))}
@@ -281,6 +288,12 @@ export function CampaignDialog({
           {editing &&
             "Your settings draft is kept here. Reload it explicitly if it is out of date."}
         </p>
+      )}
+      {exportOpen && member.role === "gm" && (
+        <CampaignExportDialog
+          member={member}
+          close={() => setExportOpen(false)}
+        />
       )}
       <button
         className="access-switch"
