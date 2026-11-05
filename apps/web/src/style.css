@@ -575,7 +575,7 @@ p {
 }
 .token-options {
   position: absolute;
-  top: 45px;
+  top: 84px;
   left: 18px;
   background: #fffdf5;
   padding: 13px;
@@ -1653,4 +1653,24 @@ p {
 .selection-delete-actions button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.snap-controls {
+  position: absolute;
+  top: 46px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: #faf9f5;
+  box-shadow: 0 2px 10px #242e2912;
+  color: #405f4d;
+  font-size: 12px;
+  cursor: pointer;
+}
+.snap-controls input {
+  margin: 0;
+  accent-color: #405f4d;
 }

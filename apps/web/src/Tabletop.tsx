@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import {
+  GRID_SIZE,
+  dragDelta,
+  snapAnchor,
+  snapPoint,
+  visibleGrid,
+} from "./grid.js";
+import type { SnapAnchor } from "./grid.js";
 import { DeleteSelectionDialog } from "./DeleteSelectionDialog.js";
 import { captureDeletionReview } from "./scene-selection.js";
 import type { DeletionReviewItem } from "./scene-selection.js";
@@ -13,7 +21,6 @@ import type {
 import type { Member } from "@tableloom/core/access";
 import { translateTokens } from "./token-selection.js";
 import {
-  selectionDelta,
   translateObject,
   hitDrawing,
   objectBounds,
@@ -25,8 +32,14 @@ import { canEditObject } from "@tableloom/core/permissions";
 
 export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
 type Gesture =
-  | { kind: "draw"; drawing: DrawingInput }
-  | { kind: "move"; objects: SceneObject[]; start: Point; delta: Point }
+  | { kind: "draw"; drawing: DrawingInput; snap: boolean }
+  | {
+      kind: "move";
+      objects: SceneObject[];
+      start: Point;
+      delta: Point;
+      anchor: SnapAnchor | null;
+    }
   | { kind: "marquee"; start: Point; end: Point; base: string[] }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
@@ -59,6 +72,33 @@ export function Tabletop({
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [snap, setSnap] = useState(false);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const update = () => {
+      const width = element.clientWidth,
+        height = element.clientHeight;
+      setViewport((previous) =>
+        previous.width === width && previous.height === height
+          ? previous
+          : { width, height },
+      );
+      const app = appRef.current;
+      if (
+        app &&
+        width > 0 &&
+        height > 0 &&
+        (app.screen.width !== width || app.screen.height !== height)
+      )
+        app.resize();
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    update();
+    return () => observer.disconnect();
+  }, []);
   const [selectionError, setSelectionError] = useState("");
   const [deleteReview, setDeleteReview] = useState<DeletionReviewItem[] | null>(
     null,
@@ -125,16 +165,24 @@ export function Tabletop({
       child.destroy({ children: true });
     world.position.set(view.x, view.y);
     world.scale.set(view.scale);
-    const grid = new Graphics();
-    for (let x = -2400; x <= 4800; x += 60)
-      grid.moveTo(x, -2400).lineTo(x, 4800);
-    for (let y = -2400; y <= 4800; y += 60)
-      grid.moveTo(-2400, y).lineTo(4800, y);
+    const grid = new Graphics(),
+      area = visibleGrid(view, viewport.width, viewport.height);
+    if (area) {
+      for (const x of area.vertical)
+        grid.moveTo(x, area.top).lineTo(x, area.bottom);
+      for (const y of area.horizontal)
+        grid.moveTo(area.left, y).lineTo(area.right, y);
+    }
     grid.stroke({ color: "#c7c6b9", width: 1, alpha: 0.5 });
     world.addChild(grid);
     const previews = new Map<string, SceneObject>();
     if (gesture?.kind === "move") {
-      const delta = selectionDelta(gesture.objects, gesture.delta);
+      const delta = dragDelta(
+        gesture.objects,
+        gesture.delta,
+        view.scale,
+        gesture.anchor,
+      );
       for (const object of gesture.objects)
         previews.set(object.id, translateObject(object, delta));
     }
@@ -230,7 +278,7 @@ export function Tabletop({
         .stroke({ color: "#405f4d", width: 1 / view.scale });
       world.addChild(rectangle);
     }
-  }, [ready, state, gesture, selected, view]);
+  }, [ready, state, gesture, selected, view, viewport]);
 
   function local(event: { clientX: number; clientY: number }): Point {
     const rect = host.current!.getBoundingClientRect();
@@ -257,7 +305,7 @@ export function Tabletop({
         token: {
           id: crypto.randomUUID(),
           name: tokenName.trim() || "Token",
-          position: p,
+          position: snap ? snapPoint(p, GRID_SIZE / 2) : p,
           color,
         },
       });
@@ -308,7 +356,13 @@ export function Tabletop({
         const objects = [...state.tokens, ...state.drawings].filter(
           (object) => ids.includes(object.id) && canEditObject(member, object),
         );
-        setGesture({ kind: "move", objects, start: p, delta: { x: 0, y: 0 } });
+        setGesture({
+          kind: "move",
+          objects,
+          start: p,
+          delta: { x: 0, y: 0 },
+          anchor: snap ? snapAnchor(editable) : null,
+        });
       } else if (!target) {
         setGesture({
           kind: "marquee",
@@ -319,12 +373,14 @@ export function Tabletop({
       } else setSelected([]);
     } else {
       setSelected([]);
+      const start = tool === "rectangle" && snap ? snapPoint(p) : p;
       setGesture({
         kind: "draw",
+        snap: tool === "rectangle" && snap,
         drawing: {
           id: crypto.randomUUID(),
           kind: tool === "rectangle" ? "rectangle" : "stroke",
-          points: [p, p],
+          points: [start, start],
           color,
         },
       });
@@ -350,7 +406,8 @@ export function Tabletop({
     else if (gesture.kind === "marquee")
       setGesture({ ...gesture, end: point(event) });
     else {
-      const p = point(event);
+      const raw = point(event),
+        p = gesture.snap ? snapPoint(raw) : raw;
       const points = gesture.drawing.points;
       if (Math.hypot(p.x - points.at(-1)!.x, p.y - points.at(-1)!.y) < 2)
         return;
@@ -367,8 +424,18 @@ export function Tabletop({
     }
   }
   function up(event: ReactPointerEvent) {
-    if (gesture?.kind === "draw")
-      send({ type: "drawing.add", drawing: gesture.drawing });
+    if (gesture?.kind === "draw") {
+      if (gesture.drawing.kind === "rectangle") {
+        const raw = point(event),
+          last = gesture.snap ? snapPoint(raw) : raw,
+          first = gesture.drawing.points[0]!;
+        if (first.x !== last.x && first.y !== last.y)
+          send({
+            type: "drawing.add",
+            drawing: { ...gesture.drawing, points: [first, last] },
+          });
+      } else send({ type: "drawing.add", drawing: gesture.drawing });
+    }
     if (gesture?.kind === "marquee") {
       const editable = [...state.tokens, ...state.drawings].filter((object) =>
         canEditObject(member, object),
@@ -382,10 +449,15 @@ export function Tabletop({
     }
     if (gesture?.kind === "move") {
       const p = point(event),
-        delta = selectionDelta(gesture.objects, {
-          x: p.x - gesture.start.x,
-          y: p.y - gesture.start.y,
-        });
+        delta = dragDelta(
+          gesture.objects,
+          {
+            x: p.x - gesture.start.x,
+            y: p.y - gesture.start.y,
+          },
+          view.scale,
+          gesture.anchor,
+        );
       if (delta.x !== 0 || delta.y !== 0) {
         const tokens = gesture.objects.filter((object) => "position" in object);
         if (tokens.length === gesture.objects.length) {
@@ -470,6 +542,20 @@ export function Tabletop({
       <div className="canvas-label">
         <span className="live-dot" /> SHARED BATTLEFIELD
       </div>
+      <label
+        className="snap-controls"
+        title="Token centers snap to cells; room corners and drawing anchors snap to grid lines. Groups keep their spacing."
+        onPointerDown={(event) => event.stopPropagation()}
+        onPointerUp={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={snap}
+          onChange={(event) => setSnap(event.target.checked)}
+        />{" "}
+        Snap to grid
+      </label>
       {(selected.length > 0 || selectionError) && (
         <div
           className="selection-controls"
