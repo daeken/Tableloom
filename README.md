@@ -1,5 +1,7 @@
 # Tableloom
 
+[![CI](https://github.com/daeken/Tableloom/actions/workflows/ci.yml/badge.svg)](https://github.com/daeken/Tableloom/actions/workflows/ci.yml)
+
 A self-hosted, web-based virtual tabletop for RPG campaigns: working character sheets, good dice, and a battlefield you can sketch as quickly as a whiteboard.
 
 The goal is support for **any game system** through independently versioned code modules. The first targets are **Cyberpunk RED**, **Kids on Bikes**, and **Kids on Brooms**. Agents will build the modules; a visual rules builder is not a goal.
@@ -94,7 +96,7 @@ This is the **single source of truth for goals and remaining work**. Work top to
 
 - [ ] **Needs Docker engine + Compose/build plugins:** verify the added multi-stage image, persistent volume and non-root runtime with `npm run container:check`.
 - [x] Add consistent database/asset backup and restore, with tested recovery into new directories.
-- [ ] **Next:** add CI for clean install, strict checks, tests and builds.
+- [ ] **Next:** verify the added CI for clean install, strict checks, tests, builds and recovery; first hosted run is pending.
 - [ ] Document reverse proxy/HTTPS, upgrades, trusted-module installation and campaign export/import.
 - [ ] Playtest a complete campaign session with a real group and fix workflow friction.
 - [ ] **After playtest feedback:** add note history/trash and richer document content.
