@@ -160,6 +160,8 @@ export function Tabletop({
   const gestureScope = `${tool}:${grid.version}`;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
+  useEffect(() => setSelectionActionsOpen(false), [tool, selected.join("|")]);
   const [sharing, setSharing] = useState(false);
   const pointer = useRef<{ clientX: number; clientY: number } | null>(null);
   const cursorSender = useRef(shareCursor);
@@ -1328,105 +1330,125 @@ export function Tabletop({
       {tool !== "measure" && (selected.length > 0 || selectionError) && (
         <div
           className="selection-controls"
+          data-expanded={selectionActionsOpen}
+          role="group"
+          aria-label="Selection actions"
           onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
         >
           <button
-            onClick={() => {
-              setGesture(null);
-              setShortcutsOpen(true);
-            }}
+            className="selection-actions-toggle"
+            aria-expanded={selectionActionsOpen}
+            aria-controls="selection-actions-body"
+            onClick={() => setSelectionActionsOpen((value) => !value)}
           >
-            Keyboard shortcuts
+            <span aria-live="polite">
+              {selectionError
+                ? "Review selection"
+                : `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
+            </span>
+            <span>{selectionActionsOpen ? "Hide actions" : "Actions…"}</span>
           </button>
-          <span role="status">
-            {selectionError ||
-              `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
-          </span>
-          {selectedObjects.length === 1 &&
-            "points" in selectedObjects[0]! &&
-            canResize(selectedObjects[0]) &&
-            tool === "select" && <small>Drag a corner to resize</small>}
-          {selectedObjects.length === 1 &&
-            "position" in selectedObjects[0]! && (
-              <button
-                disabled={!enabled || pending}
-                onClick={() => {
-                  setGesture(null);
-                  setResizeToken(selectedObjects[0] as Token);
-                }}
-              >
-                Resize token…
-              </button>
-            )}
-          {selectedObjects.length === 1 &&
-            "kind" in selectedObjects[0]! &&
-            selectedObjects[0].kind === "text" && (
-              <button
-                disabled={!enabled || pending}
-                onClick={() => {
-                  setGesture(null);
-                  setEditText(selectedObjects[0] as Drawing);
-                }}
-              >
-                Edit label…
-              </button>
-            )}
-          {selectedObjects.length === 1 &&
-            "kind" in selectedObjects[0]! &&
-            selectedObjects[0].kind !== "text" && (
-              <button
-                disabled={!enabled || pending}
-                onClick={() => {
-                  setGesture(null);
-                  setEditShape(selectedObjects[0] as Drawing);
-                }}
-              >
-                Style shape…
-              </button>
-            )}
-          {selectedObjects.length === 1 && (
+          <div className="selection-actions-body" id="selection-actions-body">
             <button
-              disabled={!enabled || pending}
               onClick={() => {
                 setGesture(null);
-                setSceneOrder({
-                  initial: selectedObjects[0]!,
-                  kind: "points" in selectedObjects[0]! ? "drawing" : "token",
-                });
+                setShortcutsOpen(true);
               }}
             >
-              Arrange {"points" in selectedObjects[0]! ? "drawing" : "token"}…
+              Keyboard shortcuts
             </button>
-          )}
-          {selectedObjects.length > 1 && (
+            <span role="status">
+              {selectionError ||
+                `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
+            </span>
+            {selectedObjects.length === 1 &&
+              "points" in selectedObjects[0]! &&
+              canResize(selectedObjects[0]) &&
+              tool === "select" && <small>Drag a corner to resize</small>}
+            {selectedObjects.length === 1 &&
+              "position" in selectedObjects[0]! && (
+                <button
+                  disabled={!enabled || pending}
+                  onClick={() => {
+                    setGesture(null);
+                    setResizeToken(selectedObjects[0] as Token);
+                  }}
+                >
+                  Resize token…
+                </button>
+              )}
+            {selectedObjects.length === 1 &&
+              "kind" in selectedObjects[0]! &&
+              selectedObjects[0].kind === "text" && (
+                <button
+                  disabled={!enabled || pending}
+                  onClick={() => {
+                    setGesture(null);
+                    setEditText(selectedObjects[0] as Drawing);
+                  }}
+                >
+                  Edit label…
+                </button>
+              )}
+            {selectedObjects.length === 1 &&
+              "kind" in selectedObjects[0]! &&
+              selectedObjects[0].kind !== "text" && (
+                <button
+                  disabled={!enabled || pending}
+                  onClick={() => {
+                    setGesture(null);
+                    setEditShape(selectedObjects[0] as Drawing);
+                  }}
+                >
+                  Style shape…
+                </button>
+              )}
+            {selectedObjects.length === 1 && (
+              <button
+                disabled={!enabled || pending}
+                onClick={() => {
+                  setGesture(null);
+                  setSceneOrder({
+                    initial: selectedObjects[0]!,
+                    kind: "points" in selectedObjects[0]! ? "drawing" : "token",
+                  });
+                }}
+              >
+                Arrange {"points" in selectedObjects[0]! ? "drawing" : "token"}…
+              </button>
+            )}
+            {selectedObjects.length > 1 && (
+              <button
+                disabled={!enabled || pending}
+                onClick={() => {
+                  setGesture(null);
+                  setResizeSelection(selectedObjects);
+                }}
+              >
+                Resize selection…
+              </button>
+            )}
             <button
-              disabled={!enabled || pending}
+              onClick={() => {
+                setSelected([]);
+                setSelectionError("");
+                setGesture(null);
+              }}
+            >
+              Clear selection
+            </button>
+            <button
+              disabled={!enabled || pending || !selectedObjects.length}
               onClick={() => {
                 setGesture(null);
-                setResizeSelection(selectedObjects);
+                setDeleteReview(captureDeletionReview(selectedObjects));
               }}
             >
-              Resize selection…
+              Delete selection…
             </button>
-          )}
-          <button
-            onClick={() => {
-              setSelected([]);
-              setSelectionError("");
-              setGesture(null);
-            }}
-          >
-            Clear selection
-          </button>
-          <button
-            disabled={!enabled || pending || !selectedObjects.length}
-            onClick={() => {
-              setGesture(null);
-              setDeleteReview(captureDeletionReview(selectedObjects));
-            }}
-          >
-            Delete selection…
-          </button>
+          </div>
         </div>
       )}
       {resizeSelection && (

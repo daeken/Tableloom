@@ -57,8 +57,9 @@ This is the **single source of truth for goals and remaining work**. Work top to
 
 - [x] Restore compact campaign controls, fit the phone toolbar and add keyboard skip navigation.
 - [x] Guard pointer gestures with one owner, second-contact cancellation and release-only tap actions.
-- [ ] **Next:** audit dense selection controls and narrow dialogs; verify touch/pen behavior on real devices.
-- [ ] Complete keyboard object workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
+- [x] Fit dense selection actions and resize/review dialogs on narrow screens.
+- [ ] **Needs device access:** verify touch/pen behavior on real hardware.
+- [ ] **Next:** complete keyboard object workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
 ### Make game modules playable

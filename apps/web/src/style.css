@@ -904,6 +904,16 @@ p {
   border-radius: 10px;
   padding: 36px 38px;
   box-shadow: 0 20px 80px #07170c44;
+  overflow-wrap: anywhere;
+}
+.join-card fieldset {
+  min-width: 0;
+}
+.join-card input,
+.join-card textarea,
+.join-card select {
+  min-width: 0;
+  max-width: 100%;
 }
 .join-card > .brand-mark {
   display: block;
@@ -1612,6 +1622,13 @@ p {
   border: 0;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.selection-actions-toggle {
+  display: none;
+}
+.selection-actions-body {
+  display: contents;
 }
 
 .selection-delete-dialog {
@@ -2586,5 +2603,61 @@ summary:focus-visible,
   }
   .right-rail button {
     min-height: 44px;
+  }
+  .selection-controls {
+    top: 88px;
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    max-height: clamp(116px, calc(100% - 310px), 240px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding: 56px 6px 6px;
+    display: block;
+    padding: 6px;
+  }
+  .selection-actions-body > span,
+  .selection-actions-body > small {
+    grid-column: 1 / -1;
+    overflow-wrap: anywhere;
+  }
+  .selection-actions-body > span {
+    order: -1;
+  }
+  .selection-controls button {
+    min-height: 44px;
+    padding: 6px;
+    border: 1px solid #d9dcce;
+    border-radius: 4px;
+    background: #fffef8;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .selection-actions-toggle {
+    position: sticky;
+    top: -6px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+  }
+  .selection-actions-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .selection-controls[data-expanded="false"] .selection-actions-body {
+    display: none;
+  }
+  .join-card button {
+    min-height: 44px;
+  }
+  .selection-delete-actions,
+  .drawing-order-actions,
+  .drawing-order-pages {
+    flex-wrap: wrap;
   }
 }
