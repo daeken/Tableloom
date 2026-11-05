@@ -1,10 +1,14 @@
+import {
+  CompactControlsDialog,
+  useCompactLayout,
+} from "./CompactControlsDialog.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { TablePresence } from "./TablePresence.js";
 import { toolKeys } from "./tabletop-shortcuts.js";
 import { GridSettingsDialog } from "./GridSettingsDialog.js";
 import { SceneMapDialog } from "./SceneMapDialog.js";
 import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   ArrowUpRight,
@@ -76,6 +80,24 @@ export function App() {
   const viewerKey = member
     ? `${member.id}:${member.tableId}:${member.role}`
     : null;
+  const compact = useCompactLayout();
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const controlsTrigger = useRef<HTMLButtonElement>(null);
+  const controlFocusPending = useRef(false);
+  const openControl = (action: () => void) => {
+    controlFocusPending.current = compact;
+    setControlsOpen(false);
+    action();
+  };
+  useEffect(() => {
+    if (!compact && controlsOpen) {
+      setControlsOpen(false);
+      const frame = requestAnimationFrame(() =>
+        document.getElementById("battlefield-main")?.focus(),
+      );
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [compact]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -84,6 +106,24 @@ export function App() {
   const [mapOpen, setMapOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
+  useEffect(() => {
+    if (
+      !controlFocusPending.current ||
+      controlsOpen ||
+      sceneOpen ||
+      assetsOpen ||
+      mapOpen ||
+      gridOpen ||
+      ownershipOpen
+    )
+      return;
+    const frame = requestAnimationFrame(() => {
+      if (!document.querySelector("dialog[open]"))
+        controlsTrigger.current?.focus();
+      controlFocusPending.current = false;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [controlsOpen, sceneOpen, assetsOpen, mapOpen, gridOpen, ownershipOpen]);
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState(colors[0]!);
   const [tokenName, setTokenName] = useState("Adventurer");
@@ -138,6 +178,7 @@ export function App() {
   useEffect(() => {
     setDraft({ viewerKey, expression: "2d6", visibility: "public" });
     setRollError("");
+    setControlsOpen(false);
     setCampaignOpen(false);
     setSceneOpen(false);
     setHistoryOpen(false);
@@ -183,8 +224,171 @@ export function App() {
     }
   }
 
+  const sidebar = (
+    <aside className="left-rail" aria-label="Campaign controls and cast">
+      <div className="rail-heading">
+        <span className="eyebrow">THE TABLE</span>
+        <span className="chapter-number">01</span>
+      </div>
+      <div className="scene-card" aria-label="Current scene">
+        <span className="scene-art">
+          <span className="scene-room room-one" />
+          <span className="scene-room room-two" />
+          <span className="scene-path" />
+          <span className="scene-pin" />
+        </span>
+        <span className="scene-caption">
+          <span>
+            <strong>{table.sceneName || "The gathering place"}</strong>
+            <small>Your shared battlefield</small>
+          </span>
+          <span className="scene-active" />
+        </span>
+      </div>
+      {member?.role === "gm" && table.context && (
+        <button
+          className="add-cast manage-scenes"
+          onClick={() => openControl(() => setSceneOpen(true))}
+        >
+          Manage scenes
+        </button>
+      )}
+      {member?.role === "gm" && (
+        <button
+          className="add-cast manage-scenes"
+          onClick={() => openControl(() => setAssetsOpen(true))}
+        >
+          Map assets
+        </button>
+      )}
+      {member?.role === "gm" && table.context && (
+        <button
+          className="add-cast manage-scenes"
+          disabled={!connected}
+          onClick={() => openControl(() => setMapOpen(true))}
+        >
+          Scene map
+        </button>
+      )}
+      {member?.role === "gm" && table.context && (
+        <button
+          className="add-cast manage-scenes"
+          disabled={!connected || !table.grid}
+          onClick={() => openControl(() => setGridOpen(true))}
+        >
+          Grid settings
+        </button>
+      )}
+      <div className="rail-section">
+        <span className="eyebrow">GAME SYSTEM</span>
+        <div className="system-select">
+          <span
+            className="system-color"
+            style={{ background: currentModule.accent }}
+          />
+          <select
+            aria-label="Game system"
+            disabled={!connected || member?.role !== "gm"}
+            title={
+              member?.role === "gm"
+                ? "Choose the game system"
+                : "Only the GM can change the game system"
+            }
+            value={currentModule.id}
+            onChange={(e) =>
+              send({ type: "system.set", systemId: e.target.value })
+            }
+          >
+            {modules.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={14} />
+        </div>
+        <p className="rail-note">Every story plays a little differently.</p>
+      </div>
+      <div className="rail-section cast-section">
+        <div className="section-row">
+          <span className="eyebrow">ON THE TABLE</span>
+          <span className="count">{state?.tokens.length ?? 0}</span>
+        </div>
+        {!state?.tokens.length ? (
+          <p className="rail-note">
+            A cast of characters,
+            <br />
+            waiting to arrive.
+          </p>
+        ) : (
+          <div className="cast-list">
+            {state.tokens.map((token) => (
+              <div className="cast-member" key={token.id}>
+                <span
+                  className="token-mini"
+                  style={{ background: token.color }}
+                >
+                  {token.name.slice(0, 1)}
+                </span>
+                <span>{token.name}</span>
+                <button
+                  aria-label={`Delete ${token.name}`}
+                  disabled={!connected || !canEditObject(member, token)}
+                  title={
+                    canEditObject(member, token)
+                      ? "Delete token"
+                      : "Only the owner or GM can delete this token"
+                  }
+                  onClick={() =>
+                    send({
+                      type: "object.delete",
+                      objectId: token.id,
+                      expectedVersion: token.version,
+                    })
+                  }
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          className="add-cast"
+          onClick={() => openControl(() => setTool("token"))}
+        >
+          <Plus size={14} /> Place a token
+        </button>
+        {member?.role === "gm" && state && (
+          <button
+            className="add-cast"
+            onClick={() => {
+              clearError();
+              openControl(() => setOwnershipOpen(true));
+            }}
+          >
+            Manage ownership
+          </button>
+        )}
+      </div>
+      <div className="rail-footer">
+        <span className="small-spark">✧</span>
+        <p>
+          Good stories start
+          <br />
+          with good company.
+        </p>
+        <span className="version">TABLELOOM / 0.1</span>
+      </div>
+    </aside>
+  );
+
   return (
     <div className="app-shell">
+      <nav className="skip-links" aria-label="Skip to content">
+        <a href="#battlefield-main">Skip to battlefield</a>
+        <a href="#table-panels">Skip to dice, notes and chat</a>
+      </nav>
       <header className="topbar">
         <a className="brand" href="/" aria-label="Tableloom home">
           <span className="brand-mark">
@@ -204,6 +408,19 @@ export function App() {
           {table.campaignName || "Campaigns"} <ChevronDown size={12} />
         </button>
         <span className="prototype-badge">EARLY ACCESS</span>
+        {compact && (
+          <button
+            ref={controlsTrigger}
+            className="compact-controls-trigger"
+            aria-haspopup="dialog"
+            aria-expanded={controlsOpen}
+            aria-controls={controlsOpen ? "compact-table-controls" : undefined}
+            disabled={!member}
+            onClick={() => setControlsOpen(true)}
+          >
+            Table controls
+          </button>
+        )}
         <div className="header-actions">
           <span className={`connection ${connected ? "online" : ""}`}>
             <span className="live-dot" />
@@ -248,161 +465,22 @@ export function App() {
       </header>
 
       <div className="workspace">
-        <aside className="left-rail">
-          <div className="rail-heading">
-            <span className="eyebrow">THE TABLE</span>
-            <span className="chapter-number">01</span>
-          </div>
-          <div className="scene-card" aria-label="Current scene">
-            <span className="scene-art">
-              <span className="scene-room room-one" />
-              <span className="scene-room room-two" />
-              <span className="scene-path" />
-              <span className="scene-pin" />
-            </span>
-            <span className="scene-caption">
-              <span>
-                <strong>{table.sceneName || "The gathering place"}</strong>
-                <small>Your shared battlefield</small>
-              </span>
-              <span className="scene-active" />
-            </span>
-          </div>
-          {member?.role === "gm" && table.context && (
-            <button
-              className="add-cast manage-scenes"
-              onClick={() => setSceneOpen(true)}
-            >
-              Manage scenes
-            </button>
-          )}
-          {member?.role === "gm" && (
-            <button
-              className="add-cast manage-scenes"
-              onClick={() => setAssetsOpen(true)}
-            >
-              Map assets
-            </button>
-          )}
-          {member?.role === "gm" && table.context && (
-            <button
-              className="add-cast manage-scenes"
-              disabled={!connected}
-              onClick={() => setMapOpen(true)}
-            >
-              Scene map
-            </button>
-          )}
-          {member?.role === "gm" && table.context && (
-            <button
-              className="add-cast manage-scenes"
-              disabled={!connected || !table.grid}
-              onClick={() => setGridOpen(true)}
-            >
-              Grid settings
-            </button>
-          )}
-          <div className="rail-section">
-            <span className="eyebrow">GAME SYSTEM</span>
-            <div className="system-select">
-              <span
-                className="system-color"
-                style={{ background: currentModule.accent }}
-              />
-              <select
-                aria-label="Game system"
-                disabled={!connected || member?.role !== "gm"}
-                title={
-                  member?.role === "gm"
-                    ? "Choose the game system"
-                    : "Only the GM can change the game system"
-                }
-                value={currentModule.id}
-                onChange={(e) =>
-                  send({ type: "system.set", systemId: e.target.value })
-                }
-              >
-                {modules.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={14} />
-            </div>
-            <p className="rail-note">Every story plays a little differently.</p>
-          </div>
-          <div className="rail-section cast-section">
-            <div className="section-row">
-              <span className="eyebrow">ON THE TABLE</span>
-              <span className="count">{state?.tokens.length ?? 0}</span>
-            </div>
-            {!state?.tokens.length ? (
-              <p className="rail-note">
-                A cast of characters,
-                <br />
-                waiting to arrive.
-              </p>
-            ) : (
-              <div className="cast-list">
-                {state.tokens.map((token) => (
-                  <div className="cast-member" key={token.id}>
-                    <span
-                      className="token-mini"
-                      style={{ background: token.color }}
-                    >
-                      {token.name.slice(0, 1)}
-                    </span>
-                    <span>{token.name}</span>
-                    <button
-                      aria-label={`Delete ${token.name}`}
-                      disabled={!connected || !canEditObject(member, token)}
-                      title={
-                        canEditObject(member, token)
-                          ? "Delete token"
-                          : "Only the owner or GM can delete this token"
-                      }
-                      onClick={() =>
-                        send({
-                          type: "object.delete",
-                          objectId: token.id,
-                          expectedVersion: token.version,
-                        })
-                      }
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button className="add-cast" onClick={() => setTool("token")}>
-              <Plus size={14} /> Place a token
-            </button>
-            {member?.role === "gm" && state && (
-              <button
-                className="add-cast"
-                onClick={() => {
-                  clearError();
-                  setOwnershipOpen(true);
-                }}
-              >
-                Manage ownership
-              </button>
-            )}
-          </div>
-          <div className="rail-footer">
-            <span className="small-spark">✧</span>
-            <p>
-              Good stories start
-              <br />
-              with good company.
-            </p>
-            <span className="version">TABLELOOM / 0.1</span>
-          </div>
-        </aside>
+        {!compact && sidebar}
+        {compact && controlsOpen && (
+          <CompactControlsDialog
+            close={() => setControlsOpen(false)}
+            restoreFocus={() => controlsTrigger.current?.focus()}
+          >
+            {sidebar}
+          </CompactControlsDialog>
+        )}
 
-        <main className="main-table">
+        <main
+          className="main-table"
+          id="battlefield-main"
+          tabIndex={-1}
+          aria-label="Battlefield"
+        >
           <div className="table-heading">
             <div>
               <span className="eyebrow">A PLACE TO MAKE BELIEVE</span>
@@ -522,7 +600,12 @@ export function App() {
           </footer>
         </main>
 
-        <aside className="right-rail">
+        <aside
+          className="right-rail"
+          id="table-panels"
+          tabIndex={-1}
+          aria-label="Dice, sheets, notes and chat"
+        >
           <div className="panel-tabs">
             <button
               className={tab === "rolls" ? "active" : ""}

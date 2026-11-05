@@ -2349,3 +2349,242 @@ p {
 .panel-tabs {
   flex-wrap: wrap;
 }
+
+/* Keyboard entry points and compact controls share the same campaign actions. */
+.skip-links {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 16px);
+  transform: translateY(calc(-100% - 16px));
+}
+.skip-links:focus-within {
+  position: fixed;
+  transform: none;
+}
+.skip-links a {
+  padding: 12px;
+  border: 2px solid #405f4d;
+  border-radius: 5px;
+  background: #fffef8;
+}
+textarea:focus-visible,
+summary:focus-visible,
+#battlefield-main:focus-visible,
+#table-panels:focus-visible {
+  outline: 2px solid #405f4d;
+  outline-offset: -3px;
+}
+.workspace > *,
+.table-heading > *,
+.header-actions,
+.panel-tabs {
+  min-width: 0;
+}
+.table-heading h1 {
+  overflow-wrap: anywhere;
+}
+.compact-controls-trigger {
+  padding: 10px 12px;
+  border: 1px solid #7a8b6e;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.compact-controls-dialog {
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 1px solid #b8c2a8;
+  border-radius: 8px;
+  color: #303c33;
+  background: #f9f8f3;
+  overflow-y: auto;
+}
+.compact-controls-dialog::backdrop {
+  background: #1d2a23bb;
+}
+.compact-controls-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: #f9f8f3;
+  border-bottom: 1px solid #dfe3d4;
+}
+.compact-controls-heading h1 {
+  font:
+    22px Georgia,
+    serif;
+  margin: 0;
+}
+.compact-controls-heading button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #b8c2a8;
+}
+.compact-controls-dialog .left-rail {
+  display: flex;
+  border: 0;
+  overflow: visible;
+}
+.compact-controls-dialog .left-rail button {
+  min-height: 44px;
+}
+@media (max-width: 700px) {
+  .topbar {
+    height: auto;
+    min-height: 65px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 10px 14px;
+  }
+  .topbar .brand {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .compact-controls-trigger {
+    grid-row: 1;
+    grid-column: 2;
+    min-height: 44px;
+  }
+  .topbar .campaign-picker {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .header-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin: 0;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  .header-actions .connection {
+    display: flex;
+    font-size: 10px;
+  }
+  .header-actions .avatar {
+    display: none;
+  }
+  .header-actions button {
+    min-height: 44px;
+    font-size: 12px;
+  }
+  .table-heading {
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .main-table {
+    min-height: 650px;
+    height: 85dvh;
+  }
+  .canvas-frame {
+    min-height: 440px;
+  }
+  .scene-history-controls {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .history-button,
+  .panel-tabs button {
+    min-height: 44px;
+  }
+  .toolbar {
+    width: calc(100% - 24px);
+    max-width: 360px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(44px, 1fr));
+    gap: 3px;
+    padding: 6px;
+    bottom: 56px;
+  }
+  .toolbar > button {
+    width: 100%;
+    height: 44px;
+  }
+  .toolbar .tool-divider {
+    display: none;
+  }
+  .color-options {
+    grid-column: 1 / -1;
+    justify-content: center;
+    gap: 4px;
+    padding: 0;
+  }
+  .color-options .color-swatch {
+    width: 28px;
+    height: 28px;
+    border-width: 8px;
+  }
+  .zoom-controls {
+    bottom: 4px;
+    right: 8px;
+  }
+  .zoom-controls button {
+    min-width: 36px;
+    min-height: 44px;
+  }
+  .cursor-sharing {
+    left: 8px;
+    bottom: 4px;
+    min-height: 44px;
+  }
+  .snap-controls {
+    top: 38px;
+    left: 8px;
+    min-height: 44px;
+  }
+  .shortcuts-open {
+    top: 38px;
+    left: 128px;
+    min-height: 44px;
+  }
+  .drawing-order-open {
+    top: 88px;
+    left: 8px;
+    right: auto;
+    max-width: calc(100% - 16px);
+  }
+  .drawing-order-open button {
+    min-height: 44px;
+  }
+  .panel-tabs {
+    height: auto;
+    min-height: 52px;
+    gap: 8px;
+  }
+  .panel-tabs button {
+    padding: 6px 4px;
+    font-size: 11px;
+  }
+  .join-card {
+    width: min(540px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 24px;
+    overflow-y: auto;
+  }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  textarea,
+  select {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .right-rail button {
+    min-height: 44px;
+  }
+}
