@@ -32,6 +32,11 @@ import { RollHistoryStore } from "./roll-history.js";
 import { registerRollHistoryRoutes } from "./roll-history-http.js";
 import { DocumentStore } from "./documents.js";
 import { registerDocumentRoutes } from "./documents-http.js";
+import { documentSystems as defaultDocumentSystems } from "./document-modules.js";
+import { ContentCatalog, withContentMetadata } from "./content-catalog.js";
+import { CampaignContentStore } from "./content.js";
+import { registerContentRoutes } from "./content-http.js";
+import type { ContentPackDefinition } from "@tableloom/module-sdk/content";
 import { AccessStore } from "./access.js";
 import {
   registerAccessRoutes,
@@ -53,10 +58,18 @@ export async function createApp(options: {
   documentSystems?: readonly ServerSystemDefinition<unknown>[];
   catalog?: InstalledCatalog;
   sessionCookieName?: string;
+  contentPacks?: readonly ContentPackDefinition<unknown>[];
 }) {
-  const installedSystems = new Set(
-    (options.catalog?.systems ?? installedModules).map((module) => module.id),
+  const systems = options.documentSystems ?? defaultDocumentSystems;
+  const contentCatalog = new ContentCatalog([
+    ...systems.flatMap((system) => system.contentPacks ?? []),
+    ...(options.contentPacks ?? []),
+  ]);
+  const catalog = withContentMetadata(
+    options.catalog ?? { systems: installedModules, contentPacks: [] },
+    contentCatalog,
   );
+  const installedSystems = new Set(catalog.systems.map((module) => module.id));
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 256 * 1024,
@@ -115,6 +128,7 @@ export async function createApp(options: {
   let store: TableStore;
   let access: AccessStore;
   let documents: DocumentStore;
+  let content: CampaignContentStore;
   let history: RollHistoryStore;
   let bindings: CommandBindings;
   let sceneHistory: SceneHistoryStore;
@@ -123,10 +137,11 @@ export async function createApp(options: {
   let sceneGrids: SceneGridStore;
   let chat: ChatStore;
   try {
-    store = new TableStore(database, options.catalog);
+    store = new TableStore(database, catalog);
     access = new AccessStore(database, options.hostKey, now);
     store.load();
-    documents = new DocumentStore(database, store, options.documentSystems);
+    documents = new DocumentStore(database, store, systems);
+    content = new CampaignContentStore(database, store, contentCatalog);
     history = new RollHistoryStore(database, store);
     bindings = new CommandBindings(database);
     sceneHistory = new SceneHistoryStore(database, store);
@@ -290,6 +305,7 @@ export async function createApp(options: {
   });
   registerChatRoutes(app, access, chat);
   registerDocumentRoutes(app, access, documents);
+  registerContentRoutes(app, access, content);
   await registerAssetRoutes(app, access, assets);
   registerSceneMapRoutes(app, access, sceneMaps, assets, refreshCampaign);
   registerSceneGridRoutes(app, access, sceneGrids, refreshCampaign);

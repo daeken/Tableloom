@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineSystem, documentActionIdSchema } from "./index.js";
 import type { SystemDefinition } from "./index.js";
 import { documentData } from "./document-data.js";
+import type { ContentPackDefinition } from "./content.js";
 
 export interface DocumentActionActor {
   readonly id: string;
@@ -48,11 +49,21 @@ export interface DocumentMigration {
 export interface ServerSystemDefinition<T> extends SystemDefinition<T> {
   documentMigrations?: readonly DocumentMigration[];
   documentActions?: readonly DocumentAction<T>[];
+  contentPacks?: readonly ContentPackDefinition<unknown>[];
 }
 export function defineServerSystem<T>(
   definition: ServerSystemDefinition<T>,
 ): ServerSystemDefinition<T> {
   defineSystem(definition);
+  for (const pack of definition.contentPacks ?? []) {
+    if (
+      pack.systemId !== definition.manifest.id ||
+      pack.systemVersion !== definition.manifest.version
+    )
+      throw new Error(
+        "Content packs must match their server system's exact package pin.",
+      );
+  }
   const actions = new Set<string>();
   for (const action of definition.documentActions ?? []) {
     documentActionIdSchema.parse(action.id);

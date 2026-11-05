@@ -16,6 +16,7 @@
     "./assets": "./src/assets.ts",
     "./scene-map": "./src/scene-map.ts",
     "./scene-grid": "./src/scene-grid.ts",
-    "./chat": "./src/chat.ts"
+    "./chat": "./src/chat.ts",
+    "./content": "./src/content.ts"
   }
 }

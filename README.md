@@ -6,7 +6,7 @@ The goal is support for **any game system** through independently versioned code
 
 ## Current state
 
-The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** now saves module-provided character records with private/shared access.
+The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** saves module-provided character records with private/shared access. The content-pack backend supports pinned definitions and campaign homebrew overrides; catalog and inventory controls are still pending.
 
 **Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility, performance and deployment/recovery tooling still need work.
 
@@ -78,7 +78,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add validated, versioned server actions for persisted module documents.
 - [x] Connect saved module documents to module-provided sheet editors and versioned action callbacks.
 - [x] Add an isolated module preview/test harness with synthetic sheet/action examples.
-- [ ] **Next:** load content packs with stable definitions, owned item instances and campaign homebrew overrides.
+- [x] Load validated, pinned content definitions with versioned campaign homebrew overrides.
+- [ ] **Next:** add owned content instances and module-provided catalog/inventory controls, keeping definitions separate from owned state.
 - [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references and sourced preview cases.
 - [ ] **Needs PDFs:** inventory and implement Kids on Bikes and Kids on Brooms separately, with sourced preview cases; extract shared code only where demonstrated.
 - [ ] Run character creation, sheet editing, rolls and resource updates in two structurally different systems without changing core.

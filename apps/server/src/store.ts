@@ -470,6 +470,7 @@ export class TableStore {
           409,
         );
       this.assertDocumentPinCompatible(id, settings.system);
+      this.assertContentPinsCompatible(id, settings);
       const next = campaignSchema.parse({
         ...current,
         ...settings,
@@ -608,6 +609,7 @@ export class TableStore {
           system: this.pinFor(state.systemId),
           version: campaign.version + 1,
         });
+        this.assertContentPinsCompatible(campaignId, metadata);
         this.validatePins(metadata);
         this.assertDocumentPinCompatible(campaignId, metadata.system);
       }
@@ -750,7 +752,9 @@ export class TableStore {
           (pack) =>
             pack.id === pin.id &&
             pack.version === pin.version &&
-            pack.systemId === system.id,
+            pack.systemId === system.id &&
+            (pack.systemVersion === undefined ||
+              pack.systemVersion === system.version),
         )
       )
         throw new StoreError(
@@ -784,6 +788,33 @@ export class TableStore {
         )
         .get(name),
     );
+  }
+  private assertContentPinsCompatible(
+    campaignId: string,
+    settings: Pick<CampaignSettings, "system" | "contentPacks">,
+  ) {
+    if (!this.hasTable("content_overrides")) return;
+    const active = this.db
+      .prepare(
+        "SELECT DISTINCT pack_id,pack_version FROM content_overrides WHERE campaign_id=? AND data_json IS NOT NULL",
+      )
+      .all(campaignId);
+    if (!active.length) return;
+    const current = this.getCampaign(campaignId);
+    if (
+      current.system.id !== settings.system.id ||
+      current.system.version !== settings.system.version ||
+      active.some(
+        (row) =>
+          !settings.contentPacks.some(
+            (pin) => pin.id === row.pack_id && pin.version === row.pack_version,
+          ),
+      )
+    )
+      throw new StoreError(
+        "Reset active homebrew overrides before removing their pack or changing the system pin.",
+        409,
+      );
   }
   private transaction<T>(action: () => T): T {
     return transaction(this.db, action);

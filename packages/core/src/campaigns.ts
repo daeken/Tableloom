@@ -40,7 +40,10 @@ export const sceneSchema = sceneSettingsSchema
   })
   .strict();
 export const installedPackSchema = versionPinSchema
-  .extend({ systemId: systemIdSchema })
+  .extend({
+    systemId: systemIdSchema,
+    systemVersion: moduleVersionSchema.optional(),
+  })
   .strict();
 export type Campaign = z.infer<typeof campaignSchema>;
 export type CampaignSettings = z.infer<typeof campaignSettingsSchema>;

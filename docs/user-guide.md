@@ -68,3 +68,10 @@ Open **Your game**, choose **New private record**, and fill in the record title 
 New records are visible to their owner and the GM. Change **Who can read this record?** to **Everyone at the table** and save to share. Other players can read a shared record; editing stays with the owner/GM. **More records** and **First page** browse the visible list.
 
 Drafts stay when switching panel tabs or briefly disconnecting. Save or discard before opening another record, creating one, changing campaign/system, reloading or signing out. **Refresh records** checks saved changes. If someone else edited while you had a draft, your draft is kept and Save is blocked; **Discard draft & use latest** loads their saved version. There is no merge. If saving is not confirmed, refresh and check the record/list before trying again; changes are never silently retried. Installed modules can supply action buttons using saved versions, but the initial scaffolds have no game actions yet.
+
+
+## Content packs and homebrew
+
+The server can load trusted, versioned content packs and let a GM replace individual definitions for a campaign. Packs must match the campaign's exact system version and be selected in its saved settings. Players receive only public definitions; homebrew defaults are never inferred from private originals. A reset restores the installed definition. Active overrides must be reset before removing their pack or changing the campaign's system version.
+
+This foundation is **API-only**: no packs ship with the scaffolds, and catalog browsing, pack selection controls, owned items/inventory and module-specific content editors are not available yet. Character records continue to work independently. Module authors can use the [content-pack contract](platform.md#content-packs-and-campaign-homebrew); published content is waiting for source PDFs.
