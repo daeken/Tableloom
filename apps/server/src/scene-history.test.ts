@@ -1438,6 +1438,36 @@ test("restoration requires aggregate token and drawing capacity and never restor
           color: "#405f4d",
         },
       });
+    const original = f.tables.load();
+    const fillerTokens = Array.from({ length: 199 }, () => ({
+      id: randomUUID(),
+      name: "Filler",
+      radius: 24,
+      position: { x: 0, y: 0 },
+      color: "#405f4d",
+      ownerId: f.gm.member.id,
+      version: 1,
+    }));
+    const fillerDrawings = Array.from({ length: 1999 }, () => ({
+      id: randomUUID(),
+      kind: "rectangle" as const,
+      points: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
+      color: "#405f4d",
+      ownerId: f.gm.member.id,
+      version: 1,
+    }));
+    f.tables.save(
+      {
+        ...original,
+        revision: original.revision + 1,
+        tokens: [...fillerTokens.slice(1), ...original.tokens],
+        drawings: [...fillerDrawings.slice(1), ...original.drawings],
+      },
+      randomUUID(),
+    );
     f.run({
       type: "objects.delete",
       objects: [...ids, ...drawings].map((objectId) => ({
@@ -1450,26 +1480,8 @@ test("restoration requires aggregate token and drawing capacity and never restor
       {
         ...state,
         revision: state.revision + 1,
-        tokens: Array.from({ length: 199 }, () => ({
-          id: randomUUID(),
-          name: "Filler",
-          radius: 24,
-          position: { x: 0, y: 0 },
-          color: "#405f4d",
-          ownerId: f.gm.member.id,
-          version: 1,
-        })),
-        drawings: Array.from({ length: 1999 }, () => ({
-          id: randomUUID(),
-          kind: "rectangle" as const,
-          points: [
-            { x: 0, y: 0 },
-            { x: 1, y: 1 },
-          ],
-          color: "#405f4d",
-          ownerId: f.gm.member.id,
-          version: 1,
-        })),
+        tokens: fillerTokens,
+        drawings: fillerDrawings,
       },
       randomUUID(),
     );
@@ -1942,7 +1954,7 @@ test("schema-6 token snapshots gain fixed legacy radius atomically, including gr
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        13,
+        14,
       );
       const restored = f.action("scene.undo");
       assert.deepEqual(
@@ -2104,7 +2116,7 @@ test("schema-7 sized token and scalar resize histories upgrade intact to 8; fail
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          13,
+          14,
         );
       }
       assert.deepEqual(

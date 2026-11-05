@@ -302,7 +302,7 @@ test("campaign 3/history 8 upgrade existing scenes/inverses exactly and roll bac
           assert.equal(
             f.db.prepare("SELECT version FROM scene_history_version").get()!
               .version,
-            13,
+            14,
           );
         }
       }
@@ -553,7 +553,7 @@ test("history 9 to 11 retains text snapshots/links while seeding only legacy sty
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        13,
+        14,
       );
       assert.deepEqual(
         f.db
@@ -737,6 +737,10 @@ test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse 
       });
       const third = f.add("Deleted label");
       f.run({ type: "object.delete", objectId: third, expectedVersion: 1 });
+      // Reconstruct legacy history: drawing slots were not recorded yet.
+      f.db.exec(
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL",
+      );
       const current = f.tables.load(),
         status = f.history.status(f.player.member),
         historyRows = f.db
@@ -882,7 +886,7 @@ test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse 
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        13,
+        14,
       );
       assert.deepEqual(history.status(f.player.member), status);
       assert.deepEqual(

@@ -692,6 +692,8 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
     sockets.push(p.ws, g.ws);
     const tokenId = randomUUID(),
       drawingId = randomUUID(),
+      backId = randomUUID(),
+      frontId = randomUUID(),
       points = [
         { x: 0.1, y: 0.2 },
         { x: 20.3, y: 30.4 },
@@ -711,6 +713,27 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
       ).type,
       "ack",
     );
+    const addSurrounding = async (id: string) => {
+      assert.equal(
+        (
+          await g.send({
+            id: randomUUID(),
+            type: "drawing.add",
+            drawing: {
+              id,
+              kind: "rectangle",
+              color: "#123456",
+              points: [
+                { x: 0, y: 0 },
+                { x: 100, y: 100 },
+              ],
+            },
+          })
+        ).type,
+        "ack",
+      );
+    };
+    await addSurrounding(backId);
     assert.equal(
       (
         await p.send({
@@ -725,6 +748,12 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
         })
       ).type,
       "ack",
+    );
+    await addSurrounding(frontId);
+    const originalOrder = [backId, drawingId, frontId];
+    assert.deepEqual(
+      store.load().drawings.map((d) => d.id),
+      originalOrder,
     );
     const prepared = {
       id: randomUUID(),
@@ -765,7 +794,10 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
         p.latest().state.tokens.length === 0,
     );
     assert.equal(store.load().revision, changed.revision + 1);
-    assert.equal(store.load().drawings.length, 0);
+    assert.deepEqual(
+      store.load().drawings.map((d) => d.id),
+      [backId, frontId],
+    );
     const cursor = p.latest().history.undo!;
     assert.equal(cursor.objectCount, 2);
     assert.equal(cursor.objectType, "mixed");
@@ -807,11 +839,21 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
     await until(
       () =>
         p.latest().state.tokens.length === 1 &&
-        p.latest().state.drawings.length === 1,
+        p.latest().state.drawings.length === 3,
     );
     assert.equal(store.load().tokens[0]!.version, 4);
-    assert.equal(store.load().drawings[0]!.version, 3);
-    assert.deepEqual(store.load().drawings[0]!.points, points);
+    assert.equal(
+      store.load().drawings.find((d) => d.id === drawingId)!.version,
+      3,
+    );
+    assert.deepEqual(
+      store.load().drawings.find((d) => d.id === drawingId)!.points,
+      points,
+    );
+    assert.deepEqual(
+      store.load().drawings.map((d) => d.id),
+      originalOrder,
+    );
     const restored = store.load();
     assert.equal((await p.send(undo)).type, "ack");
     assert.deepEqual(store.load(), restored);
@@ -834,7 +876,71 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
     await until(
       () =>
         p.latest().state.tokens.length === 0 &&
-        p.latest().state.drawings.length === 0,
+        p.latest().state.drawings.length === 2,
+    );
+    const concurrentGM = await connect(url, gm);
+    sockets.push(concurrentGM.ws);
+    assert.equal(
+      (
+        await concurrentGM.send({
+          id: randomUUID(),
+          type: "drawing.reorder",
+          drawingId: backId,
+          expectedVersion: 1,
+          expectedOrder: [backId, frontId],
+          direction: "front",
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().history.undo?.available === false);
+    const blockedCursor = p.latest().history.undo!;
+    const blocked = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: blockedCursor.id,
+      expectedVersion: blockedCursor.version,
+    };
+    const concurrent = store.load();
+    assert.equal((await p.send(blocked)).type, "error");
+    assert.deepEqual(store.load(), concurrent);
+    assert.equal(store.hasCommand(blocked.id), false);
+    const gmUndo = concurrentGM.latest().history.undo!;
+    assert.equal(
+      (
+        await concurrentGM.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: gmUndo.id,
+          expectedVersion: gmUndo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().history.undo?.available === true);
+    const finalCursor = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: finalCursor.id,
+          expectedVersion: finalCursor.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.deepEqual(
+      store.load().drawings.map((d) => d.id),
+      originalOrder,
+    );
+    assert.equal(
+      store.load().drawings.find((d) => d.id === backId)!.version,
+      3,
+    );
+    assert.equal(
+      store.load().drawings.find((d) => d.id === frontId)!.version,
+      1,
     );
     const staleContext = randomUUID();
     p.ws.sendRaw(

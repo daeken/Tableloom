@@ -58,7 +58,7 @@ const resizeChangeSchema = z.union([
       "Resize history must preserve point count.",
     ),
 ]);
-export const payloadSchema = z.union([
+const basePayloadSchema = z.union([
   z
     .object({
       kind: z.literal("reorder"),
@@ -134,6 +134,7 @@ export const payloadSchema = z.union([
       kind: z.literal("delete-many"),
       objectType: z.enum(["token", "drawing", "mixed"]),
       objects: z.array(deletedObjectSchema).min(1).max(100),
+      drawingOrder: drawingOrderSchema.min(1).optional(),
     })
     .strict(),
   z
@@ -182,10 +183,34 @@ export const payloadSchema = z.union([
       kind: z.enum(["create", "delete"]),
       objectType: z.literal("drawing"),
       object: drawingSchema,
+      drawingOrder: drawingOrderSchema.min(1).optional(),
     })
     .strict(),
 ]);
+export const payloadSchema = basePayloadSchema.refine((payload) => {
+  if (!("drawingOrder" in payload) || !payload.drawingOrder) return true;
+  const ids =
+    payload.kind === "delete-many"
+      ? payload.objects
+          .filter((saved) => saved.objectType === "drawing")
+          .map((saved) => saved.object.id)
+      : [payload.object.id];
+  const order = new Set(payload.drawingOrder);
+  return ids.length > 0 && ids.every((id) => order.has(id));
+}, "Restoration order must include every saved drawing and at least one drawing.");
 export type Payload = z.infer<typeof payloadSchema>;
+/** Legacy inverses lack slots. Never reconstruct an order they did not record. */
+export function restorationOrder(payload: Payload): string[] | undefined {
+  if (!("drawingOrder" in payload) || !payload.drawingOrder) return undefined;
+  const removed = new Set(
+    payload.kind === "delete-many"
+      ? payload.objects
+          .filter((saved) => saved.objectType === "drawing")
+          .map((saved) => saved.object.id)
+      : [payload.object.id],
+  );
+  return payload.drawingOrder.filter((id) => !removed.has(id));
+}
 export const targetsSchema = z
   .array(
     z

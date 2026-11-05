@@ -1195,6 +1195,69 @@ try {
         { lineWidth: 12, fill: { color: "#627d9c", opacity: 0.35 } },
       );
     }
+    const arrangedOrder = shapeState.state.drawings.map(
+      (drawing) => drawing.id,
+    );
+    const deletedShape = snapshot(
+      live,
+      (message) =>
+        !message.state.drawings.some((drawing) => drawing.id === shapeId),
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "object.delete",
+          objectId: shapeId,
+          expectedVersion: shapeState.state.drawings.find(
+            (drawing) => drawing.id === shapeId,
+          )!.version,
+        },
+      }),
+    );
+    shapeState = await deletedShape;
+    // A restored rear drawing must keep its slot, leaving the older reorder usable.
+    for (const [type, expected] of [
+      ["scene.undo", arrangedOrder],
+      ["scene.undo", originalDrawingOrder],
+      ["scene.redo", arrangedOrder],
+      ["scene.redo", arrangedOrder.filter((id) => id !== shapeId)],
+      ["scene.undo", arrangedOrder],
+    ] as const) {
+      const edge =
+        type === "scene.undo"
+          ? shapeState.history.undo!
+          : shapeState.history.redo!;
+      assert.equal(edge.available, true);
+      const result = snapshot(
+        live,
+        (message) =>
+          JSON.stringify(
+            message.state.drawings.map((drawing) => drawing.id),
+          ) === JSON.stringify(expected),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      const drawing = shapeState.state.drawings.find(
+        (drawing) => drawing.id === shapeId,
+      );
+      if (drawing)
+        assert.deepEqual(drawing.shapeStyle, {
+          lineWidth: 12,
+          fill: { color: "#627d9c", opacity: 0.35 },
+        });
+    }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(

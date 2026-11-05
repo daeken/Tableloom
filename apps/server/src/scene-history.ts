@@ -22,6 +22,7 @@ import {
   expectsPresent,
   payloadSchema,
   targetsSchema,
+  restorationOrder,
 } from "./scene-history-model.js";
 import type { Entry, Payload, Target } from "./scene-history-model.js";
 import { initializeSceneHistory } from "./scene-history-storage.js";
@@ -48,7 +49,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 13;
+          ?.version === 14;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -114,6 +115,16 @@ export class SceneHistoryStore {
   }
   private available(entry: Entry, state: TableState, member: Member): boolean {
     const payload = entry.payload;
+    const order = restorationOrder(payload);
+    if (
+      !expectsPresent(entry) &&
+      order &&
+      !drawingOrderMatches(
+        state.drawings.map((drawing) => drawing.id),
+        order,
+      )
+    )
+      return false;
     if (
       payload.kind === "reorder" &&
       !drawingOrderMatches(
@@ -471,6 +482,9 @@ export class SceneHistoryStore {
               ? "drawing"
               : "mixed",
           objects,
+          ...(objects.some((saved) => saved.objectType === "drawing")
+            ? { drawingOrder: before.drawings.map((drawing) => drawing.id) }
+            : {}),
         };
       } else if (command.type === "objects.move") {
         ids = command.objects.map((object) => object.objectId);
@@ -547,6 +561,9 @@ export class SceneHistoryStore {
             kind: command.type === "object.delete" ? "delete" : "create",
             objectType: "name" in object ? "token" : "drawing",
             object,
+            ...(command.type === "object.delete" && "points" in object
+              ? { drawingOrder: before.drawings.map((drawing) => drawing.id) }
+              : {}),
           });
         }
       }
@@ -645,6 +662,17 @@ export class SceneHistoryStore {
         );
       const payload = entry.payload,
         target = entry.targets[0]!;
+      // Removing objects never rearranges survivors. Capture their actual slots
+      // now, including when undoing creation or redoing a legacy deletion.
+      if (
+        expectsPresent(entry) &&
+        (((payload.kind === "create" || payload.kind === "delete") &&
+          payload.objectType === "drawing") ||
+          (payload.kind === "delete-many" &&
+            payload.objects.some((saved) => saved.objectType === "drawing")))
+      ) {
+        payload.drawingOrder = state.drawings.map((drawing) => drawing.id);
+      }
       let next: TableState;
       if (payload.kind === "reorder") {
         const order = undo ? payload.before : payload.after;
@@ -825,15 +853,31 @@ export class SceneHistoryStore {
         next.revision += 1;
         next = tableSchema.parse(next);
       }
+      if (
+        !expectsPresent(entry) &&
+        "drawingOrder" in payload &&
+        payload.drawingOrder
+      ) {
+        const objects = new Map(
+          next.drawings.map((drawing) => [drawing.id, drawing]),
+        );
+        next.drawings = payload.drawingOrder.map((id) => objects.get(id)!);
+        next = tableSchema.parse(next);
+      }
       const advanced = entry.targets.map((target) => ({
         ...target,
         expectedVersion: target.expectedVersion + 1,
       }));
       this.db
         .prepare(
-          "UPDATE scene_history_entries SET state=?,version=version+1,targets_json=? WHERE id=?",
+          "UPDATE scene_history_entries SET state=?,version=version+1,targets_json=?,payload_json=? WHERE id=?",
         )
-        .run(undo ? "undone" : "done", JSON.stringify(advanced), entry.id);
+        .run(
+          undo ? "undone" : "done",
+          JSON.stringify(advanced),
+          JSON.stringify(payloadSchema.parse(payload)),
+          entry.id,
+        );
       // Rebase only the causal target links, even when a neighboring edit affects
       // several objects. One conflicted target still blocks that entire neighbor.
       for (const neighbor of this.links(
@@ -861,6 +905,9 @@ export class SceneHistoryStore {
             )
             .run(JSON.stringify(targetsSchema.parse(targets)), neighbor.id);
       }
+      // Capturing a removal can enlarge an old inverse; keep the byte cap even
+      // when no new entry was inserted.
+      this.trimCampaign(member.tableId);
       return next;
     });
   }
