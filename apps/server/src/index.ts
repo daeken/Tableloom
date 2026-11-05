@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { loadHostKey } from "./host-key.js";
+import { assertDataDirectoryReady } from "./storage-readiness.js";
 
 const dataDir = resolve(process.env.DATA_DIR ?? "data");
+assertDataDirectoryReady(dataDir);
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const app = await createApp({
   databasePath: resolve(dataDir, "tableloom.sqlite"),

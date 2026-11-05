@@ -118,16 +118,43 @@ try {
     timeout: 5000,
   });
   const saved = await seedRuntime(first, key);
+  const backupCli = resolve(directory, "apps/server/dist/backup-cli.js"),
+    snapshot = join(directory, "snapshot"),
+    recovered = join(directory, "recovered");
+  await exec(
+    process.execPath,
+    [backupCli, "backup", "--source", dataDir, "--destination", snapshot],
+    { cwd: directory, env, timeout: 10000 },
+  );
+  await exec(process.execPath, [backupCli, "verify", "--source", snapshot], {
+    cwd: directory,
+    env,
+    timeout: 10000,
+  });
+  await assert.rejects(
+    exec(process.execPath, ["apps/server/dist/index.js"], {
+      cwd: directory,
+      env: { ...env, DATA_DIR: snapshot },
+      timeout: 5000,
+    }),
+  );
+
   await stop();
+  await exec(
+    process.execPath,
+    [backupCli, "restore", "--source", snapshot, "--destination", recovered],
+    { cwd: directory, env, timeout: 10000 },
+  );
+  env.DATA_DIR = recovered;
   const second = await start();
   assert.ok(
-    (await readFile(join(dataDir, "host-key"), "utf8")) === key,
+    (await readFile(join(recovered, "host-key"), "utf8")) === key,
     "Generated host key must persist across restarts",
   );
   await verifyRuntimePersistence(second, saved);
   await stop();
   console.log(
-    "Source-free production runtime passed: generated private host key, built assets, auth, WebSocket, document/JPEG storage, graceful stop and restart persistence. Container UID/mount behavior still requires Docker.",
+    "Source-free production runtime passed: generated private host key, built assets, auth, WebSocket, document/JPEG storage, online backup, verified new-directory recovery and graceful restart persistence. Container UID/mount behavior still requires Docker.",
   );
 } finally {
   try {

@@ -14,6 +14,8 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { dirname, resolve } from "node:path";
+import { assertDataDirectoryReady } from "./storage-readiness.js";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { clientCommandSchema, PROTOCOL_VERSION } from "@tableloom/core";
@@ -62,6 +64,8 @@ export async function createApp(options: {
   sessionCookieName?: string;
   contentPacks?: readonly ContentPackDefinition<unknown>[];
 }) {
+  if (options.databasePath !== ":memory:")
+    assertDataDirectoryReady(dirname(resolve(options.databasePath)));
   const systems = options.documentSystems ?? defaultDocumentSystems;
   const contentCatalog = new ContentCatalog([
     ...systems.flatMap((system) => system.contentPacks ?? []),

@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/container-healthcheck.ts"],
+  entry: ["src/index.ts", "src/container-healthcheck.ts", "src/backup-cli.ts"],
   format: ["esm"],
   platform: "node",
   target: "node24",

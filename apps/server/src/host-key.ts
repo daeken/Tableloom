@@ -24,11 +24,17 @@ export function loadHostKey(dataDir: string, configured?: string): string {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST"))
       throw error;
   }
+  return readHostKeyFile(path);
+}
+
+/** Read-only counterpart for backup; never creates or rotates the key. */
+export function readHostKeyFile(path: string): string {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
     if (
       !stat.isFile() ||
+      stat.size > 2048 ||
       (process.platform !== "win32" && (stat.mode & 0o077) !== 0)
     ) {
       throw new Error(
