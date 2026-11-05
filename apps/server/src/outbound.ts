@@ -11,6 +11,7 @@ export interface OutboundDependencies {
   authorized(): boolean;
   snapshot(force: boolean): Extract<ServerMessage, { type: "snapshot" }> | null;
   presence(): Extract<ServerMessage, { type: "presence" }>;
+  cursors?(): Extract<ServerMessage, { type: "cursors" }>;
   schedule(action: () => void, delay: number): () => void;
 }
 export const MAX_OUTBOUND_CONTROLS = 64;
@@ -25,6 +26,7 @@ export class OutboundChannel {
   private dirtySnapshot = false;
   private forceSnapshot = false;
   private dirtyPresence = false;
+  private dirtyCursors = false;
   private stopped = false;
   private cancelTermination: (() => void) | undefined;
   constructor(
@@ -60,6 +62,12 @@ export class OutboundChannel {
       this.pump();
     }
   }
+  cursors() {
+    if (!this.stopped) {
+      this.dirtyCursors = true;
+      this.pump();
+    }
+  }
   close(code: number, reason: string) {
     this.fail(code, reason);
   }
@@ -69,6 +77,7 @@ export class OutboundChannel {
     this.bytes = 0;
     this.dirtySnapshot = false;
     this.dirtyPresence = false;
+    this.dirtyCursors = false;
     this.forceSnapshot = false;
     this.active?.cancel();
     this.active = null;
@@ -120,6 +129,9 @@ export class OutboundChannel {
       } else if (this.dirtyPresence) {
         this.dirtyPresence = false;
         frame = JSON.stringify(this.deps.presence());
+      } else if (this.dirtyCursors && this.deps.cursors) {
+        this.dirtyCursors = false;
+        frame = JSON.stringify(this.deps.cursors());
       } else return;
       const active = { controlBytes, cancel: () => {} };
       this.active = active;

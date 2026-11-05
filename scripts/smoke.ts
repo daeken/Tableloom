@@ -15,7 +15,7 @@ import {
   campaignListSchema,
   campaignMembershipSchema,
 } from "@tableloom/core/campaigns";
-import { accessStatusSchema } from "@tableloom/core/access";
+import { accessStatusSchema, invitationSchema } from "@tableloom/core/access";
 import { documentSchema, documentPageSchema } from "@tableloom/core/documents";
 import {
   tableViewSchema,
@@ -63,6 +63,31 @@ function snapshot(
   );
 }
 
+function cursorFrame(
+  socket: WebSocket,
+  matches: (frame: Extract<ServerMessage, { type: "cursors" }>) => boolean,
+) {
+  return new Promise<Extract<ServerMessage, { type: "cursors" }>>(
+    (resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.off("message", receive);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Production cursor frame timed out"));
+      }, 5000);
+      const receive = (raw: WebSocket.RawData) => {
+        const frame = serverMessageSchema.parse(JSON.parse(raw.toString()));
+        if (frame.type === "cursors" && matches(frame)) {
+          cleanup();
+          resolve(frame);
+        }
+      };
+      socket.on("message", receive);
+    },
+  );
+}
 function acknowledgement(socket: WebSocket, commandId: string) {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -319,6 +344,59 @@ try {
       await once(duplicate, "close");
     }
 
+    const inviteResponse = await fetch(`${url}/api/access/invitations`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: "{}",
+    });
+    const invite = invitationSchema.parse(await inviteResponse.json());
+    const peerJoin = await fetch(`${url}/api/access/join`, {
+      method: "POST",
+      headers: { Origin: url, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Cursor peer", code: invite.token }),
+    });
+    assert.equal(peerJoin.status, 200);
+    await peerJoin.json();
+    const peerCookie = peerJoin.headers.get("set-cookie")!.split(";")[0]!;
+    const peerSocket = new WebSocket(
+        `${url.replace("http", "ws")}/api/live?protocolVersion=${PROTOCOL_VERSION}`,
+        { headers: { Cookie: peerCookie, Origin: url } },
+      ),
+      peerSnapshot = snapshot(peerSocket, () => true);
+    try {
+      await once(peerSocket, "open");
+      await peerSnapshot;
+      const pointed = cursorFrame(peerSocket, (frame) =>
+        frame.cursors.some(
+          (cursor) => cursor.memberId === current.onlineMembers[0]!.id,
+        ),
+      );
+      live.send(
+        JSON.stringify({
+          type: "cursor.update",
+          context: current.context,
+          position: { x: 80, y: 120 },
+        }),
+      );
+      assert.deepEqual((await pointed).cursors, [
+        { memberId: current.onlineMembers[0]!.id, position: { x: 80, y: 120 } },
+      ]);
+      const hidden = cursorFrame(
+        peerSocket,
+        (frame) => frame.cursors.length === 0,
+      );
+      live.send(
+        JSON.stringify({
+          type: "cursor.update",
+          context: current.context,
+          position: null,
+        }),
+      );
+      await hidden;
+    } finally {
+      peerSocket.close();
+      await once(peerSocket, "close");
+    }
     assert.deepEqual(current.grid, { version: 0, settings: DEFAULT_GRID });
     const gridRoot = `${url}/api/campaigns/${campaign.id}/scene-grid`,
       gridSettings = {
@@ -1902,5 +1980,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding and transient context-bound cursor show/hide, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

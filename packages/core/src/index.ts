@@ -1,3 +1,11 @@
+import { cursorsMessageSchema } from "./cursors.js";
+export {
+  cursorUpdateSchema,
+  cursorsMessageSchema,
+  CURSOR_INTERVAL_MS,
+  CURSOR_TTL_MS,
+} from "./cursors.js";
+export type { ParticipantCursor, CursorPosition } from "./cursors.js";
 import { presenceDataSchema } from "./presence.js";
 export { presenceDataSchema, onlineMemberSchema } from "./presence.js";
 export type { PresenceData, OnlineMember } from "./presence.js";
@@ -7,7 +15,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 27;
+export const PROTOCOL_VERSION = 28;
 import {
   tokenLayerSchema,
   tokenLayersSchema,
@@ -760,6 +768,7 @@ export type CommandInput = Command extends infer C
   : never;
 
 export const serverMessageSchema = z.discriminatedUnion("type", [
+  cursorsMessageSchema,
   presenceDataSchema.safeExtend({
     type: z.literal("snapshot"),
     protocolVersion: z.literal(PROTOCOL_VERSION),

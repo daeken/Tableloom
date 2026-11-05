@@ -393,7 +393,10 @@ test("live rooms isolate snapshots, presence, receipts, ownership recipients, an
     for (const client of [...roomA, ...roomB])
       assert.ok(
         client.messages.every(
-          (m) => m.type === "error" || m.type === "ack" || m.participants <= 3,
+          (m) =>
+            m.type === "error" ||
+            m.type === "ack" ||
+            (m.type !== "cursors" && m.participants <= 3),
         ),
       );
     const tokenA = randomUUID(),
@@ -623,7 +626,10 @@ test("live rooms isolate snapshots, presence, receipts, ownership recipients, an
     );
     assert.ok(
       ga.messages.every(
-        (m) => m.type === "error" || m.type === "ack" || m.participants <= 3,
+        (m) =>
+          m.type === "error" ||
+          m.type === "ack" ||
+          (m.type !== "cursors" && m.participants <= 3),
       ),
     );
     const mismatched = await app.inject({

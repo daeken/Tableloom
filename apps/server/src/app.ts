@@ -1,3 +1,5 @@
+import { CursorStore } from "./cursors.js";
+import { cursorUpdateSchema, CURSOR_INTERVAL_MS } from "@tableloom/core";
 import { projectPresence } from "./presence.js";
 import { SceneGridStore } from "./scene-grid.js";
 import { registerSceneGridRoutes } from "./scene-grid-http.js";
@@ -94,6 +96,33 @@ export async function createApp(options: {
   const clients = new Map<WebSocket, Client>();
   const sentVersions = new Map<WebSocket, string>();
   const outbound = new Map<WebSocket, OutboundChannel>();
+  const cursors = new CursorStore(),
+    dirtyCursors = new Set<string>();
+  const cursorContext = (id: string) => {
+    const c = store.getCampaign(id);
+    return {
+      campaignId: c.id,
+      sceneId: c.activeSceneId,
+      generation: c.version,
+    };
+  };
+  const requestCursors = (id: string) => {
+    dirtyCursors.add(id);
+  };
+  let cursorRefresh = Date.now() + 1000;
+  const cursorTick = setInterval(() => {
+    for (const id of cursors.expire(now())) dirtyCursors.add(id);
+    if (Date.now() >= cursorRefresh) {
+      cursorRefresh = Date.now() + 1000;
+      for (const id of cursors.campaigns()) dirtyCursors.add(id);
+    }
+    const pending = [...dirtyCursors];
+    dirtyCursors.clear();
+    for (const id of pending)
+      for (const [socket, client] of clients)
+        if (client.campaignId === id) outbound.get(socket)?.cursors();
+  }, CURSOR_INTERVAL_MS);
+  cursorTick.unref();
   const authenticate = (socket: WebSocket): Member | null => {
     const context = clients.get(socket);
     const member = access.authenticate(context?.credential ?? "");
@@ -163,6 +192,7 @@ export async function createApp(options: {
   const sendSnapshot = (socket: WebSocket, force = false) =>
     outbound.get(socket)?.snapshot(force);
   const refreshCampaign = (campaignId: string) => {
+    if (cursors.activate(cursorContext(campaignId))) requestCursors(campaignId);
     for (const [socket, context] of clients)
       if (context.campaignId === campaignId) sendSnapshot(socket);
   };
@@ -263,6 +293,7 @@ export async function createApp(options: {
         return;
       }
       store.getCampaign(initial.tableId);
+      cursors.activate(cursorContext(initial.tableId));
       clients.set(socket, {
         credential,
         campaignId: initial.tableId,
@@ -277,6 +308,24 @@ export async function createApp(options: {
             campaignId: initial.tableId,
             ...presence(initial.tableId),
           }),
+          cursors: () => {
+            const actor = authenticate(socket);
+            if (!actor) throw new Error("Sign in again.");
+            const context = cursorContext(actor.tableId);
+            return {
+              type: "cursors",
+              context,
+              cursors: cursors.project(
+                context,
+                actor.id,
+                (owner) => {
+                  const peer = owner as WebSocket;
+                  return peer.readyState === 1 ? authenticate(peer) : null;
+                },
+                now(),
+              ),
+            };
+          },
           schedule: (action, delay) => {
             const timer = setTimeout(action, delay);
             timer.unref();
@@ -290,6 +339,10 @@ export async function createApp(options: {
         closeClient(socket, 1011, "Unable to open this campaign.");
       }
       broadcastPresence(initial.tableId);
+      if (cursors.has(initial.tableId)) requestCursors(initial.tableId);
+      let cursorWindow = Date.now(),
+        cursorCount = 0,
+        lastCursor = -Infinity;
       let windowStart = Date.now();
       let count = 0;
       let alive = true;
@@ -315,6 +368,57 @@ export async function createApp(options: {
           closeClient(socket, 4001, "Sign in again.");
           return;
         }
+        // Cursor traffic has no command IDs, receipts, acknowledgements or replay.
+        let decoded: unknown;
+        try {
+          decoded = JSON.parse(raw.toString());
+        } catch {
+          /* Normal command validation reports invalid JSON. */
+        }
+        if (
+          decoded &&
+          typeof decoded === "object" &&
+          "type" in decoded &&
+          decoded.type === "cursor.update"
+        ) {
+          const tick = Date.now();
+          if (tick - cursorWindow >= 10000) {
+            cursorWindow = tick;
+            cursorCount = 0;
+          }
+          if (++cursorCount > 240) {
+            closeClient(socket, 1008, "Too many cursor updates.");
+            return;
+          }
+          const parsed = cursorUpdateSchema.safeParse(decoded);
+          if (
+            isBinary ||
+            Buffer.byteLength(raw.toString()) > 512 ||
+            !parsed.success
+          ) {
+            closeClient(socket, 1008, "Invalid cursor update.");
+            return;
+          }
+          const current = cursorContext(member.tableId);
+          if (contextKey(current) !== contextKey(parsed.data.context)) {
+            for (const id of cursors.remove(socket)) requestCursors(id);
+            return;
+          }
+          if (tick - lastCursor < 80 && parsed.data.position !== null) return;
+          lastCursor = tick;
+          if (
+            cursors.update(
+              socket,
+              member,
+              current,
+              parsed.data.position,
+              now(),
+              parsed.data.renewOnly,
+            )
+          )
+            requestCursors(member.tableId);
+          return;
+        }
         if (Date.now() - windowStart > 10000) {
           windowStart = Date.now();
           count = 0;
@@ -327,9 +431,7 @@ export async function createApp(options: {
         let committed = false;
         try {
           if (isBinary) throw new Error("Commands must be JSON text.");
-          const parsed = clientCommandSchema.safeParse(
-            JSON.parse(raw.toString()),
-          );
+          const parsed = clientCommandSchema.safeParse(decoded);
           if (!parsed.success)
             throw new Error(
               "Invalid action or old protocol. Reload the updated application.",
@@ -425,6 +527,7 @@ export async function createApp(options: {
       );
       socket.on("close", () => {
         clearInterval(heartbeat);
+        for (const id of cursors.remove(socket)) requestCursors(id);
         clients.delete(socket);
         sentVersions.delete(socket);
         outbound.get(socket)?.dispose();
@@ -437,6 +540,8 @@ export async function createApp(options: {
     await app.register(fastifyStatic, { root: options.webRoot });
   }
   app.addHook("onClose", async () => {
+    clearInterval(cursorTick);
+    dirtyCursors.clear();
     for (const channel of outbound.values()) channel.dispose();
     outbound.clear();
     for (const socket of clients.keys()) socket.terminate();

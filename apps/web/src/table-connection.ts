@@ -1,4 +1,10 @@
 import {
+  cursorUpdateSchema,
+  CURSOR_INTERVAL_MS,
+  CURSOR_TTL_MS,
+} from "@tableloom/core";
+import type { CursorPosition, ParticipantCursor } from "@tableloom/core";
+import {
   clientCommandSchema,
   PROTOCOL_VERSION,
   serverMessageSchema,
@@ -41,6 +47,7 @@ export interface ConnectionDependencies {
   refreshAccess(): Promise<void>;
   snapshot(message: Snapshot): void;
   presence(presence: PresenceData): void;
+  cursors(cursors: ParticipantCursor[]): void;
   clear(): void;
   status(status: ConnectionStatus): void;
   error(message: string): void;
@@ -51,6 +58,13 @@ export const MAX_PENDING_COMMANDS = 64;
 
 /** No offline queue or replay: fresh validated state is required after every connection. */
 export class TableConnection {
+  private cursorPending: {
+    context: CommandContext;
+    position: CursorPosition;
+    renewOnly?: true;
+  } | null = null;
+  private cancelCursor: (() => void) | undefined;
+  private cancelCursorExpiry: (() => void) | undefined;
   private pending = new Map<
     string,
     { delivery: CommandDelivery; cancel: () => void }
@@ -94,6 +108,7 @@ export class TableConnection {
     this.ready = false;
     this.context = null;
     this.deps.presence({ participants: 0, onlineMembers: [] });
+    this.clearCursors();
     this.cancelTimer?.();
     this.cancelDeadline?.();
     this.probe?.abort();
@@ -180,6 +195,11 @@ export class TableConnection {
             }
             this.cancelDeadline?.();
             this.cancelDeadline = undefined;
+            if (
+              this.context &&
+              contextKey(this.context) !== contextKey(message.context)
+            )
+              this.clearCursors();
             this.context = message.context;
             this.ready = true;
             this.attempts = 0;
@@ -207,6 +227,28 @@ export class TableConnection {
                     : message.message,
               });
               if (message.type === "error") this.deps.error(message.message);
+            }
+          } else if (message.type === "cursors") {
+            if (this.ready && this.context) {
+              if (message.context.campaignId !== this.campaignId) {
+                this.block(
+                  "Cursor update belongs to another campaign. Reload the page.",
+                  true,
+                );
+                return;
+              }
+              if (contextKey(message.context) === contextKey(this.context)) {
+                this.cancelCursorExpiry?.();
+                this.cancelCursorExpiry = undefined;
+                this.deps.cursors(message.cursors);
+                if (message.cursors.length) {
+                  const generation = this.generation;
+                  this.cancelCursorExpiry = this.deps.schedule(() => {
+                    this.cancelCursorExpiry = undefined;
+                    if (generation === this.generation) this.deps.cursors([]);
+                  }, CURSOR_TTL_MS);
+                }
+              }
             }
           } else if (message.type === "presence") {
             if (this.ready) {
@@ -243,6 +285,68 @@ export class TableConnection {
     } catch {
       if (current()) this.retry();
     }
+  }
+  private clearCursors() {
+    this.cancelCursorExpiry?.();
+    this.cancelCursorExpiry = undefined;
+    this.cancelCursor?.();
+    this.cancelCursor = undefined;
+    this.cursorPending = null;
+    this.deps.cursors([]);
+  }
+  cursor(
+    context: CommandContext | null,
+    position: CursorPosition,
+    renewOnly = false,
+  ): boolean {
+    if (
+      !this.ready ||
+      !context ||
+      !this.context ||
+      contextKey(context) !== contextKey(this.context) ||
+      this.socket?.readyState !== 1
+    )
+      return false;
+    const parsed = cursorUpdateSchema.safeParse({
+      type: "cursor.update",
+      context,
+      position,
+      ...(renewOnly ? { renewOnly: true } : {}),
+    });
+    if (!parsed.success) return false;
+    if (renewOnly && this.cursorPending && !this.cursorPending.renewOnly)
+      return true;
+    this.cursorPending = {
+      context: parsed.data.context,
+      position: parsed.data.position,
+      ...(parsed.data.renewOnly ? { renewOnly: true as const } : {}),
+    };
+    if (!this.cancelCursor) {
+      const generation = this.generation;
+      this.cancelCursor = this.deps.schedule(() => {
+        this.cancelCursor = undefined;
+        const latest = this.cursorPending;
+        this.cursorPending = null;
+        if (
+          !latest ||
+          generation !== this.generation ||
+          !this.ready ||
+          !this.context ||
+          contextKey(latest.context) !== contextKey(this.context) ||
+          this.socket?.readyState !== 1 ||
+          this.socket.bufferedAmount > 16 * 1024
+        )
+          return;
+        try {
+          this.socket.send(
+            JSON.stringify({ type: "cursor.update", ...latest }),
+          );
+        } catch {
+          /* Cursors expire; never replay transient traffic or affect command delivery. */
+        }
+      }, CURSOR_INTERVAL_MS);
+    }
+    return true;
   }
   send(context: CommandContext | null, command: CommandInput): boolean {
     if (

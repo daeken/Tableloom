@@ -378,3 +378,65 @@ test("explicit access closure drops queued work immediately and preparation/tran
     assert.equal(timers.size, 0);
   }
 });
+
+test("cursor writes coalesce behind reliable controls and build current context only at drain time", () => {
+  let generation = 1,
+    position = 1;
+  const sent: ServerMessage[] = [],
+    callbacks: (() => void)[] = [];
+  const channel = new OutboundChannel(
+    {
+      readyState: 1,
+      send: (frame, done) => {
+        sent.push(JSON.parse(frame));
+        callbacks.push(() => done());
+      },
+      close: () => {},
+      terminate: () => {},
+    },
+    {
+      authorized: () => true,
+      snapshot: () => null,
+      presence: () => ({
+        type: "presence",
+        campaignId: DEFAULT_CAMPAIGN_ID,
+        participants: 1,
+        onlineMembers: [connectedFixture],
+      }),
+      cursors: () => ({
+        type: "cursors",
+        context: {
+          campaignId: DEFAULT_CAMPAIGN_ID,
+          sceneId: DEFAULT_SCENE_ID,
+          generation,
+        },
+        cursors: [
+          { memberId: connectedFixture.id, position: { x: position, y: 0 } },
+        ],
+      }),
+      schedule: () => () => {},
+    },
+  );
+  channel.control({ type: "ack", commandId: crypto.randomUUID() });
+  for (let i = 0; i < 1000; i++) {
+    position = i;
+    channel.cursors();
+  }
+  generation = 2;
+  channel.control({ type: "ack", commandId: crypto.randomUUID() });
+  callbacks.shift()!();
+  assert.equal(sent[1]!.type, "ack");
+  callbacks.shift()!();
+  assert.deepEqual(sent[2], {
+    type: "cursors",
+    context: {
+      campaignId: DEFAULT_CAMPAIGN_ID,
+      sceneId: DEFAULT_SCENE_ID,
+      generation: 2,
+    },
+    cursors: [{ memberId: connectedFixture.id, position: { x: 999, y: 0 } }],
+  });
+  assert.equal(sent.length, 3);
+  callbacks.shift()!();
+  channel.dispose();
+});

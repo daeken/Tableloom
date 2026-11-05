@@ -77,7 +77,8 @@ function fixture(
     errors: string[] = [],
     snapshots: ServerMessage[] = [],
     presence: number[] = [],
-    rosters: import("@tableloom/core").OnlineMember[][] = [];
+    rosters: import("@tableloom/core").OnlineMember[][] = [],
+    cursorViews: import("@tableloom/core").ParticipantCursor[][] = [];
   const timers = new Set<{ at: number; action: () => void }>();
   const client = new TableConnection(
     "ws://fixture.invalid/api/live",
@@ -102,6 +103,7 @@ function fixture(
         refreshes++;
       },
       snapshot: (message) => snapshots.push(message),
+      cursors: (data) => cursorViews.push(data),
       presence: (data) => {
         presence.push(data.participants);
         rosters.push(data.onlineMembers);
@@ -137,6 +139,7 @@ function fixture(
     snapshots,
     presence,
     rosters,
+    cursorViews,
     timers,
     advance,
     get refreshes() {
@@ -488,4 +491,97 @@ test("foreign, duplicate, over-bound and missing presence data block the live vi
       assert.equal(f.clears, 1);
     f.client.stop();
   }
+});
+
+test("cursor sending keeps one latest context-bound value, drops backpressured updates and never creates command deliveries or replay", async () => {
+  const f = fixture();
+  f.client.start();
+  await flush();
+  const socket = f.sockets[0]!;
+  assert.equal(f.client.cursor(context, { x: 0, y: 0 }), false);
+  socket.emit(snapshot());
+  for (let i = 0; i < 100; i++)
+    assert.equal(f.client.cursor(context, { x: i, y: -i }), true);
+  f.client.cursor(context, { x: 99, y: -99 }, true);
+  assert.equal(socket.sent.length, 0);
+  await f.advance(100);
+  assert.deepEqual(JSON.parse(socket.sent[0]!), {
+    type: "cursor.update",
+    context,
+    position: { x: 99, y: -99 },
+  });
+  assert.equal(f.deliveries.length, 0);
+  f.client.cursor(context, { x: 1, y: 2 });
+  f.client.cursor(context, null);
+  await f.advance(100);
+  assert.equal(JSON.parse(socket.sent[1]!).position, null);
+  socket.bufferedAmount = 20000;
+  f.client.cursor(context, { x: 4, y: 5 });
+  await f.advance(100);
+  socket.bufferedAmount = 0;
+  await f.advance(1000);
+  assert.equal(socket.sent.length, 2);
+  assert.equal(f.client.cursor(context, { x: Infinity, y: 0 }), false);
+  f.client.cursor(context, { x: 8, y: 9 });
+  socket.emit(snapshot({ ...context, generation: 2 }));
+  await f.advance(100);
+  assert.equal(socket.sent.length, 2);
+  assert.equal(f.client.cursor(context, { x: 0, y: 0 }), false);
+  f.client.cursor({ ...context, generation: 2 }, { x: 1, y: 1 });
+  socket.handlers.close(1006);
+  await f.advance(1000);
+  assert.equal(f.sockets[1]!.sent.length, 0);
+  assert.equal(f.deliveries.length, 0);
+  f.client.stop();
+});
+test("received cursors wait for snapshots, clear on context/disconnect, reject foreign campaigns and ignore stale scene frames", async () => {
+  const f = fixture();
+  f.client.start();
+  await flush();
+  const socket = f.sockets[0]!,
+    cursors = [{ memberId: crypto.randomUUID(), position: { x: 1, y: 2 } }],
+    frame = { type: "cursors", context, cursors };
+  socket.emit(frame);
+  assert.deepEqual(f.cursorViews.at(-1), []);
+  socket.emit(snapshot());
+  socket.emit(frame);
+  assert.deepEqual(f.cursorViews.at(-1), cursors);
+  const next = { ...context, generation: 2 };
+  socket.emit(snapshot(next));
+  assert.deepEqual(f.cursorViews.at(-1), []);
+  socket.emit(frame);
+  assert.deepEqual(f.cursorViews.at(-1), []);
+  socket.emit({ ...frame, context: next });
+  assert.deepEqual(f.cursorViews.at(-1), cursors);
+  socket.emit({
+    ...frame,
+    context: { ...next, campaignId: crypto.randomUUID() },
+  });
+  assert.equal(f.statuses.at(-1), "blocked");
+  assert.deepEqual(f.cursorViews.at(-1), []);
+  assert.equal(f.clears, 1);
+  f.client.stop();
+});
+
+test("received cursor leases expire during a silent live socket and refresh independently of scene state", async () => {
+  const f = fixture();
+  f.client.start();
+  await flush();
+  const socket = f.sockets[0]!;
+  socket.emit(snapshot());
+  const cursors = [
+      { memberId: crypto.randomUUID(), position: { x: 20, y: 30 } },
+    ],
+    frame = { type: "cursors", context, cursors };
+  socket.emit(frame);
+  await f.advance(2000);
+  assert.deepEqual(f.cursorViews.at(-1), cursors);
+  socket.emit(frame);
+  await f.advance(2000);
+  assert.deepEqual(f.cursorViews.at(-1), cursors);
+  await f.advance(1000);
+  assert.deepEqual(f.cursorViews.at(-1), []);
+  assert.equal(f.statuses.at(-1), "connected");
+  assert.equal(f.deliveries.length, 0);
+  f.client.stop();
 });

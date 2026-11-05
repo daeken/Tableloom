@@ -1,3 +1,9 @@
+import { ParticipantCursors } from "./ParticipantCursors.js";
+import type {
+  CursorPosition,
+  ParticipantCursor,
+  OnlineMember,
+} from "@tableloom/core";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog.js";
 import { tabletopShortcut } from "./tabletop-shortcuts.js";
 import { sceneHistoryCommand } from "./scene-history-command.js";
@@ -89,6 +95,9 @@ type Gesture =
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
   state: TableView;
+  cursors: ParticipantCursor[];
+  onlineMembers: OnlineMember[];
+  shareCursor: (position: CursorPosition, renewOnly?: boolean) => boolean;
   grid: SceneGrid;
   background: BackgroundView | null;
   campaignId: string;
@@ -107,6 +116,9 @@ interface Props {
 const clamp = (v: number) => Math.max(-10000, Math.min(10000, v));
 export function Tabletop({
   state,
+  cursors,
+  onlineMembers,
+  shareCursor,
   grid,
   background,
   campaignId,
@@ -128,11 +140,17 @@ export function Tabletop({
   const [mapFailure, setMapFailure] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
+  const cursorView = useRef(view);
+  cursorView.current = view;
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [measurement, setMeasurement] = useState<Measurement | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [sharing, setSharing] = useState(false);
+  const pointer = useRef<{ clientX: number; clientY: number } | null>(null);
+  const cursorSender = useRef(shareCursor);
+  cursorSender.current = shareCursor;
   const [snap, setSnap] = useState(false);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -493,8 +511,78 @@ export function Tabletop({
       y: clamp((p.y - view.y) / view.scale),
     };
   }
+  function trackCursor(event: ReactPointerEvent) {
+    const box = host.current?.getBoundingClientRect();
+    if (
+      !sharing ||
+      !enabled ||
+      !box ||
+      event.clientX < box.left ||
+      event.clientX > box.right ||
+      event.clientY < box.top ||
+      event.clientY > box.bottom ||
+      (event.target !== host.current &&
+        event.target !== appRef.current?.canvas) ||
+      document.querySelector("dialog[open], [role='dialog'][aria-modal='true']")
+    ) {
+      if (pointer.current) {
+        pointer.current = null;
+        shareCursor(null);
+      }
+      return;
+    }
+    pointer.current = { clientX: event.clientX, clientY: event.clientY };
+    shareCursor(point(event));
+  }
+  useEffect(() => {
+    const hide = () => {
+      pointer.current = null;
+      cursorSender.current(null);
+    };
+    if (!sharing || !enabled) {
+      hide();
+      return;
+    }
+    const send = () => {
+      if (
+        document.visibilityState !== "visible" ||
+        document.querySelector(
+          "dialog[open], [role='dialog'][aria-modal='true']",
+        )
+      ) {
+        hide();
+        return;
+      }
+      const p = pointer.current,
+        box = host.current?.getBoundingClientRect(),
+        v = cursorView.current;
+      if (p && box)
+        cursorSender.current(
+          {
+            x: clamp((p.clientX - box.left - v.x) / v.scale),
+            y: clamp((p.clientY - box.top - v.y) / v.scale),
+          },
+          true,
+        );
+    };
+    send();
+    const timer = setInterval(send, 1000);
+    window.addEventListener("blur", hide);
+    document.addEventListener("visibilitychange", send);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("blur", hide);
+      document.removeEventListener("visibilitychange", send);
+      hide();
+    };
+  }, [sharing, enabled]);
+  useEffect(() => {
+    if (sharing && enabled && pointer.current)
+      shareCursor(point(pointer.current));
+  }, [view]);
   function down(event: ReactPointerEvent<HTMLDivElement>) {
     if (!ready || !enabled || event.button !== 0 || textAnchor) return;
+    trackCursor(event);
     event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = point(event);
@@ -633,6 +721,7 @@ export function Tabletop({
     }
   }
   function move(event: ReactPointerEvent) {
+    trackCursor(event);
     if (!gesture) return;
     if (gesture.kind === "measure") {
       if (gesture.pointerId !== event.pointerId) return;
@@ -680,6 +769,10 @@ export function Tabletop({
     }
   }
   function up(event: ReactPointerEvent) {
+    if (event.pointerType !== "mouse") {
+      pointer.current = null;
+      shareCursor(null);
+    }
     if (gesture?.kind === "measure") {
       if (gesture.pointerId !== event.pointerId) return;
       setMeasurement(
@@ -886,8 +979,17 @@ export function Tabletop({
       onKeyDown={keyboard}
       onPointerDown={down}
       onPointerMove={move}
+      onPointerEnter={trackCursor}
+      onPointerLeave={() => {
+        pointer.current = null;
+        shareCursor(null);
+      }}
       onPointerUp={up}
-      onPointerCancel={() => setGesture(null)}
+      onPointerCancel={() => {
+        setGesture(null);
+        pointer.current = null;
+        shareCursor(null);
+      }}
       onLostPointerCapture={() =>
         setGesture((previous) =>
           previous?.kind === "measure" ? null : previous,
@@ -908,6 +1010,14 @@ export function Tabletop({
             focusBattlefield();
           }}
           save={(drawing) => send({ type: "drawing.add", drawing })}
+        />
+      )}
+      {enabled && (
+        <ParticipantCursors
+          cursors={cursors}
+          members={onlineMembers}
+          viewerId={member?.id ?? null}
+          view={view}
         />
       )}
       {background && (
@@ -995,6 +1105,19 @@ export function Tabletop({
           Keyboard shortcuts
         </button>
       )}
+      <label
+        className="cursor-sharing"
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={sharing}
+          onChange={(e) => setSharing(e.target.checked)}
+        />{" "}
+        Share my cursor
+      </label>
       <span className="keyboard-focus-hint" id="tabletop-keyboard-hint">
         Click or Tab to focus the battlefield. Press ? for keyboard shortcuts.
       </span>

@@ -1,4 +1,8 @@
-import type { PresenceData } from "@tableloom/core";
+import type {
+  PresenceData,
+  ParticipantCursor,
+  CursorPosition,
+} from "@tableloom/core";
 import type { SceneGrid } from "@tableloom/core/scene-grid";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -32,6 +36,7 @@ export function useTable(
       onlineMembers: [],
     }),
     [error, setError] = useState("");
+  const [cursors, setCursors] = useState<ParticipantCursor[]>([]);
   const [deliveries, setDeliveries] = useState<CommandDelivery[]>([]);
   const connection = useRef<{
     viewerKey: string;
@@ -39,6 +44,7 @@ export function useTable(
   } | null>(null);
   useEffect(() => {
     setSnapshot(null);
+    setCursors([]);
     setPresence({ participants: 0, onlineMembers: [] });
     setError("");
     setDeliveries([]);
@@ -100,6 +106,7 @@ export function useTable(
           sceneName: message.sceneName,
         }),
       presence: setPresence,
+      cursors: setCursors,
       clear: () => setSnapshot(null),
       status: setStatus,
       error: setError,
@@ -122,6 +129,14 @@ export function useTable(
     },
     [viewerKey, context],
   );
+  const shareCursor = useCallback(
+    (position: CursorPosition, renewOnly = false) => {
+      if (!viewerKey || connection.current?.viewerKey !== viewerKey)
+        return false;
+      return connection.current.client.cursor(context, position, renewOnly);
+    },
+    [viewerKey, context],
+  );
   const current = snapshot?.viewerKey === viewerKey;
   return {
     state: current ? snapshot.state : null,
@@ -135,6 +150,8 @@ export function useTable(
     status: connection.current?.viewerKey === viewerKey ? status : "connecting",
     participants: current ? presence.participants : 0,
     onlineMembers: current ? presence.onlineMembers : [],
+    cursors: current ? cursors : [],
+    shareCursor,
     error,
     deliveries: connection.current?.viewerKey === viewerKey ? deliveries : [],
     clearError: () => setError(""),

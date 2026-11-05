@@ -434,6 +434,9 @@ export function App() {
                 }
                 member={member}
                 state={state}
+                cursors={table.cursors}
+                onlineMembers={table.onlineMembers}
+                shareCursor={table.shareCursor}
                 background={table.background}
                 grid={table.grid}
                 campaignId={member?.tableId ?? ""}
