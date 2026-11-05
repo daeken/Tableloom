@@ -25,7 +25,13 @@ export function campaignModuleReferences(
         complete = false;
         return;
       }
-      const found = inspectCampaignDataReferences(policy, data);
+      let found: ReturnType<typeof inspectCampaignDataReferences>;
+      try {
+        found = inspectCampaignDataReferences(policy, data);
+      } catch {
+        // Even a trusted callback's StoreError may contain private module values.
+        throw new StoreError("Module resource references are invalid.", 400);
+      }
       references += found.length;
       if (references > 100000)
         throw new StoreError(

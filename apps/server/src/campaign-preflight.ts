@@ -46,6 +46,13 @@ const invalid = () => {
     400,
   );
 };
+function moduleValidation<T>(validate: () => T): T {
+  try {
+    return validate();
+  } catch {
+    throw new StoreError("Campaign module data is invalid.", 400);
+  }
+}
 const campaignDataSchema = z
   .object({
     schemaVersion: z.literal(11),
@@ -539,7 +546,11 @@ function inspect(
       blockers.add("document_schema_unavailable");
       moduleReferences.unavailable();
     } else {
-      if (!system.documentSchema.safeParse(document.data).success) invalid();
+      if (
+        !moduleValidation(() => system.documentSchema.safeParse(document.data))
+          .success
+      )
+        invalid();
       moduleReferences.inspect(system.documentTransfer, document.data);
     }
   }
@@ -560,7 +571,9 @@ function inspect(
     if (saved.name !== row.name || saved.visibility !== row.visibility)
       invalid();
     if (entry) {
-      validatedContentData(entry.dataSchema, saved.data);
+      moduleValidation(() =>
+        validatedContentData(entry.dataSchema, saved.data),
+      );
       moduleReferences.inspect(entry.transfer, saved.data);
     } else moduleReferences.unavailable();
   }
@@ -603,8 +616,12 @@ function inspect(
         blockers.add("instance_schema_unavailable");
         moduleReferences.unavailable();
       } else {
-        validatedContentData(entry.instances.dataSchema, instance.data);
-        validatedContentData(entry.dataSchema, instance.source.data);
+        moduleValidation(() =>
+          validatedContentData(entry.instances!.dataSchema, instance.data),
+        );
+        moduleValidation(() =>
+          validatedContentData(entry.dataSchema, instance.source.data),
+        );
         moduleReferences.inspect(entry.instances.transfer, instance.data);
         moduleReferences.inspect(entry.transfer, instance.source.data);
       }

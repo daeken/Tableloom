@@ -416,12 +416,28 @@ test("trusted registrations reject malformed transfer executors", () => {
 });
 
 test("HTTP preflight keeps module callback failures private and returns source-reference summaries without importing", async () => {
+  let failDefinitionSchema = false,
+    failInstanceSchema = false;
   const f = populated(),
+    pack = {
+      ...f.pack,
+      dataSchema: fixtureData.superRefine(() => {
+        if (failDefinitionSchema)
+          throw new StoreError("PRIVATE DEFINITION SCHEMA CANARY", 409);
+      }),
+      instances: {
+        ...f.pack.instances!,
+        dataSchema: instanceData.superRefine(() => {
+          if (failInstanceSchema)
+            throw new StoreError("PRIVATE INSTANCE SCHEMA CANARY", 409);
+        }),
+      },
+    },
     app = await createApp({
       databasePath: ":memory:",
       hostKey: key,
       documentSystems: [system],
-      contentPacks: [f.pack],
+      contentPacks: [pack],
     });
   const post = (url: string, payload: unknown, cookie = "") =>
     app.inject({
@@ -452,11 +468,32 @@ test("HTTP preflight keeps module callback failures private and returns source-r
     assert.ok(!accepted.body.includes("PRIVATE MODULE CANARY"));
     // Only the installed trusted registration can choose callbacks, never the uploaded file.
     const previous = system.documentTransfer;
-    system.documentTransfer = {
-      inspect: () => {
-        throw new Error("PRIVATE CALLBACK CANARY");
-      },
-    };
+    try {
+      for (const error of [
+        new Error("PRIVATE CALLBACK CANARY"),
+        new StoreError("PRIVATE CALLBACK CANARY", 409),
+      ]) {
+        system.documentTransfer = {
+          inspect: () => {
+            throw error;
+          },
+        };
+        const rejected = await post(
+          "/api/campaign-imports/preflight",
+          f.archive,
+          cookie,
+        );
+        assert.equal(rejected.statusCode, 400);
+        assert.ok(!rejected.body.includes("PRIVATE CALLBACK CANARY"));
+        assert.ok(!rejected.body.includes("PRIVATE MODULE CANARY"));
+      }
+    } finally {
+      system.documentTransfer = previous;
+    }
+    const previousSchema = system.documentSchema;
+    system.documentSchema = referenceData.superRefine(() => {
+      throw new StoreError("PRIVATE SCHEMA CANARY", 409);
+    });
     try {
       const rejected = await post(
         "/api/campaign-imports/preflight",
@@ -464,11 +501,22 @@ test("HTTP preflight keeps module callback failures private and returns source-r
         cookie,
       );
       assert.equal(rejected.statusCode, 400);
-      assert.ok(!rejected.body.includes("PRIVATE CALLBACK CANARY"));
-      assert.ok(!rejected.body.includes("PRIVATE MODULE CANARY"));
+      assert.ok(!rejected.body.includes("PRIVATE SCHEMA CANARY"));
     } finally {
-      system.documentTransfer = previous;
+      system.documentSchema = previousSchema;
     }
+    for (const kind of ["definition", "instance"]) {
+      failDefinitionSchema = kind === "definition";
+      failInstanceSchema = kind === "instance";
+      const rejected = await post(
+        "/api/campaign-imports/preflight",
+        f.archive,
+        cookie,
+      );
+      assert.equal(rejected.statusCode, 400);
+      assert.ok(!rejected.body.includes("PRIVATE"));
+    }
+    failDefinitionSchema = failInstanceSchema = false;
     assert.equal(
       (
         await app.inject({
