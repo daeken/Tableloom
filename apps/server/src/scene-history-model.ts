@@ -28,7 +28,39 @@ const deletedObjectSchema = z.union([
     .object({ objectType: z.literal("drawing"), object: drawingSchema })
     .strict(),
 ]);
+const tokenGeometrySchema = z
+  .object({ position: pointSchema, radius: tokenRadiusSchema })
+  .strict();
+const resizeChangeSchema = z.union([
+  z
+    .object({
+      objectId: z.uuid(),
+      objectType: z.literal("token"),
+      before: tokenGeometrySchema,
+      after: tokenGeometrySchema,
+    })
+    .strict(),
+  z
+    .object({
+      objectId: z.uuid(),
+      objectType: z.literal("drawing"),
+      before: drawingSchema.shape.points,
+      after: drawingSchema.shape.points,
+    })
+    .strict()
+    .refine(
+      (c) => c.before.length === c.after.length,
+      "Resize history must preserve point count.",
+    ),
+]);
 export const payloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal("resize-many"),
+      objectType: z.enum(["token", "drawing", "mixed"]),
+      changes: z.array(resizeChangeSchema).min(2).max(100),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("token-resize"),
@@ -143,7 +175,23 @@ export function entryOf(row: unknown): Entry {
   const entry = rowSchema.parse(row),
     payload = payloadSchema.parse(JSON.parse(entry.payload_json)),
     targets = targetsSchema.parse(JSON.parse(entry.targets_json));
-  if (payload.kind === "delete-many") {
+  if (payload.kind === "resize-many") {
+    if (
+      payload.changes.length !== targets.length ||
+      new Set(payload.changes.map((c) => c.objectId)).size !== targets.length ||
+      payload.changes.some(
+        (c) => !targets.some((t) => t.objectId === c.objectId),
+      )
+    )
+      throw new Error("Resized history targets are inconsistent.");
+    const kind = payload.changes.every((c) => c.objectType === "token")
+      ? "token"
+      : payload.changes.every((c) => c.objectType === "drawing")
+        ? "drawing"
+        : "mixed";
+    if (payload.objectType !== kind)
+      throw new Error("Resized history types are inconsistent.");
+  } else if (payload.kind === "delete-many") {
     if (
       payload.objects.length !== targets.length ||
       new Set(payload.objects.map((saved) => saved.object.id)).size !==
@@ -202,6 +250,7 @@ export function entryOf(row: unknown): Entry {
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "resize-many" ||
   entry.payload.kind === "token-resize" ||
   entry.payload.kind === "resize" ||
   entry.payload.kind === "translate" ||

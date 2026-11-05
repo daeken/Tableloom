@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 7;
+          ?.version === 8;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -117,6 +117,14 @@ export class SceneHistoryStore {
             (payload.objectType === "token"
               ? "name" in object
               : "points" in object)) &&
+          (payload.kind !== "resize-many" ||
+            payload.changes.some(
+              (change) =>
+                change.objectId === target.objectId &&
+                (change.objectType === "token"
+                  ? "position" in object
+                  : "points" in object),
+            )) &&
           (payload.kind !== "translate" ||
             payload.originals.some(
               (original) =>
@@ -140,6 +148,7 @@ export class SceneHistoryStore {
     if (
       payload.kind === "move" ||
       payload.kind === "move-many" ||
+      payload.kind === "resize-many" ||
       payload.kind === "token-resize" ||
       payload.kind === "resize" ||
       payload.kind === "translate"
@@ -186,7 +195,7 @@ export class SceneHistoryStore {
           objectId: target.objectId,
           objectCount: entry.targets.length,
           action:
-            payload.kind === "token-resize"
+            payload.kind === "token-resize" || payload.kind === "resize-many"
               ? "resize"
               : payload.kind === "delete-many"
                 ? "delete"
@@ -195,29 +204,31 @@ export class SceneHistoryStore {
                   : payload.kind,
           objectType: payload.objectType,
           name:
-            payload.kind === "delete-many"
-              ? entry.targets.length > 1
-                ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
-                : payload.objects[0]!.objectType === "drawing"
-                  ? "Drawing"
-                  : (payload.objects[0]!.object as Token).name
-              : payload.kind === "translate"
+            payload.kind === "resize-many"
+              ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
+              : payload.kind === "delete-many"
                 ? entry.targets.length > 1
                   ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
-                  : payload.objectType === "drawing"
+                  : payload.objects[0]!.objectType === "drawing"
                     ? "Drawing"
-                    : ((objectOf(state, target.objectId) as Token | undefined)
-                        ?.name ?? "Token")
-                : payload.kind === "move-many"
-                  ? `${entry.targets.length} tokens`
-                  : payload.objectType === "drawing"
-                    ? "Drawing"
-                    : ((objectOf(state, target.objectId) as Token | undefined)
-                        ?.name ??
-                      (payload.kind === "move" ||
-                      payload.kind === "token-resize"
-                        ? "Token"
-                        : payload.object.name)),
+                    : (payload.objects[0]!.object as Token).name
+                : payload.kind === "translate"
+                  ? entry.targets.length > 1
+                    ? `${entry.targets.length} ${payload.objectType === "mixed" ? "objects" : payload.objectType === "drawing" ? "drawings" : "tokens"}`
+                    : payload.objectType === "drawing"
+                      ? "Drawing"
+                      : ((objectOf(state, target.objectId) as Token | undefined)
+                          ?.name ?? "Token")
+                  : payload.kind === "move-many"
+                    ? `${entry.targets.length} tokens`
+                    : payload.objectType === "drawing"
+                      ? "Drawing"
+                      : ((objectOf(state, target.objectId) as Token | undefined)
+                          ?.name ??
+                        (payload.kind === "move" ||
+                        payload.kind === "token-resize"
+                          ? "Token"
+                          : payload.object.name)),
           available: this.available(entry, state, member),
         };
       };
@@ -259,6 +270,7 @@ export class SceneHistoryStore {
         "drawing.add",
         "drawing.resize",
         "token.resize",
+        "objects.resize",
         "token.move",
         "tokens.move",
         "objects.move",
@@ -285,7 +297,44 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "token.resize") {
+      if (command.type === "objects.resize") {
+        ids = command.objects.map((o) => o.objectId);
+        const changes = ids.map((objectId) => {
+          const from = objectOf(before, objectId),
+            to = objectOf(after, objectId);
+          if (
+            !from ||
+            !to ||
+            from.version + 1 !== to.version ||
+            from.ownerId !== to.ownerId
+          )
+            throw new Error("Invalid group resize transition.");
+          if ("position" in from && "position" in to)
+            return {
+              objectId,
+              objectType: "token" as const,
+              before: { position: from.position, radius: from.radius },
+              after: { position: to.position, radius: to.radius },
+            };
+          if ("points" in from && "points" in to)
+            return {
+              objectId,
+              objectType: "drawing" as const,
+              before: from.points,
+              after: to.points,
+            };
+          throw new Error("Invalid group resize object type.");
+        });
+        payload = {
+          kind: "resize-many",
+          objectType: changes.every((c) => c.objectType === "token")
+            ? "token"
+            : changes.every((c) => c.objectType === "drawing")
+              ? "drawing"
+              : "mixed",
+          changes,
+        };
+      } else if (command.type === "token.resize") {
         ids = [command.tokenId];
         const from = before.tokens.find((t) => t.id === command.tokenId)!,
           to = after.tokens.find((t) => t.id === command.tokenId)!;
@@ -512,7 +561,26 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "token-resize") {
+      if (payload.kind === "resize-many") {
+        next = structuredClone(state);
+        for (const change of payload.changes) {
+          const geometry = undo ? change.before : change.after;
+          if (change.objectType === "token" && "position" in geometry) {
+            const token = next.tokens.find((t) => t.id === change.objectId)!;
+            token.position = { ...geometry.position };
+            token.radius = geometry.radius;
+            token.version += 1;
+          } else if (Array.isArray(geometry)) {
+            const drawing = next.drawings.find(
+              (d) => d.id === change.objectId,
+            )!;
+            drawing.points = structuredClone(geometry);
+            drawing.version += 1;
+          } else throw new Error("Invalid resized geometry.");
+        }
+        next.revision += 1;
+        next = tableSchema.parse(next);
+      } else if (payload.kind === "token-resize") {
         next = applyCommand(
           state,
           {

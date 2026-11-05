@@ -1,3 +1,4 @@
+import { ResizeSelectionDialog } from "./ResizeSelectionDialog.js";
 import { ResizeTokenDialog } from "./ResizeTokenDialog.js";
 import { drawingBounds, resizedDrawingPoints } from "@tableloom/core/geometry";
 import {
@@ -119,6 +120,9 @@ export function Tabletop({
     update();
     return () => observer.disconnect();
   }, []);
+  const [resizeSelection, setResizeSelection] = useState<SceneObject[] | null>(
+    null,
+  );
   const [resizeToken, setResizeToken] = useState<Token | null>(null);
   const [selectionError, setSelectionError] = useState("");
   const [deleteReview, setDeleteReview] = useState<DeletionReviewItem[] | null>(
@@ -703,6 +707,17 @@ export function Tabletop({
                 Resize token…
               </button>
             )}
+          {selectedObjects.length > 1 && (
+            <button
+              disabled={!enabled || pending}
+              onClick={() => {
+                setGesture(null);
+                setResizeSelection(selectedObjects);
+              }}
+            >
+              Resize selection…
+            </button>
+          )}
           <button
             onClick={() => {
               setSelected([]);
@@ -722,6 +737,17 @@ export function Tabletop({
             Delete selection…
           </button>
         </div>
+      )}
+      {resizeSelection && (
+        <ResizeSelectionDialog
+          objects={resizeSelection}
+          state={state}
+          member={member}
+          enabled={enabled}
+          pending={pending}
+          send={send}
+          close={() => setResizeSelection(null)}
+        />
       )}
       {resizeToken && (
         <ResizeTokenDialog

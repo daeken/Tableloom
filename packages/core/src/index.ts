@@ -2,7 +2,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -265,6 +265,13 @@ export const objectMoveTargetsSchema = z
       new Set(objects.map((object) => object.objectId)).size === objects.length,
     "Each object may appear only once.",
   );
+export const objectResizeTargetsSchema = objectMoveTargetsSchema.min(2);
+export const groupScaleSchema = z
+  .number()
+  .finite()
+  .min(0.01)
+  .max(100)
+  .refine((scale) => scale !== 1, "Choose a scale other than 100%.");
 export const resizeBoundsSchema = z
   .object({
     left: z.number().finite().min(-10000).max(10000),
@@ -280,6 +287,14 @@ export const resizeBoundsSchema = z
 export type ResizeBounds = z.infer<typeof resizeBoundsSchema>;
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("objects.resize"),
+      objects: objectResizeTargetsSchema,
+      scale: groupScaleSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

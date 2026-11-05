@@ -506,7 +506,7 @@ test("live rooms isolate snapshots, presence, receipts, ownership recipients, an
         publicB,
         "B campaign public text",
         "B only token",
-        "1d19",
+        '"expression":"1d19"',
       ])
         assert.ok(!client.raw.join("").includes(hidden));
     for (const client of roomB)
@@ -516,7 +516,7 @@ test("live rooms isolate snapshots, presence, receipts, ownership recipients, an
         privateA,
         "A campaign public text",
         "A campaign private text",
-        "1d13",
+        '"expression":"1d13"',
       ])
         assert.ok(!client.raw.join("").includes(hidden));
     assert.ok(!ba.raw.join("").includes("A campaign private text"));

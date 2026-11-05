@@ -1,11 +1,12 @@
 import {
   tokenMovesSchema,
   objectMoveTargetsSchema,
+  objectResizeTargetsSchema,
   translationSchema,
   pointSchema,
   tokenRadiusSchema,
 } from "./index.js";
-import { resizedDrawingPoints } from "./geometry.js";
+import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
 import type { Command, Roll, TableState } from "./index.js";
 
@@ -47,6 +48,27 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "objects.resize": {
+      const objects = objectResizeTargetsSchema
+        .parse(command.objects)
+        .map((target) => {
+          const object =
+            state.tokens.find((o) => o.id === target.objectId) ??
+            state.drawings.find((o) => o.id === target.objectId);
+          if (!object) throw new Error("A selected object no longer exists.");
+          if (!canEditObject(member, object))
+            throw new Error(
+              "Only the owner or GM can resize every selected object.",
+            );
+          if (object.version !== target.expectedVersion)
+            throw new Error(
+              "An object changed. Review the selection before resizing again.",
+            );
+          return object;
+        });
+      resizedObjects(objects, command.scale);
+      return;
+    }
     case "token.resize": {
       const token = state.tokens.find((t) => t.id === command.tokenId);
       if (!token) throw new Error("That token no longer exists.");

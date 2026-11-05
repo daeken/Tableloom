@@ -848,6 +848,88 @@ try {
       assert.equal(sized.radius, type === "scene.undo" ? 24 : 75.125);
       assert.deepEqual(sized.position, { x: 90, y: 150 });
     }
+    const resizeGroupId = randomUUID(),
+      resizeGroupAck = acknowledgement(live, resizeGroupId),
+      resizeGroupView = snapshot(
+        live,
+        (message) =>
+          message.state.tokens.some(
+            (t) => t.id === sizeToken && t.version === 5,
+          ) &&
+          message.state.drawings.some(
+            (d) => d.id === resizedId && d.version === 5,
+          ),
+      );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: resizeGroupId,
+          type: "objects.resize",
+          objects: [
+            { objectId: sizeToken, expectedVersion: 4 },
+            { objectId: resizedId, expectedVersion: 4 },
+          ],
+          scale: 1.25,
+        },
+      }),
+    );
+    await resizeGroupAck;
+    let resizeGroupState = await resizeGroupView;
+    const groupToken = resizeGroupState.state.tokens.find(
+        (t) => t.id === sizeToken,
+      )!,
+      groupPoints = resizeGroupState.state.drawings.find(
+        (d) => d.id === resizedId,
+      )!.points;
+    assert.equal(resizeGroupState.history.undo!.objectCount, 2);
+    assert.equal(resizeGroupState.history.undo!.action, "resize");
+    assert.equal(groupToken.radius, 75.125 * 1.25);
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+          resizeGroupState.history[type === "scene.undo" ? "undo" : "redo"]!,
+        id = randomUUID(),
+        ack = acknowledgement(live, id),
+        version = type === "scene.undo" ? 6 : 7,
+        view = snapshot(
+          live,
+          (message) =>
+            message.state.tokens.some(
+              (t) => t.id === sizeToken && t.version === version,
+            ) &&
+            message.state.drawings.some(
+              (d) => d.id === resizedId && d.version === version,
+            ),
+        );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      await ack;
+      resizeGroupState = await view;
+      const token = resizeGroupState.state.tokens.find(
+        (t) => t.id === sizeToken,
+      )!;
+      assert.equal(
+        token.radius,
+        type === "scene.undo" ? 75.125 : groupToken.radius,
+      );
+      assert.deepEqual(
+        token.position,
+        type === "scene.undo" ? { x: 90, y: 150 } : groupToken.position,
+      );
+      assert.deepEqual(
+        resizeGroupState.state.drawings.find((d) => d.id === resizedId)!.points,
+        type === "scene.undo" ? finalPoints : groupPoints,
+      );
+    }
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -888,5 +970,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, roll archive/cleanup, and clean shutdown.",
 );

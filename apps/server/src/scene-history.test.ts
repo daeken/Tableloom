@@ -1942,7 +1942,7 @@ test("schema-6 token snapshots gain fixed legacy radius atomically, including gr
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        7,
+        8,
       );
       const restored = f.action("scene.undo");
       assert.deepEqual(
@@ -1959,5 +1959,217 @@ test("schema-6 token snapshots gain fixed legacy radius atomically, including gr
     } finally {
       f.db.close();
     }
+  }
+});
+
+test("mixed group resize restores exact decimal geometry and sizes through whole-group deletion and overlapping move history", () => {
+  const f = fixture();
+  try {
+    const a = f.add(),
+      b = f.add(),
+      d = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: d,
+        kind: "stroke",
+        color: "#aabbcc",
+        points: [
+          { x: 0.1, y: 0.2 },
+          { x: 10.3, y: 20.4 },
+        ],
+      },
+    });
+    f.move(b, 50.15);
+    f.run({
+      type: "token.resize",
+      tokenId: a,
+      expectedVersion: 1,
+      radius: 15.125,
+    });
+    const before = f.tables.load(),
+      refs = [...before.tokens, ...before.drawings].map((o) => ({
+        objectId: o.id,
+        expectedVersion: o.version,
+      })),
+      count = f.db
+        .prepare("SELECT COUNT(*) AS n FROM scene_history_entries")
+        .get()!.n;
+    const resized = f.run({
+      type: "objects.resize",
+      objects: refs,
+      scale: 1.75,
+    });
+    assert.equal(resized.revision, before.revision + 1);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) AS n FROM scene_history_entries").get()!.n,
+      Number(count) + 1,
+    );
+    const cursor = f.history.status(f.player.member).undo!;
+    assert.equal(cursor.action, "resize");
+    assert.equal(cursor.objectCount, 3);
+    assert.equal(cursor.objectType, "mixed");
+    assert.ok(!JSON.stringify(cursor).includes("changes"));
+    f.run({
+      type: "objects.delete",
+      objects: [...resized.tokens, ...resized.drawings].map((o) => ({
+        objectId: o.id,
+        expectedVersion: o.version,
+      })),
+    });
+    f.action("scene.undo");
+    const undone = f.action("scene.undo");
+    assert.deepEqual(
+      undone.tokens.map((t) => ({ position: t.position, radius: t.radius })),
+      before.tokens.map((t) => ({ position: t.position, radius: t.radius })),
+    );
+    assert.deepEqual(undone.drawings[0]!.points, before.drawings[0]!.points);
+    const again = f.action("scene.redo");
+    assert.deepEqual(
+      again.tokens.map((t) => ({ position: t.position, radius: t.radius })),
+      resized.tokens.map((t) => ({ position: t.position, radius: t.radius })),
+    );
+    assert.deepEqual(again.drawings[0]!.points, resized.drawings[0]!.points);
+    f.action("scene.undo");
+    f.action("scene.undo");
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens.find((t) => t.id === b)!.position.x, 0);
+    assert.equal(f.tables.load().tokens.find((t) => t.id === a)!.radius, 24);
+    f.action("scene.redo");
+    f.action("scene.redo");
+    f.action("scene.redo");
+    f.move(a, 100, f.gm.member);
+    const blocked = f.history.status(f.player.member).undo!;
+    assert.equal(blocked.available, false);
+    assert.equal(blocked.objectCount, 3);
+    const current = f.tables.load();
+    assert.throws(() => f.action("scene.undo"), /changed|unavailable/);
+    assert.deepEqual(f.tables.load(), current);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("schema-7 sized token and scalar resize histories upgrade intact to 8; failed marker and disguised future group payload roll back", () => {
+  for (const failure of ["none", "marker", "future"]) {
+    const f = fixture();
+    try {
+      const a = f.add(),
+        b = f.add();
+      f.run({
+        type: "token.resize",
+        tokenId: a,
+        expectedVersion: 1,
+        radius: 75.125,
+      });
+      f.run({
+        type: "objects.delete",
+        objects: [
+          { objectId: a, expectedVersion: 2 },
+          { objectId: b, expectedVersion: 1 },
+        ],
+      });
+      const status = f.history.status(f.player.member);
+      if (failure === "future") {
+        f.action("scene.undo");
+        const state = f.tables.load();
+        f.run({
+          type: "objects.resize",
+          objects: state.tokens.map((t) => ({
+            objectId: t.id,
+            expectedVersion: t.version,
+          })),
+          scale: 1.25,
+        });
+      }
+      f.db.exec("UPDATE scene_history_version SET version=7");
+      if (failure === "marker")
+        f.db.exec(
+          "CREATE TRIGGER reject_group_size BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture group size marker'); END;",
+        );
+      const rows = f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        state = f.tables.load();
+      if (failure !== "none") {
+        assert.throws(() => new SceneHistoryStore(f.db, f.tables));
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          7,
+        );
+      } else {
+        const history = new SceneHistoryStore(f.db, f.tables);
+        assert.deepEqual(history.status(f.player.member), status);
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          8,
+        );
+      }
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        rows,
+      );
+      assert.deepEqual(f.tables.load(), state);
+      if (failure === "none")
+        assert.equal(
+          f.action("scene.undo").tokens.find((t) => t.id === a)!.radius,
+          75.125,
+        );
+    } finally {
+      f.db.close();
+    }
+  }
+});
+
+test("100-object resize stays one bounded edge with exact undo after predecessor expiry; malformed geometry links fail closed", () => {
+  const f = fixture();
+  try {
+    const ids = Array.from({ length: 100 }, () => f.add());
+    const before = f.tables.load();
+    f.run({
+      type: "objects.resize",
+      objects: ids.map((objectId) => ({ objectId, expectedVersion: 1 })),
+      scale: 2,
+    });
+    assert.equal(f.history.status(f.player.member).undo!.objectCount, 100);
+    assert.ok(
+      f
+        .action("scene.undo")
+        .tokens.every((t) => t.radius === 24 && t.version === 3),
+    );
+    f.action("scene.redo");
+    const current = f.tables.load(),
+      edge = f.history.status(f.player.member).undo!,
+      row = f.db
+        .prepare("SELECT payload_json FROM scene_history_entries WHERE id=?")
+        .get(edge.id)!,
+      original = JSON.parse(String(row.payload_json));
+    for (const corrupt of ["duplicate", "kind", "point", "target"]) {
+      const payload = structuredClone(original);
+      if (corrupt === "duplicate")
+        payload.changes[1].objectId = payload.changes[0].objectId;
+      if (corrupt === "kind") payload.objectType = "mixed";
+      if (corrupt === "point") payload.changes[0].after.position.x = 10001;
+      if (corrupt === "target") payload.changes[0].objectId = randomUUID();
+      f.db
+        .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+        .run(JSON.stringify(payload), edge.id);
+      assert.throws(() => f.history.status(f.player.member));
+      assert.deepEqual(f.tables.load(), current);
+    }
+    f.db
+      .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+      .run(row.payload_json!, edge.id);
+    const undone = f.action("scene.undo");
+    assert.deepEqual(
+      undone.tokens.map((t) => ({ position: t.position, radius: t.radius })),
+      before.tokens.map((t) => ({ position: t.position, radius: t.radius })),
+    );
+  } finally {
+    f.db.close();
   }
 });
