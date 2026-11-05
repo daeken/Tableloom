@@ -1,3 +1,4 @@
+import { chatPageSchema, chatMessageSchema } from "@tableloom/core/chat";
 import { DEFAULT_GRID, gridStateSchema } from "@tableloom/core/scene-grid";
 import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
 import { backgroundStateSchema } from "@tableloom/core/scene-map";
@@ -356,8 +357,55 @@ try {
       body: JSON.stringify({ name: "Cursor peer", code: invite.token }),
     });
     assert.equal(peerJoin.status, 200);
-    await peerJoin.json();
+    const peerAccess = accessStatusSchema.parse(await peerJoin.json());
     const peerCookie = peerJoin.headers.get("set-cookie")!.split(";")[0]!;
+    const chatRoot = `${url}/api/campaigns/${campaign.id}/chat`;
+    const sendChat = async (
+      headers: typeof documentHeaders,
+      authorId: string,
+      body: string,
+      audience: "public" | "gm",
+    ) => {
+      const response = await fetch(chatRoot, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          id: randomUUID(),
+          expectedAuthorId: authorId,
+          body,
+          audience,
+        }),
+      });
+      assert.equal(response.status, 200);
+      return chatMessageSchema.parse(await response.json());
+    };
+    await sendChat(
+      documentHeaders,
+      current.onlineMembers[0]!.id,
+      "Smoke public chat",
+      "public",
+    );
+    await sendChat(
+      documentHeaders,
+      current.onlineMembers[0]!.id,
+      "Smoke GM-only chat",
+      "gm",
+    );
+    await sendChat(
+      { ...documentHeaders, Cookie: peerCookie },
+      peerAccess.member!.id,
+      "Smoke player-and-GM chat",
+      "gm",
+    );
+    const peerChat = chatPageSchema.parse(
+      await (await fetch(chatRoot, { headers: { Cookie: peerCookie } })).json(),
+    );
+    assert.equal(peerChat.messages.length, 2);
+    assert.ok(!JSON.stringify(peerChat).includes("Smoke GM-only chat"));
+    const gmChat = chatPageSchema.parse(
+      await (await fetch(chatRoot, { headers: { Cookie: nextCookie } })).json(),
+    );
+    assert.equal(gmChat.messages.length, 3);
     const peerSocket = new WebSocket(
         `${url.replace("http", "ws")}/api/live?protocolVersion=${PROTOCOL_VERSION}`,
         { headers: { Cookie: peerCookie, Origin: url } },
@@ -1980,5 +2028,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding and transient context-bound cursor show/hide, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding and transient context-bound cursor show/hide, persisted audience-filtered campaign chat, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

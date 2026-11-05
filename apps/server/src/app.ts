@@ -1,3 +1,5 @@
+import { ChatStore } from "./chat.js";
+import { registerChatRoutes } from "./chat-http.js";
 import { CursorStore } from "./cursors.js";
 import { cursorUpdateSchema, CURSOR_INTERVAL_MS } from "@tableloom/core";
 import { projectPresence } from "./presence.js";
@@ -77,6 +79,7 @@ export async function createApp(options: {
   let assets: AssetStore;
   let sceneMaps: SceneMapStore;
   let sceneGrids: SceneGridStore;
+  let chat: ChatStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
@@ -88,6 +91,7 @@ export async function createApp(options: {
     assets = new AssetStore(database, now);
     sceneMaps = new SceneMapStore(database, store, assets);
     sceneGrids = new SceneGridStore(database, store);
+    chat = new ChatStore(database, store, now);
   } catch (error) {
     database.close();
     throw error;
@@ -242,6 +246,7 @@ export async function createApp(options: {
     disconnectInvalid,
     refreshCampaign,
   });
+  registerChatRoutes(app, access, chat);
   registerDocumentRoutes(app, access, documents);
   await registerAssetRoutes(app, access, assets);
   registerSceneMapRoutes(app, access, sceneMaps, assets, refreshCampaign);

@@ -1,3 +1,4 @@
+import { ChatPanel } from "./ChatPanel.js";
 import { TablePresence } from "./TablePresence.js";
 import { toolKeys } from "./tabletop-shortcuts.js";
 import { GridSettingsDialog } from "./GridSettingsDialog.js";
@@ -11,6 +12,7 @@ import {
   ChevronDown,
   Circle,
   Dice5,
+  MessageCircle,
   Eraser,
   FileText,
   Hand,
@@ -99,7 +101,7 @@ export function App() {
   const setRollVisibility = (value: RollVisibility) =>
     setDraft({ ...currentDraft, visibility: value });
   const [rollError, setRollError] = useState("");
-  const [tab, setTab] = useState<"rolls" | "game" | "notes">("rolls");
+  const [tab, setTab] = useState<"rolls" | "game" | "notes" | "chat">("rolls");
   const [copied, setCopied] = useState(false);
   const table = useTable(viewerKey, refresh, member?.tableId ?? null);
   const { status, error, clearError, send } = table;
@@ -540,7 +542,21 @@ export function App() {
             >
               <FileText size={16} /> Notes
             </button>
+            <button
+              className={tab === "chat" ? "active" : ""}
+              onClick={() => setTab("chat")}
+            >
+              <MessageCircle size={16} /> Chat
+            </button>
           </div>
+          {member && (
+            <ChatPanel
+              key={`chat:${viewerKey}`}
+              member={member}
+              active={tab === "chat"}
+              enabled={connected}
+            />
+          )}
           {member && state && (
             <NotesPanel
               key={viewerKey}

@@ -2265,3 +2265,87 @@ p {
   margin: 0;
   accent-color: #405f4d;
 }
+
+.chat-panel {
+  overflow-y: auto;
+  flex: 1;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.chat-panel h2,
+.chat-panel p {
+  margin: 0;
+}
+.chat-panel .muted,
+.chat-panel small {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.chat-panel button {
+  padding: 8px;
+  border: 1px solid #d2d5c8;
+  border-radius: 4px;
+  background: #fffef8;
+  color: #405f4d;
+}
+.chat-messages {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.chat-messages li {
+  padding: 12px 0;
+  border-bottom: 1px solid #d2d5c8;
+}
+.chat-messages li div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+.chat-messages span,
+.chat-messages time {
+  font-size: 10px;
+  color: #66715d;
+}
+.chat-messages li p {
+  white-space: pre-wrap;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.chat-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-panel label {
+  font-size: 12px;
+}
+.chat-panel textarea,
+.chat-panel select {
+  width: 100%;
+  border: 1px solid #d2d5c8;
+  border-radius: 4px;
+  padding: 8px;
+  background: #fffef8;
+  color: #303d2e;
+  font: inherit;
+  font-size: 12px;
+}
+.chat-panel textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.chat-error {
+  font-size: 12px;
+  color: #9b5146;
+}
+.panel-tabs {
+  flex-wrap: wrap;
+}
