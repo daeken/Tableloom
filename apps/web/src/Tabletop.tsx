@@ -1,3 +1,4 @@
+import { MeasurementDialog } from "./MeasurementDialog.js";
 import { ResizeDrawingDialog } from "./ResizeDrawingDialog.js";
 import { PositionSelectionDialog } from "./PositionSelectionDialog.js";
 import { CreateObjectDialog } from "./CreateObjectDialog.js";
@@ -157,6 +158,10 @@ export function Tabletop({
   cursorView.current = view;
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [measurement, setMeasurement] = useState<Measurement | null>(null);
+  const [measurementEntry, setMeasurementEntry] = useState<{
+    initial: Measurement | null;
+    origin: Point;
+  } | null>(null);
   const session = useRef(new PointerSession<Gesture>());
   const [gesture, renderGesture] = useState<Gesture | null>(null);
   function setGesture(value: Gesture | null) {
@@ -1396,10 +1401,49 @@ export function Tabletop({
           measurement={ruler}
           snapping={snap}
           dragging={gesture?.kind === "measure"}
-          enabled={enabled}
+          enabled={enabled && ready}
+          enter={() => {
+            if (!enabled || !ready || session.current.active) return;
+            setMeasurementEntry({
+              initial: ruler,
+              origin: {
+                x: clamp(
+                  Math.round((viewport.width / 2 - view.x) / view.scale),
+                ),
+                y: clamp(
+                  Math.round((viewport.height / 2 - view.y) / view.scale),
+                ),
+              },
+            });
+          }}
           clear={() => {
             setMeasurement(null);
             setGesture(null);
+          }}
+        />
+      )}
+      {measurementEntry && (
+        <MeasurementDialog
+          initial={measurementEntry.initial}
+          origin={measurementEntry.origin}
+          grid={grid}
+          snapping={snap}
+          enabled={enabled && ready && tool === "measure"}
+          save={(value) => {
+            if (
+              !enabled ||
+              !ready ||
+              tool !== "measure" ||
+              session.current.active ||
+              !measurementCurrent(value, grid)
+            )
+              return false;
+            setMeasurement(value);
+            return true;
+          }}
+          close={() => {
+            setMeasurementEntry(null);
+            focusBattlefield();
           }}
         />
       )}

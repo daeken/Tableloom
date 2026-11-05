@@ -63,8 +63,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add keyboard creation of tokens, rooms and text labels using exact coordinate entry.
 - [x] Add exact coordinate positioning for selected tokens, drawings and mixed groups.
 - [x] Add keyboard width/height entry for individual rooms, freehand drawings and text labels.
-- [ ] **Next:** add keyboard ruler endpoint entry.
-- [ ] Check screen-reader navigation, contrast, zoom and mobile-keyboard behavior.
+- [x] Add keyboard ruler endpoint entry with local distance previews and optional snapping.
+- [ ] **Next:** check screen-reader navigation, contrast, zoom and mobile-keyboard behavior.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
 ### Make game modules playable

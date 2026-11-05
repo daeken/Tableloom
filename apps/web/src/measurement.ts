@@ -1,4 +1,4 @@
-import type { Point } from "@tableloom/core";
+import { pointSchema, type Point } from "@tableloom/core";
 import { sameGrid, type SceneGrid } from "@tableloom/core/scene-grid";
 import { snapPoint } from "./grid.js";
 
@@ -65,6 +65,40 @@ export function measurementDistance(measurement: Measurement) {
     measurement.end.y - measurement.start.y,
   );
   return { units, cells: units / measurement.grid.settings.spacing };
+}
+export interface MeasurementCoordinates {
+  startX: string;
+  startY: string;
+  endX: string;
+  endY: string;
+}
+/** Explicit entry provides intent without a pointer threshold; no saved command is constructed. */
+export function coordinateMeasurement(
+  coordinates: MeasurementCoordinates,
+  capturedGrid: SceneGrid,
+  currentGrid: SceneGrid,
+  snapped: boolean,
+  enabled: boolean,
+): Measurement | null {
+  if (!enabled || Object.values(coordinates).some((value) => !value.trim()))
+    return null;
+  const start = pointSchema.safeParse({
+      x: Number(coordinates.startX),
+      y: Number(coordinates.startY),
+    }),
+    end = pointSchema.safeParse({
+      x: Number(coordinates.endX),
+      y: Number(coordinates.endY),
+    });
+  if (!start.success || !end.success) return null;
+  const { rawStart: _, ...result } = updateMeasurement(
+    beginMeasurement(start.data, capturedGrid, snapped),
+    end.data,
+  );
+  return measurementCurrent(result, currentGrid) &&
+    measurementDistance(result).units > 0
+    ? result
+    : null;
 }
 /** Keep the displayed approximation from implying exact zero for a short ruler. */
 const distanceFormatter = new Intl.NumberFormat("en-US", {

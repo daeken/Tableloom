@@ -78,6 +78,13 @@ export function KeyboardShortcutsDialog({
             </td>
           </tr>
           <tr>
+            <th scope="row">Ruler endpoints</th>
+            <td>
+              <kbd>M</kbd> selects Measure; Tab to Enter endpoints to type
+              start/end coordinates and preview a local ruler.
+            </td>
+          </tr>
+          <tr>
             <th scope="row">Snap</th>
             <td>
               <kbd>S</kbd> Toggle local snapping

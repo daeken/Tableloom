@@ -5,12 +5,14 @@ export function MeasurementControls({
   dragging,
   snapping,
   enabled,
+  enter,
   clear,
 }: {
   measurement: Measurement | null;
   dragging: boolean;
   snapping: boolean;
   enabled: boolean;
+  enter: () => void;
   clear: () => void;
 }) {
   const distance = measurement ? measurementDistance(measurement) : null;
@@ -29,7 +31,7 @@ export function MeasurementControls({
           {formatDistance(distance.cells)} grid cells
         </output>
       ) : (
-        <span>Drag across the table to measure.</span>
+        <span>Drag across the table or enter endpoints to measure.</span>
       )}
       <span
         className="measurement-announcement"
@@ -45,6 +47,9 @@ export function MeasurementControls({
           ? "Endpoints snap to grid intersections."
           : "Use Snap to grid for intersections."}
       </small>
+      <button disabled={!enabled || dragging} onClick={enter}>
+        Enter endpoints…
+      </button>
       <button disabled={!enabled || !measurement} onClick={clear}>
         Clear measurement
       </button>

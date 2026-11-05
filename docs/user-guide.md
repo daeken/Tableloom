@@ -34,6 +34,8 @@ To create objects without pointing at the canvas, Tab to **Shared battlefield** 
 
 For exact drawing sizes, select one room, freehand drawing or text label, then Tab to **Resize drawing…** in its selection actions. Enter Width and Height and confirm; the upper-left corner stays fixed. Sizes must be at least one canvas unit and fit the board. Flat drawings can only scale as part of a group. Token and group selections have their own size controls.
 
+To measure without dragging, press **M** with the battlefield focused, then Tab to **Enter endpoints…**. Enter Start/End X/Y, review the distance preview and choose **Show measurement**. Optional snapping previews the actual grid intersections and applies only to this ruler. The ruler is local to your view; Cancel preserves the previous result. Reopen the dialog if the shared grid changes.
+
 Scene objects are currently public to all table members. Before rolling, choose **Everyone at the table** or **You and the GM**. Private rolls are visible only to the roller and the GM; a GM's private rolls stay with the GM. The history marks private results explicitly. Public is the default, and already-recorded roll visibility cannot be changed. Sign-out/identity changes clear the local roll draft.
 
 The **Notes** panel supports plain-text documents. **New** creates a private note visible to its owner and the GM; GM-owned private notes stay with the GM. Set **Who can read this?** to **Everyone at the table** and save to share a note. Other players can read shared notes; only the owner and GM can edit or delete them. Changing a note back to private removes it from other players' current/future views. Previously shared text may already have been read.

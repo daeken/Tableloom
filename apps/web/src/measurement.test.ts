@@ -9,10 +9,118 @@ import {
   measurementCurrent,
   measurementDistance,
   formatDistance,
+  coordinateMeasurement,
 } from "./measurement.js";
 const grid = (): SceneGrid => ({
   version: 3,
   settings: structuredClone(DEFAULT_GRID),
+});
+
+test("keyboard endpoints use exact world coordinates and explicit intent without pointer thresholds", () => {
+  const g = grid(),
+    coordinates = { startX: "-60", startY: "120", endX: "120", endY: "360" },
+    ruler = coordinateMeasurement(coordinates, g, g, false, true)!;
+  assert.deepEqual(measurementDistance(ruler), { units: 300, cells: 5 });
+  assert.deepEqual(ruler.start, { x: -60, y: 120 });
+  assert.equal(ruler.snapped, false);
+  assert.equal("rawStart" in ruler, false);
+  assert.deepEqual(
+    measurementDistance(
+      coordinateMeasurement(
+        { startX: "0", startY: "0", endX: "0.004", endY: "0" },
+        g,
+        g,
+        false,
+        true,
+      )!,
+    ),
+    { units: 0.004, cells: 0.004 / 60 },
+  );
+  const extreme = coordinateMeasurement(
+    { startX: "-10000", startY: "-10000", endX: "10000", endY: "10000" },
+    g,
+    g,
+    false,
+    true,
+  )!;
+  assert.equal(measurementDistance(extreme).units, Math.hypot(20000, 20000));
+  coordinates.startX = "999";
+  g.settings.spacing = 10;
+  assert.deepEqual(ruler.start, { x: -60, y: 120 });
+  assert.equal(ruler.grid.settings.spacing, 60);
+});
+test("keyboard snapping shares shifted/hidden intersections and rejects coincident snapped endpoints", () => {
+  const g = {
+      version: 4,
+      settings: { spacing: 80, origin: { x: 15, y: -25 }, visible: false },
+    },
+    coordinates = { startX: "100", startY: "100", endX: "335", endY: "455" },
+    ruler = coordinateMeasurement(coordinates, g, g, true, true)!;
+  assert.deepEqual(ruler.start, { x: 95, y: 135 });
+  assert.deepEqual(ruler.end, { x: 335, y: 455 });
+  assert.deepEqual(measurementDistance(ruler), { units: 400, cells: 5 });
+  assert.equal(
+    coordinateMeasurement(
+      { ...coordinates, endX: "101", endY: "101" },
+      g,
+      g,
+      true,
+      true,
+    ),
+    null,
+  );
+  assert.ok(
+    coordinateMeasurement(
+      { ...coordinates, endX: "101", endY: "101" },
+      g,
+      g,
+      false,
+      true,
+    ),
+  );
+});
+test("keyboard endpoints reject blank/nonfinite/out-of-bounds/zero-length/offline drafts and every captured-grid change", () => {
+  const g = grid(),
+    coordinates = { startX: "0", startY: "0", endX: "180", endY: "240" };
+  for (const key of Object.keys(coordinates) as (keyof typeof coordinates)[])
+    for (const value of ["", " ", "NaN", "Infinity", "10001", "-10001"])
+      assert.equal(
+        coordinateMeasurement(
+          { ...coordinates, [key]: value },
+          g,
+          g,
+          false,
+          true,
+        ),
+        null,
+      );
+  assert.equal(
+    coordinateMeasurement(
+      { ...coordinates, endX: "0", endY: "0" },
+      g,
+      g,
+      false,
+      true,
+    ),
+    null,
+  );
+  assert.equal(coordinateMeasurement(coordinates, g, g, false, false), null);
+  for (const next of [
+    { ...g, version: g.version + 1 },
+    { ...g, settings: { ...g.settings, spacing: 80 } },
+    { ...g, settings: { ...g.settings, visible: false } },
+    { ...g, settings: { ...g.settings, origin: { x: 1, y: 0 } } },
+  ])
+    assert.equal(
+      coordinateMeasurement(coordinates, g, next, false, true),
+      null,
+    );
+  assert.deepEqual(
+    measurementDistance(
+      coordinateMeasurement(coordinates, g, structuredClone(g), false, true)!,
+    ),
+    { units: 300, cells: 5 },
+  );
 });
 test("ruler reports Euclidean world distance and cell equivalents without imposing diagonal or game distance rules", () => {
   const g = grid(),

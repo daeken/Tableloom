@@ -2151,6 +2151,7 @@ p {
 }
 .measurement-controls button {
   justify-self: start;
+  min-height: 44px;
   padding: 4px 0;
   text-decoration: underline;
 }
@@ -2733,4 +2734,35 @@ summary:focus-visible,
 }
 .creation-coordinates input {
   min-width: 0;
+}
+
+.ruler-coordinate-fields {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #d9dcce;
+  border-radius: 6px;
+}
+.ruler-coordinate-fields legend {
+  padding: 0 5px;
+}
+.ruler-entry-snap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.ruler-entry-snap input {
+  width: auto;
+  flex: 0 0 auto;
+}
+.ruler-entry-preview {
+  padding: 10px;
+  margin: 12px 0;
+  border-radius: 6px;
+  background: #eae7dd;
+  font-variant-numeric: tabular-nums;
+}
+.ruler-entry-preview p {
+  margin: 8px 0 0;
 }
