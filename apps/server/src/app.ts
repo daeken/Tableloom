@@ -312,6 +312,7 @@ export async function createApp(options: {
   });
   registerCampaignRoutes(app, store, access, {
     database,
+    contentCatalog,
     setSession: accessHttp.setSession,
     disconnectInvalid,
     refreshCampaign,

@@ -7,6 +7,7 @@ import { campaignMembershipSchema } from "@tableloom/core/campaigns";
 import { documentSchema } from "@tableloom/core/documents";
 import { assetSchema } from "@tableloom/core/assets";
 import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
+import { z } from "zod";
 const hash = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 const request = (url: string, path: string, cookie = "", body?: unknown) =>
@@ -21,6 +22,53 @@ const request = (url: string, path: string, cookie = "", body?: unknown) =>
       ? {}
       : { method: "POST", body: JSON.stringify(body) }),
   });
+async function verifyCampaignExport(
+  url: string,
+  cookie: string,
+  document: z.infer<typeof documentSchema>,
+  campaignVersion: number,
+  assetHash: string,
+) {
+  const path = `/api/campaigns/${document.campaignId}/export`,
+    body = {
+      expectedVersion: campaignVersion,
+      include: "all-campaign-content-including-private",
+    };
+  assert.equal((await request(url, path, "", body)).status, 401);
+  const response = await request(url, path, cookie, body);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(
+    response.headers.get("content-disposition") ?? "",
+    /^attachment;/,
+  );
+  const archive = z
+    .object({
+      format: z.literal("tableloom-campaign-export"),
+      version: z.literal(1),
+      privacy: z.literal("all-campaign-content-including-private"),
+      identityPolicy: z.literal("source-identifiers-without-access-grants"),
+      records: z.object({
+        module_documents: z.array(
+          z.object({ id: z.uuid(), owner_id: z.uuid(), data_json: z.string() }),
+        ),
+        campaign_assets: z.array(
+          z.object({ bytes: z.string(), sha256: z.string() }),
+        ),
+      }),
+    })
+    .parse(await response.json());
+  const exported = archive.records.module_documents.find(
+    (row) => row.id === document.id,
+  );
+  assert.ok(exported);
+  assert.equal(exported.owner_id, document.ownerId);
+  assert.deepEqual(JSON.parse(exported.data_json), document.data);
+  assert.equal(archive.records.campaign_assets.length, 1);
+  const image = archive.records.campaign_assets[0]!;
+  assert.equal(hash(Buffer.from(image.bytes, "base64")), assetHash);
+  assert.equal(image.sha256, assetHash);
+}
 export async function verifyRuntimeHttp(url: string) {
   const health = await request(url, "/api/health");
   assert.equal(health.status, 200);
@@ -75,6 +123,13 @@ export async function seedRuntime(url: string, hostKey: string) {
   const bytes = Buffer.from(
     await (await request(url, assetPath, cookie)).arrayBuffer(),
   );
+  await verifyCampaignExport(
+    url,
+    cookie,
+    document,
+    campaign.version,
+    hash(bytes),
+  );
   const socket = new WebSocket(
     url.replace(/^http/, "ws") +
       `/api/live?protocolVersion=${PROTOCOL_VERSION}`,
@@ -113,6 +168,7 @@ export async function seedRuntime(url: string, hostKey: string) {
     documentPath: `${documents}/${document.id}`,
     assetPath,
     assetHash: hash(bytes),
+    campaignVersion: campaign.version,
   };
 }
 export async function verifyRuntimePersistence(
@@ -126,4 +182,11 @@ export async function verifyRuntimePersistence(
   const asset = await request(url, state.assetPath, state.cookie);
   assert.equal(asset.status, 200);
   assert.equal(hash(Buffer.from(await asset.arrayBuffer())), state.assetHash);
+  await verifyCampaignExport(
+    url,
+    state.cookie,
+    state.document,
+    state.campaignVersion,
+    state.assetHash,
+  );
 }

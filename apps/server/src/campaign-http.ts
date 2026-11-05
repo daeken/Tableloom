@@ -16,6 +16,11 @@ import type { SessionGrant } from "./access.js";
 import { sessionToken } from "./access-http.js";
 import { StoreError, TableStore } from "./store.js";
 import { transaction } from "./database.js";
+import {
+  exportCampaign,
+  campaignExportRequestSchema,
+} from "./campaign-export.js";
+import type { ContentCatalog } from "./content-catalog.js";
 
 export function registerCampaignRoutes(
   app: FastifyInstance,
@@ -23,6 +28,7 @@ export function registerCampaignRoutes(
   access: AccessStore,
   options: {
     database: DatabaseSync;
+    contentCatalog: ContentCatalog;
     setSession: (grant: SessionGrant) => string;
     disconnectInvalid: () => void;
     refreshCampaign: (campaignId: string) => void;
@@ -44,6 +50,24 @@ export function registerCampaignRoutes(
     if (current.role !== "gm") throw new AccessError("host_required");
     return current;
   };
+  app.post("/api/campaigns/:id/export", async (request, reply) => {
+    const member = activeGM(request);
+    const exported = exportCampaign(
+      options.database,
+      store,
+      options.contentCatalog,
+      member,
+      campaignExportRequestSchema.parse(request.body),
+    );
+    return reply
+      .header("Content-Type", "application/json; charset=utf-8")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="tableloom-campaign-${member.tableId}.json"`,
+      )
+      .header("X-Content-Type-Options", "nosniff")
+      .send(exported);
+  });
   app.get("/api/campaigns/:id/scenes", async (request) => {
     const member = activeGM(request);
     return sceneListSchema.parse(store.listScenes(member.tableId));

@@ -198,6 +198,21 @@ Campaigns pin exact system and pack versions. The server installs **one version 
 
 ## Campaign transfer: current limits
 
-**Portable per-campaign export/import is not implemented.** There is no campaign archive endpoint, UI or CLI, and campaign metadata/record JSON responses are not transfer files. Copying one campaign row omits related scenes, assets, histories, documents, ownership/access and package references.
+**Campaign export has a GM-only API; import and transfer UI/CLI are not implemented.** The export is an initial versioned private snapshot, not a tested recovery/round-trip format. Keep using [whole-instance backups](#backup-and-recovery) for recovery until import and destination validation are available.
 
-The supported transfer today is a **whole-instance** backup, verify and restore into a new data directory on a matching installation. It brings every campaign and the saved identity/access state and recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. Treat that archive as private administrator data, not a player/character share file. The README keeps selective portable transfer as unfinished work; the backup command must not be presented as that feature.
+An authenticated GM with the campaign active can request `POST /api/campaigns/<campaign-id>/export` from the same origin, with JSON:
+
+```json
+{
+  "expectedVersion": 1,
+  "include": "all-campaign-content-including-private"
+}
+```
+
+Use the campaign's current version from its settings response, not a fixed version of 1. A stale version returns 409. The response is a `no-store` JSON attachment named with the campaign UUID. There is no download button yet. Players, signed-out sessions, foreign origins and other inactive campaigns cannot request this export.
+
+**Treat the file as private administrator data.** It includes all scenes (including inactive ones), maps and library images, notes, current/archived rolls, private chat, module records, homebrew, owned content and durable edit history for that campaign. It includes source ownership identifiers and the current member names/roles as descriptors, but no login sessions, invitation/recovery codes, private host key or other campaigns' records. User-entered secrets in notes/module fields remain content and are included. This is not a player-safe share file. Files are plaintext, unsigned and unencrypted.
+
+Exports are limited to 32 MiB of JSON and 100,000 data rows; embedded images use base64. Large campaigns should use whole-instance backup. Export runs in one consistent read snapshot without changing the source. It retains exact system/pack versions and content-pack fingerprints, including historical reset-only pack references. Source identities are preserved **without access grants**: departed owners may have no current member descriptor. The future importer must explicitly resolve owners and validate installed code, references and module data; matching names or IDs must never grant access automatically. No module code or installed base catalog is bundled, and no destination compatibility is claimed yet.
+
+The supported end-to-end server transfer today remains a **whole-instance** backup, verify and restore into a new data directory on a matching installation. It brings every campaign and saved access state/recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. The README keeps selective portable transfer unfinished.
