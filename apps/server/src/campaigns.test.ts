@@ -341,7 +341,7 @@ test("unknown, incomplete, mismatched, or downgraded persistence fails closed wi
       db.prepare("SELECT version FROM campaign_storage_version").get()?.version,
       99,
     );
-    db.exec("UPDATE campaign_storage_version SET version = 3");
+    db.exec("UPDATE campaign_storage_version SET version = 4");
     db.prepare("UPDATE campaign_records SET json = ?").run(
       JSON.stringify({ ...metadata, activeSceneId: randomUUID() }),
     );

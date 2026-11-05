@@ -70,6 +70,15 @@ export function hitDrawing(
   point: Point,
   tolerance: number,
 ): boolean {
+  if (drawing.kind === "text") {
+    const box = objectBounds(drawing);
+    return (
+      point.x >= box.left - tolerance &&
+      point.x <= box.right + tolerance &&
+      point.y >= box.top - tolerance &&
+      point.y <= box.bottom + tolerance
+    );
+  }
   let points = drawing.points;
   if (drawing.kind === "rectangle") {
     const first = points[0]!,
@@ -137,7 +146,9 @@ export function captureDeletionReview(
         ? `Token: ${object.name}`
         : object.kind === "rectangle"
           ? "Room drawing"
-          : "Freehand drawing",
+          : object.kind === "text"
+            ? "Text label"
+            : "Freehand drawing",
   }));
 }
 

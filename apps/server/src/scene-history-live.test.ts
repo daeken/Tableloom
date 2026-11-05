@@ -1265,3 +1265,204 @@ test("live mixed group resize confirms once, rolls back failed bindings, survive
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("text labels synchronize as owned drawing objects with exact retries, stale guards, receipt rollback and restart-safe shared content/history", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-text-live-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, payload: Record<string, unknown>, cookie = "") =>
+      app.inject({
+        method: "POST",
+        url: `/api/access/${route}`,
+        headers: { cookie, origin: "http://localhost" },
+        payload,
+      }),
+    cookieOf = (r: { headers: Record<string, unknown> }) =>
+      String(r.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      grant = await post("join", {
+        name: "Player",
+        code: (await post("invitations", {}, gm)).json().token,
+      }),
+      player = cookieOf(grant);
+    let p = await connect(url, player),
+      g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    const id = randomUUID(),
+      create = {
+        id: randomUUID(),
+        type: "drawing.add",
+        drawing: {
+          id,
+          kind: "text",
+          text: "North gate\n<script>literal text</script>",
+          color: "#405f4d",
+          points: [
+            { x: 60, y: 90 },
+            { x: 380, y: 154 },
+          ],
+        },
+      };
+    assert.equal((await p.send(create)).type, "ack");
+    await until(() => g.latest().state.drawings.some((d) => d.id === id));
+    assert.equal(g.latest().state.drawings[0]!.text, create.drawing.text);
+    assert.equal(g.latest().state.drawings[0]!.ownerId, grant.json().member.id);
+    assert.equal((await p.send(create)).type, "ack");
+    assert.equal(store.load().drawings.length, 1);
+    assert.equal(store.load().drawings[0]!.version, 1);
+    assert.equal(g.latest().history.undo, null);
+    const cursor = p.latest().history.undo!;
+    assert.ok(!JSON.stringify(g.messages).includes(cursor.id));
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "objects.move",
+          objects: [{ objectId: id, expectedVersion: 1 }],
+          delta: { x: 60, y: 0 },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => g.latest().state.drawings[0]?.version === 2);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "drawing.resize",
+          drawingId: id,
+          expectedVersion: 1,
+          bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+        })
+      ).type,
+      "error",
+    );
+    const before = store.load(),
+      malformedStart = p.messages.length;
+    p.ws.send(
+      JSON.stringify({
+        id: randomUUID(),
+        type: "drawing.add",
+        drawing: { ...create.drawing, id: randomUUID(), text: undefined },
+      }),
+    );
+    await until(() =>
+      p.messages.slice(malformedStart).some((m) => m.type === "error"),
+    );
+    assert.deepEqual(store.load(), before);
+    const rollback = {
+      ...create,
+      id: randomUUID(),
+      drawing: {
+        ...create.drawing,
+        id: randomUUID(),
+        text: "Receipt rollback label",
+      },
+    };
+    db.exec(
+      "CREATE TRIGGER reject_text_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture text binding'); END",
+    );
+    assert.equal((await p.send(rollback)).type, "error");
+    assert.deepEqual(store.load(), before);
+    assert.equal(store.hasCommand(rollback.id), false);
+    db.exec("DROP TRIGGER reject_text_binding");
+    assert.equal((await p.send(rollback)).type, "ack");
+    assert.equal(store.load().drawings.length, 2);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "object.delete",
+          objectId: id,
+          expectedVersion: 2,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => g.latest().history.undo?.action === "delete");
+    const edge = g.latest().history.undo!;
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: edge.id,
+          expectedVersion: edge.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() =>
+      p.latest().state.drawings.some((d) => d.id === id && d.version === 4),
+    );
+    assert.equal(
+      store.load().drawings.find((d) => d.id === id)!.text,
+      create.drawing.text,
+    );
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "objects.move",
+          objects: [{ objectId: id, expectedVersion: 2 }],
+          delta: { x: 10, y: 0 },
+        })
+      ).type,
+      "error",
+    );
+    const saved = store.load();
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    assert.deepEqual(store.load(), saved);
+    assert.deepEqual(p.latest().state.drawings, saved.drawings);
+    assert.deepEqual(g.latest().state.drawings, saved.drawings);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "objects.move",
+          objects: [{ objectId: id, expectedVersion: 4 }],
+          delta: { x: 15, y: 20 },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().history.undo?.action === "move");
+    const move = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: move.id,
+          expectedVersion: move.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.deepEqual(
+      store.load().drawings.find((d) => d.id === id)!.points,
+      saved.drawings.find((d) => d.id === id)!.points,
+    );
+    assert.equal(
+      store.load().drawings.find((d) => d.id === id)!.text,
+      create.drawing.text,
+    );
+  } finally {
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    store.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

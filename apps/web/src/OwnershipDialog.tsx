@@ -82,7 +82,7 @@ export function OwnershipDialog({
     })),
     ...state.drawings.map((drawing): Subject => ({
       id: drawing.id,
-      label: `Drawing: ${drawing.kind === "rectangle" ? "Room" : "Stroke"}`,
+      label: `Drawing: ${drawing.kind === "rectangle" ? "Room" : drawing.kind === "text" ? "Text label" : "Stroke"}`,
       ownerId: drawing.ownerId,
       kind: "object",
       version: drawing.version,

@@ -31,7 +31,7 @@ export class ObjectIdentities {
         throw new Error("Object identity storage is missing its version.");
       if (
         exists("scene_history_version") &&
-        [2, 3, 4, 5, 6, 7, 8].includes(
+        [2, 3, 4, 5, 6, 7, 8, 9].includes(
           Number(
             db
               .prepare("SELECT version FROM scene_history_version WHERE id=1")
@@ -64,7 +64,7 @@ export class ObjectIdentities {
       }
       const campaign = z
         .object({
-          schemaVersion: z.literal(6),
+          schemaVersion: z.literal(7),
           revision: tableSchema.shape.revision,
           notes: tableSchema.shape.notes,
           rolls: tableSchema.shape.rolls,

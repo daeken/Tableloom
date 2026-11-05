@@ -1,4 +1,5 @@
 import type { BackgroundView } from "@tableloom/core/scene-map";
+import { TextPlacementDialog } from "./TextPlacementDialog.js";
 import { ResizeSelectionDialog } from "./ResizeSelectionDialog.js";
 import { ResizeTokenDialog } from "./ResizeTokenDialog.js";
 import { drawingBounds, resizedDrawingPoints } from "@tableloom/core/geometry";
@@ -44,7 +45,8 @@ import {
 import type { SceneObject } from "./scene-selection.js";
 import { canEditObject } from "@tableloom/core/permissions";
 
-export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
+export type Tool =
+  "select" | "hand" | "pen" | "rectangle" | "token" | "erase" | "text";
 type Gesture =
   | {
       kind: "resize";
@@ -99,6 +101,7 @@ export function Tabletop({
   const [mapFailure, setMapFailure] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
+  const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [snap, setSnap] = useState(false);
@@ -246,7 +249,24 @@ export function Tabletop({
       const last = drawing.points.at(-1);
       if (!first || !last) continue;
       const graphic = new Graphics();
-      if (drawing.kind === "rectangle") {
+      if (drawing.kind === "text") {
+        const box = objectBounds(drawing),
+          label = new Text({
+            text: drawing.text!,
+            style: {
+              fontFamily: "monospace",
+              fontSize: 24,
+              lineHeight: 32,
+              fill: drawing.color,
+            },
+          });
+        label.position.set(box.left, box.top);
+        label.scale.set(
+          (box.right - box.left) / Math.max(1, label.width),
+          (box.bottom - box.top) / Math.max(1, label.height),
+        );
+        world.addChild(label);
+      } else if (drawing.kind === "rectangle") {
         graphic.roundRect(
           Math.min(first.x, last.x),
           Math.min(first.y, last.y),
@@ -260,12 +280,13 @@ export function Tabletop({
         for (const point of drawing.points.slice(1))
           graphic.lineTo(point.x, point.y);
       }
-      graphic.stroke({
-        color: drawing.color,
-        width: 3,
-        cap: "round",
-        join: "round",
-      });
+      if (drawing.kind !== "text")
+        graphic.stroke({
+          color: drawing.color,
+          width: 3,
+          cap: "round",
+          join: "round",
+        });
       world.addChild(graphic);
       if (selected.includes(drawing.id)) {
         const box = objectBounds(drawing),
@@ -382,11 +403,16 @@ export function Tabletop({
     };
   }
   function down(event: ReactPointerEvent) {
-    if (!ready || !enabled || event.button !== 0) return;
+    if (!ready || !enabled || event.button !== 0 || textAnchor) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = point(event);
     if (tool === "hand") {
       setGesture({ kind: "pan", start: local(event), origin: view });
+      return;
+    }
+    if (tool === "text") {
+      event.preventDefault();
+      if (!pending) setTextAnchor(snap ? snapPoint(p) : p);
       return;
     }
     if (tool === "token") {
@@ -644,10 +670,19 @@ export function Tabletop({
       onPointerUp={up}
       onPointerCancel={() => setGesture(null)}
       onWheel={(event) => {
-        if (enabled && !gesture)
+        if (enabled && !gesture && !textAnchor)
           zoom(event.deltaY > 0 ? 0.92 : 1.08, local(event));
       }}
     >
+      {textAnchor && (
+        <TextPlacementDialog
+          anchor={textAnchor}
+          color={color}
+          enabled={enabled && !pending}
+          close={() => setTextAnchor(null)}
+          save={(drawing) => send({ type: "drawing.add", drawing })}
+        />
+      )}
       {background && (
         <img
           key={background.imageId}

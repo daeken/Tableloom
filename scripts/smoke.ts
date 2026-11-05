@@ -934,6 +934,68 @@ try {
         type === "scene.undo" ? finalPoints : groupPoints,
       );
     }
+    const textId = randomUUID(),
+      textAdded = snapshot(live, (m) =>
+        m.state.drawings.some((d) => d.id === textId),
+      );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: {
+            id: textId,
+            kind: "text",
+            text: "Courtyard\nNorth gate",
+            points: [
+              { x: 60, y: 60 },
+              { x: 220, y: 124 },
+            ],
+            color: "#405f4d",
+          },
+        },
+      }),
+    );
+    const textState = await textAdded;
+    assert.equal(
+      textState.state.drawings.find((d) => d.id === textId)!.text,
+      "Courtyard\nNorth gate",
+    );
+    const textUndo = snapshot(
+      live,
+      (m) => !m.state.drawings.some((d) => d.id === textId),
+    );
+    live.send(
+      JSON.stringify({
+        context: textState.context,
+        command: {
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: textState.history.undo!.id,
+          expectedVersion: textState.history.undo!.version,
+        },
+      }),
+    );
+    const textUndone = await textUndo;
+    const textRedo = snapshot(live, (m) =>
+      m.state.drawings.some((d) => d.id === textId),
+    );
+    live.send(
+      JSON.stringify({
+        context: textUndone.context,
+        command: {
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: textUndone.history.redo!.id,
+          expectedVersion: textUndone.history.redo!.version,
+        },
+      }),
+    );
+    assert.equal(
+      (await textRedo).state.drawings.find((d) => d.id === textId)!.text,
+      "Courtyard\nNorth gate",
+    );
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(
@@ -1157,5 +1219,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

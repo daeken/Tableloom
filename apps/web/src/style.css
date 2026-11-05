@@ -1879,3 +1879,30 @@ p {
   line-height: 1.55;
   margin: 0.75rem 0;
 }
+
+.text-placement-dialog textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 130px;
+  max-height: 280px;
+  padding: 10px;
+  font: inherit;
+  color: #303c33;
+  background: #fffef8;
+  border: 1px solid #c8d0c2;
+  border-radius: 5px;
+}
+.text-placement-dialog {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.text-placement-dialog > p {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.text-placement-dialog > .form-error {
+  color: #9b5146;
+}
+.tool-text {
+  cursor: text;
+}

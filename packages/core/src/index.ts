@@ -3,7 +3,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -11,18 +11,59 @@ export const pointSchema = z.object({
 });
 export type Point = z.infer<typeof pointSchema>;
 const colorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
-export const drawingSchema = z.object({
+export const sceneTextSchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine((text) => text.trim().length > 0, "Enter some visible text.")
+  .regex(
+    /^[^\u0000-\u0009\u000b-\u001f\u007f]*$/u,
+    "Use plain text and line breaks.",
+  )
+  .refine((text) => text.split("\n").length <= 20, "Use at most 20 lines.");
+const drawingDataSchema = z.object({
   id: z.uuid(),
-  kind: z.enum(["stroke", "rectangle"]),
+  kind: z.enum(["stroke", "rectangle", "text"]),
+  text: sceneTextSchema.optional(),
   points: z.array(pointSchema).min(2).max(2000),
   color: colorSchema,
   ownerId: z.uuid().nullable(),
   version: z.number().int().positive(),
 });
-export type Drawing = z.infer<typeof drawingSchema>;
-export const drawingInputSchema = drawingSchema
-  .omit({ ownerId: true, version: true })
+function validateTextDrawing(
+  drawing: { kind: string; text?: string | undefined; points: Point[] },
+  context: z.RefinementCtx,
+) {
+  if (drawing.kind === "text") {
+    if (
+      drawing.text === undefined ||
+      drawing.points.length !== 2 ||
+      drawing.points[0]!.x >= drawing.points[1]!.x ||
+      drawing.points[0]!.y >= drawing.points[1]!.y
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Text labels need text and two ordered corners with positive width and height.",
+      });
+  } else if (drawing.text !== undefined)
+    context.addIssue({
+      code: "custom",
+      message: "Only text labels may contain text.",
+    });
+}
+export const drawingSchema = drawingDataSchema
+  .strict()
+  .superRefine(validateTextDrawing);
+export const preTextDrawingSchema = drawingDataSchema
+  .omit({ text: true })
+  .extend({ kind: z.enum(["stroke", "rectangle"]) })
   .strict();
+export type Drawing = z.infer<typeof drawingSchema>;
+export const drawingInputSchema = drawingDataSchema
+  .omit({ ownerId: true, version: true })
+  .strict()
+  .superRefine(validateTextDrawing);
 export type DrawingInput = z.infer<typeof drawingInputSchema>;
 export const DEFAULT_TOKEN_RADIUS = 24;
 export const tokenRadiusSchema = z.number().finite().min(4).max(300);
@@ -81,7 +122,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(6),
+  schemaVersion: z.literal(7),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -127,7 +168,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 6,
+  schemaVersion: 7,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -136,11 +177,19 @@ export const createTable = (): TableState => ({
   notes: [],
 });
 
-const legacyDrawingSchema = drawingSchema.omit({ version: true }).strict();
+const legacyDrawingSchema = preTextDrawingSchema
+  .omit({ version: true })
+  .strict();
 const legacyTokenSchema = tokenSchema
   .omit({ version: true, radius: true })
   .strict();
-const version5TableSchema = tableDataSchema
+const version6TableSchema = tableDataSchema
+  .extend({
+    schemaVersion: z.literal(6),
+    drawings: z.array(preTextDrawingSchema).max(2000),
+  })
+  .strict();
+const version5TableSchema = version6TableSchema
   .extend({
     schemaVersion: z.literal(5),
     tokens: z.array(tokenSchema.omit({ radius: true }).strict()).max(200),
@@ -163,7 +212,9 @@ const version2TableSchema = version3TableSchema.extend({
 });
 const version1TableSchema = version2TableSchema.extend({
   schemaVersion: z.literal(1),
-  drawings: z.array(drawingInputSchema).max(2000),
+  drawings: z
+    .array(preTextDrawingSchema.omit({ ownerId: true, version: true }).strict())
+    .max(2000),
   tokens: z.array(tokenInputSchema).max(200),
 });
 
@@ -174,13 +225,19 @@ export function restoreTable(value: unknown): {
 } {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
+  const previous = version6TableSchema.safeParse(value);
+  if (previous.success)
+    return {
+      migrated: true,
+      state: tableSchema.parse({ ...previous.data, schemaVersion: 7 }),
+    };
   const sized = version5TableSchema.safeParse(value);
   if (sized.success)
     return {
       migrated: true,
       state: tableSchema.parse({
         ...sized.data,
-        schemaVersion: 6,
+        schemaVersion: 7,
         tokens: sized.data.tokens.map((token) => ({
           ...token,
           radius: DEFAULT_TOKEN_RADIUS,
@@ -197,7 +254,7 @@ export function restoreTable(value: unknown): {
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 6,
+    schemaVersion: 7,
     notes: legacy.schemaVersion === 4 ? legacy.notes : [],
     drawings: legacy.drawings.map((drawing) => ({
       ...drawing,

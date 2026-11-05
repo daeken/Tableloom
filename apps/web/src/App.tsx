@@ -16,6 +16,7 @@ import {
   Pencil,
   Plus,
   Square,
+  Type,
   Users,
   X,
 } from "lucide-react";
@@ -55,6 +56,7 @@ const tools = [
   { id: "hand", label: "Pan the table", Icon: Hand },
   { id: "pen", label: "Freehand drawing", Icon: Pencil },
   { id: "rectangle", label: "Draw a room", Icon: Square },
+  { id: "text", label: "Place a text label", Icon: Type },
   { id: "token", label: "Place a token", Icon: Circle },
   { id: "erase", label: "Delete an object", Icon: Eraser },
 ] as const;
@@ -470,11 +472,13 @@ export function App() {
                   ? "Drag to explore the table"
                   : tool === "pen"
                     ? "Drag to sketch something"
-                    : tool === "rectangle"
-                      ? "Drag to draw a room"
-                      : tool === "erase"
-                        ? "Click a token or drawing edge to remove it"
-                        : "Click to place your token"}
+                    : tool === "text"
+                      ? "Click to place a shared text label"
+                      : tool === "rectangle"
+                        ? "Drag to draw a room"
+                        : tool === "erase"
+                          ? "Click a token or drawing edge to remove it"
+                          : "Click to place your token"}
             </span>
             <span>
               Scroll to zoom <span className="footer-dot">·</span> Made for your
