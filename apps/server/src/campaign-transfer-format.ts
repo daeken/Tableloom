@@ -8,6 +8,12 @@ import { MAX_CAMPAIGN_DOCUMENTS } from "@tableloom/core/documents";
 import { MAX_CAMPAIGN_INSTANCES } from "@tableloom/core/instances";
 import { MAX_CAMPAIGN_ASSETS } from "@tableloom/core/assets";
 import { MAX_CAMPAIGN_CONTENT_OVERRIDES } from "@tableloom/core/content";
+import { MAX_ARCHIVED_ROLLS } from "@tableloom/core/roll-history";
+import {
+  MAX_CAMPAIGN_CHAT_MESSAGES,
+  MAX_CAMPAIGN_SCENE_HISTORY,
+  MAX_CAMPAIGN_MAP_HISTORY,
+} from "./storage-limits.js";
 import { StoreError } from "./store.js";
 import {
   campaignExportTables as tables,
@@ -68,14 +74,18 @@ const recordsSchema = z
     scene_backgrounds: z.array(tables.scene_backgrounds).max(MAX_SCENES),
     scene_background_history: z
       .array(tables.scene_background_history)
-      .max(100 * MAX_SCENES),
+      .max(MAX_CAMPAIGN_MAP_HISTORY),
     scene_background_history_refs: z
       .array(tables.scene_background_history_refs)
-      .max(200 * MAX_SCENES),
+      .max(2 * MAX_CAMPAIGN_MAP_HISTORY),
     scene_grids: z.array(tables.scene_grids).max(MAX_SCENES),
-    scene_history_entries: z.array(tables.scene_history_entries).max(10000),
-    roll_archive: z.array(tables.roll_archive).max(10000),
-    chat_messages: z.array(tables.chat_messages).max(MAX_CAMPAIGN_EXPORT_ROWS),
+    scene_history_entries: z
+      .array(tables.scene_history_entries)
+      .max(MAX_CAMPAIGN_SCENE_HISTORY),
+    roll_archive: z.array(tables.roll_archive).max(MAX_ARCHIVED_ROLLS),
+    chat_messages: z
+      .array(tables.chat_messages)
+      .max(MAX_CAMPAIGN_CHAT_MESSAGES),
   })
   .strict();
 export const campaignTransferSchema = z

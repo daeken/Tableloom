@@ -32,9 +32,16 @@ import {
 import type { Entry, Payload, Target } from "./scene-history-model.js";
 import { initializeSceneHistory } from "./scene-history-storage.js";
 
-export const MAX_MEMBER_SCENE_HISTORY = 100;
-export const MAX_CAMPAIGN_SCENE_HISTORY = 10000;
-export const MAX_CAMPAIGN_HISTORY_BYTES = 32 * 1024 * 1024;
+import {
+  MAX_MEMBER_SCENE_HISTORY,
+  MAX_CAMPAIGN_SCENE_HISTORY,
+  MAX_CAMPAIGN_HISTORY_BYTES,
+} from "./storage-limits.js";
+export {
+  MAX_MEMBER_SCENE_HISTORY,
+  MAX_CAMPAIGN_SCENE_HISTORY,
+  MAX_CAMPAIGN_HISTORY_BYTES,
+} from "./storage-limits.js";
 const objectOf = (state: TableState, id: string) =>
   state.tokens.find((object) => object.id === id) ??
   state.drawings.find((object) => object.id === id);

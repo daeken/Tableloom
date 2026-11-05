@@ -8,6 +8,10 @@ import {
 import { memberSchema, type Member } from "@tableloom/core/access";
 import { transaction } from "./database.js";
 import { StoreError, TableStore } from "./store.js";
+import {
+  MAX_AUDIENCE_CHAT_MESSAGES,
+  MAX_CAMPAIGN_CHAT_MESSAGES,
+} from "./storage-limits.js";
 
 /** Separate from scene revisions/receipts. One public bucket and one private bucket per author. */
 export class ChatStore {
@@ -46,14 +50,14 @@ export class ChatStore {
         if (
           db
             .prepare(
-              "SELECT 1 FROM chat_messages GROUP BY campaign_id,bucket HAVING count(*)>100",
+              "SELECT 1 FROM chat_messages GROUP BY campaign_id,bucket HAVING count(*)>?",
             )
-            .get() ||
+            .get(MAX_AUDIENCE_CHAT_MESSAGES) ||
           db
             .prepare(
-              "SELECT 1 FROM chat_messages GROUP BY campaign_id HAVING count(*)>1100",
+              "SELECT 1 FROM chat_messages GROUP BY campaign_id HAVING count(*)>?",
             )
-            .get()
+            .get(MAX_CAMPAIGN_CHAT_MESSAGES)
         )
           throw new Error("Chat storage exceeds retention limits.");
         return;
@@ -143,13 +147,19 @@ export class ChatStore {
       // Prune only the submitting audience; private traffic never evicts public or another author's private messages.
       this.db
         .prepare(
-          "DELETE FROM chat_messages WHERE campaign_id=? AND bucket=? AND sequence NOT IN (SELECT sequence FROM chat_messages WHERE campaign_id=? AND bucket=? ORDER BY sequence DESC LIMIT 100)",
+          "DELETE FROM chat_messages WHERE campaign_id=? AND bucket=? AND sequence NOT IN (SELECT sequence FROM chat_messages WHERE campaign_id=? AND bucket=? ORDER BY sequence DESC LIMIT ?)",
         )
-        .run(member.tableId, bucket, member.tableId, bucket);
+        .run(
+          member.tableId,
+          bucket,
+          member.tableId,
+          bucket,
+          MAX_AUDIENCE_CHAT_MESSAGES,
+        );
       const count = this.db
         .prepare("SELECT count(*) AS n FROM chat_messages WHERE campaign_id=?")
         .get(member.tableId)!.n;
-      if (typeof count !== "number" || count > 1100)
+      if (typeof count !== "number" || count > MAX_CAMPAIGN_CHAT_MESSAGES)
         throw new StoreError(
           "Campaign chat has reached its storage limit for a new audience. No message was sent.",
           409,

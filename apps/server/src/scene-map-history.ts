@@ -7,6 +7,12 @@ import {
   backgroundHistoryActionSchema,
 } from "@tableloom/core/scene-map";
 import { StoreError } from "./store.js";
+import {
+  MAX_SCENE_MAP_HISTORY,
+  MAX_CAMPAIGN_MAP_HISTORY,
+  MAX_MAP_HISTORY_ENTRY_BYTES,
+  MAX_CAMPAIGN_MAP_HISTORY_BYTES,
+} from "./storage-limits.js";
 
 type Map = z.infer<typeof backgroundMapSchema> | null;
 export type MapRecord = { version: number; map: Map; cursor: number };
@@ -114,12 +120,12 @@ export class SceneMapHistory {
   read(campaignId: string, sceneId: string, state: MapRecord) {
     const entries = this.db
       .prepare(
-        "SELECT id,seq,entry_json FROM scene_background_history WHERE campaign_id=? AND scene_id=? ORDER BY seq LIMIT 101",
+        "SELECT id,seq,entry_json FROM scene_background_history WHERE campaign_id=? AND scene_id=? ORDER BY seq LIMIT ?",
       )
-      .all(campaignId, sceneId)
+      .all(campaignId, sceneId, MAX_SCENE_MAP_HISTORY + 1)
       .map((row) => {
         const raw = z.string().parse(row.entry_json);
-        if (Buffer.byteLength(raw, "utf8") > 4096)
+        if (Buffer.byteLength(raw, "utf8") > MAX_MAP_HISTORY_ENTRY_BYTES)
           throw new Error("Stored background history entry is too large.");
         const entry = entrySchema.parse(JSON.parse(raw));
         if (
@@ -147,7 +153,7 @@ export class SceneMapHistory {
         return entry;
       });
     if (
-      entries.length > 100 ||
+      entries.length > MAX_SCENE_MAP_HISTORY ||
       (state.cursor !== 0 && !entries.some((e) => e.seq === state.cursor))
     )
       throw new Error("Stored background history cursor is inconsistent.");
@@ -207,9 +213,9 @@ export class SceneMapHistory {
           .run(campaignId, sceneId, entry.id, id);
     this.db
       .prepare(
-        "DELETE FROM scene_background_history WHERE campaign_id=? AND scene_id=? AND seq NOT IN (SELECT seq FROM scene_background_history WHERE campaign_id=? AND scene_id=? ORDER BY seq DESC LIMIT 100)",
+        "DELETE FROM scene_background_history WHERE campaign_id=? AND scene_id=? AND seq NOT IN (SELECT seq FROM scene_background_history WHERE campaign_id=? AND scene_id=? ORDER BY seq DESC LIMIT ?)",
       )
-      .run(campaignId, sceneId, campaignId, sceneId);
+      .run(campaignId, sceneId, campaignId, sceneId, MAX_SCENE_MAP_HISTORY);
     this.cursor(campaignId, sceneId, entry.seq);
     this.quota(campaignId);
   }
@@ -235,8 +241,8 @@ export class SceneMapHistory {
       )
       .get(campaignId)!;
     if (
-      z.number().parse(row.count) > 10000 ||
-      z.number().parse(row.bytes) > 8 * 1024 * 1024
+      z.number().parse(row.count) > MAX_CAMPAIGN_MAP_HISTORY ||
+      z.number().parse(row.bytes) > MAX_CAMPAIGN_MAP_HISTORY_BYTES
     )
       throw new StoreError(
         "Map history is full. Clear history in a scene before editing again.",

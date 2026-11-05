@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import { PROTOCOL_VERSION, serverMessageSchema } from "@tableloom/core";
 import { accessStatusSchema } from "@tableloom/core/access";
-import { campaignMembershipSchema } from "@tableloom/core/campaigns";
+import {
+  campaignMembershipSchema,
+  MAX_CAMPAIGNS,
+} from "@tableloom/core/campaigns";
 import { documentSchema } from "@tableloom/core/documents";
 import { assetSchema } from "@tableloom/core/assets";
 import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
@@ -87,6 +90,14 @@ async function verifyCampaignExport(
       importReady: z.literal(false),
       archiveSha256: z.string(),
       blockers: z.array(z.string()),
+      pendingValidation: z.array(z.string()),
+      destination: z.object({
+        campaignCapacity: z.object({
+          used: z.number().int().positive(),
+          accessUsed: z.number().int().positive(),
+          limit: z.literal(MAX_CAMPAIGNS),
+        }),
+      }),
       ownership: z.object({
         policy: z.literal("explicit-mapping-required"),
         subjects: z.array(z.object({ sourceId: z.uuid() })),
@@ -94,6 +105,8 @@ async function verifyCampaignExport(
     })
     .parse(await preflight.json());
   assert.deepEqual(report.blockers, []);
+  assert.ok(report.pendingValidation.includes("mapped-storage-quotas"));
+  assert.ok(!report.pendingValidation.includes("full-storage-quotas"));
   assert.equal(
     report.archiveSha256,
     createHash("sha256").update(serialized).digest("hex"),

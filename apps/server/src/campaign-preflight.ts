@@ -2,7 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { tableSchema, rollSchema } from "@tableloom/core";
-import { campaignSchema, sceneSchema } from "@tableloom/core/campaigns";
+import {
+  campaignSchema,
+  sceneSchema,
+  MAX_CAMPAIGNS,
+} from "@tableloom/core/campaigns";
 import { documentSchema } from "@tableloom/core/documents";
 import { instanceSchema } from "@tableloom/core/instances";
 import { assetSchema } from "@tableloom/core/assets";
@@ -19,6 +23,7 @@ import {
 } from "./campaign-transfer-format.js";
 import { entryOf } from "./scene-history-model.js";
 import { backgroundHistoryEntrySchema } from "./scene-map-history.js";
+import { validateCampaignStorageQuotas } from "./campaign-storage-quotas.js";
 
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -56,6 +61,7 @@ export function inspectCampaignTransfer(
   db: DatabaseSync,
 ) {
   const archive = parseCampaignTransfer(serialized);
+  validateCampaignStorageQuotas(archive.records);
   let report: ReturnType<typeof inspect>;
   try {
     report = inspect(archive, serialized, catalog, content, systems);
@@ -74,6 +80,11 @@ export function inspectCampaignTransfer(
   db.exec("BEGIN");
   try {
     const destination = campaignTransferCollisions(db, archive);
+    if (
+      destination.campaignCapacity.used >= MAX_CAMPAIGNS ||
+      destination.campaignCapacity.accessUsed >= MAX_CAMPAIGNS
+    )
+      report.blockers.push("campaign_capacity_reached");
     const stored = db.prepare(
       "SELECT digest FROM content_pack_bindings WHERE pack_id=? AND pack_version=?",
     );
@@ -85,6 +96,7 @@ export function inspectCampaignTransfer(
     )
       report.blockers.push("stored_pack_binding_changed");
     db.exec("COMMIT");
+    report.blockers.sort();
     return { ...report, destination };
   } catch (error) {
     db.exec("ROLLBACK");
@@ -488,10 +500,10 @@ function inspect(
     pendingValidation: [
       "history-causal-graph",
       "image-decoding",
-      "full-storage-quotas",
       "module-external-references",
       "ownership-plan",
       "resource-id-plan",
+      "mapped-storage-quotas",
       "atomic-import",
     ],
   };
@@ -508,7 +520,24 @@ function campaignTransferCollisions(
     "campaign_assets",
     "scene_history_entries",
   ] as const;
+  const capacity = z
+    .object({
+      campaigns: z.number().int().nonnegative(),
+      access: z.number().int().nonnegative(),
+    })
+    .parse(
+      db
+        .prepare(
+          "SELECT (SELECT COUNT(*) FROM campaign_records) AS campaigns,(SELECT COUNT(*) FROM access_campaigns) AS access",
+        )
+        .get(),
+    );
   return {
+    campaignCapacity: {
+      used: capacity.campaigns,
+      accessUsed: capacity.access,
+      limit: MAX_CAMPAIGNS,
+    },
     campaignIdExists: Boolean(
       db
         .prepare("SELECT 1 FROM campaign_records WHERE id=?")
