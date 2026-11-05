@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { X } from "lucide-react";
 import {
@@ -12,6 +12,12 @@ import type { ModuleManifest } from "@tableloom/module-sdk";
 import { accessRequest } from "./useAccess.js";
 import type { z } from "zod";
 import { CampaignExportDialog } from "./CampaignExportDialog.js";
+
+const CampaignImportReviewDialog = lazy(() =>
+  import("./CampaignImportReviewDialog.js").then((module) => ({
+    default: module.CampaignImportReviewDialog,
+  })),
+);
 
 type Listing = z.infer<typeof campaignListSchema>;
 export function CampaignDialog({
@@ -29,6 +35,7 @@ export function CampaignDialog({
     reads = useRef(0);
   const [campaigns, setCampaigns] = useState<Listing>([]);
   const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [busy, setBusy] = useState(true),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
@@ -185,6 +192,18 @@ export function CampaignDialog({
         ))}
       </ul>
       {member.role === "gm" && (
+        <section className="access-section">
+          <h2>Review a campaign file</h2>
+          <p>
+            Import reviews are available to the server host and make no saved
+            changes.
+          </p>
+          <button disabled={busy} onClick={() => setImportOpen(true)}>
+            Review campaign import…
+          </button>
+        </section>
+      )}
+      {member.role === "gm" && (
         <form className="campaign-form" onSubmit={(event) => void save(event)}>
           <h2>{editing ? "Edit this campaign" : "Create a campaign"}</h2>
           <label htmlFor="campaign-name">Campaign name</label>
@@ -288,6 +307,11 @@ export function CampaignDialog({
           {editing &&
             "Your settings draft is kept here. Reload it explicitly if it is out of date."}
         </p>
+      )}
+      {importOpen && member.role === "gm" && (
+        <Suspense fallback={<p role="status">Loading import review…</p>}>
+          <CampaignImportReviewDialog close={() => setImportOpen(false)} />
+        </Suspense>
       )}
       {exportOpen && member.role === "gm" && (
         <CampaignExportDialog

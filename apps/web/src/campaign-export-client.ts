@@ -5,16 +5,12 @@ import {
 } from "@tableloom/core/campaigns";
 import type { Member } from "@tableloom/core/access";
 
-// Download transport limit, matching the version-1 server transfer contract.
-export const MAX_EXPORT_DOWNLOAD_BYTES = 32 * 1024 * 1024;
-const exportMetadata = z.object({
-  format: z.literal("tableloom-campaign-export"),
-  version: z.literal(1),
-  privacy: z.literal("all-campaign-content-including-private"),
-  identityPolicy: z.literal("source-identifiers-without-access-grants"),
-  assetEncoding: z.literal("base64"),
-  campaign: campaignSchema,
-});
+import {
+  MAX_TRANSFER_FILE_BYTES,
+  transferFileMetadataSchema,
+} from "@tableloom/core/campaign-transfer";
+import { readTransferBytes } from "./transfer-http.js";
+export const MAX_EXPORT_DOWNLOAD_BYTES = MAX_TRANSFER_FILE_BYTES;
 type Campaign = z.infer<typeof campaignMembershipSchema>;
 export interface CampaignExportState {
   campaign: Campaign | null;
@@ -36,51 +32,6 @@ export type ExportRequest = (
 ) => Promise<Response>;
 export const exportRequest: ExportRequest = (path, init) => fetch(path, init);
 
-/** Bound streamed bytes before allocating a complete private download. */
-async function readBytes(
-  response: Response,
-  limit: number,
-  signal: AbortSignal,
-) {
-  const declared = response.headers.get("content-length");
-  if (
-    !/^application\/json(?:\s*;|$)/i.test(
-      response.headers.get("content-type") ?? "",
-    ) ||
-    (declared !== null &&
-      (!/^\d+$/.test(declared) || Number(declared) > limit)) ||
-    !response.body
-  ) {
-    await response.body?.cancel();
-    throw new Error("Unexpected download response.");
-  }
-  const reader = response.body.getReader(),
-    chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      signal.throwIfAborted();
-      const { done, value } = await reader.read();
-      signal.throwIfAborted();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) throw new Error("Download limit exceeded.");
-      chunks.push(value);
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {});
-    throw error;
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
 function responseFailure(status: number) {
   if (status === 401)
     return "Sign in again, then review this campaign before exporting.";
@@ -186,7 +137,7 @@ export class CampaignExportClient {
       await response.body?.cancel();
       throw new ExportFailure(responseFailure(response.status));
     }
-    return readBytes(response, limit, signal);
+    return readTransferBytes(response, limit, signal);
   }
   review() {
     if (this.flight) return Promise.resolve(false);
@@ -218,7 +169,7 @@ export class CampaignExportClient {
         MAX_EXPORT_DOWNLOAD_BYTES,
       );
       // Inspect only transfer metadata; saved resource contents belong to destination preflight.
-      const envelope = exportMetadata.parse(
+      const envelope = transferFileMetadataSchema.parse(
         JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
       );
       const { role: _role, ...reviewed } = campaign;

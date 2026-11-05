@@ -3018,3 +3018,85 @@ textarea::placeholder {
 .campaign-export-dialog h1 {
   padding-right: 12px;
 }
+
+.campaign-import-dialog {
+  width: min(620px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.campaign-import-dialog .dialog-close {
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+}
+.campaign-import-dialog h1 {
+  padding-right: 12px;
+}
+.campaign-import-dialog label {
+  margin-top: 12px;
+}
+.campaign-import-dialog select {
+  width: 100%;
+  padding: 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.campaign-import-dialog .transfer-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.transfer-consent input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+.campaign-import-dialog input[type="file"] {
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+}
+.import-person-choice {
+  padding: 12px;
+  margin: 16px 0;
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+}
+.import-person-choice legend {
+  font-weight: 700;
+  font-size: 14px;
+}
+.import-person-choice small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.import-person-choice p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.import-package-checks {
+  max-height: 180px;
+  overflow-y: auto;
+}
+.import-review-close {
+  margin-top: 20px;
+}
+.import-resolved-people {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.import-resolved-people li {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}

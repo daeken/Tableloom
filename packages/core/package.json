@@ -18,6 +18,7 @@
     "./scene-grid": "./src/scene-grid.ts",
     "./chat": "./src/chat.ts",
     "./content": "./src/content.ts",
-    "./instances": "./src/instances.ts"
+    "./instances": "./src/instances.ts",
+    "./campaign-transfer": "./src/campaign-transfer.ts"
   }
 }

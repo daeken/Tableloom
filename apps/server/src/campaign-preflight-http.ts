@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import {
+  importPeopleQuerySchema,
+  importPeoplePageSchema,
+} from "@tableloom/core/campaign-transfer";
+import { destinationSnapshot } from "./database.js";
 import type { ServerSystemDefinition } from "@tableloom/module-sdk/server";
 import type { InstalledCatalog } from "./store.js";
 import { StoreError } from "./store.js";
@@ -84,6 +89,33 @@ export async function registerCampaignPreflightRoutes(
         reply.raw.removeListener("close", cancel);
       }
     };
+    api.get(
+      "/api/campaign-imports/people",
+      {
+        onRequest: async (request) => {
+          host(request);
+        },
+      },
+      async (request) => {
+        const query = importPeopleQuerySchema.parse(request.query);
+        return destinationSnapshot(options.database, () => {
+          const current = host(request),
+            q = query.q ?? "";
+          const people = options.database
+            .prepare(
+              `SELECT u.id,u.name FROM access_users u
+          WHERE u.id > ? AND (u.id=? OR EXISTS(SELECT 1 FROM access_memberships m WHERE m.user_id=u.id))
+          AND (?='' OR instr(lower(u.name),lower(?))>0) ORDER BY u.id LIMIT 101`,
+            )
+            .all(query.after ?? "", current.id, q, q);
+          return importPeoplePageSchema.parse({
+            host: { id: current.id, name: current.name },
+            people: people.slice(0, 100),
+            nextCursor: people.length > 100 ? people[99]!.id : null,
+          });
+        });
+      },
+    );
     api.post(
       "/api/campaign-imports/preflight",
       {

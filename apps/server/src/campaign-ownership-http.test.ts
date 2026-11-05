@@ -683,3 +683,97 @@ test("import rejects changed package bindings and revoked host sessions after as
     await f.close();
   }
 });
+
+test("import people directory is host-only, strictly paginated and read-only; membership-free attribution profiles are excluded", async () => {
+  const f = await setup();
+  try {
+    const path = "/api/campaign-imports/people",
+      get = (url = path, cookie = f.cookie) =>
+        f.app.inject({ method: "GET", url, headers: { cookie } });
+    assert.equal((await get(path, "")).statusCode, 401);
+    const player = await f.player();
+    assert.equal((await get(path, player.cookie)).statusCode, 403);
+    f.db
+      .prepare("UPDATE access_memberships SET role='gm' WHERE user_id=?")
+      .run(player.id);
+    assert.equal(
+      (await get(path, player.cookie)).statusCode,
+      403,
+      "A campaign GM is not the server host",
+    );
+    for (const query of [
+      "?unexpected=1",
+      "?after=not-a-uuid",
+      `?q=${"x".repeat(33)}`,
+    ])
+      assert.equal((await get(path + query)).statusCode, 400);
+    const tableId = String(
+      f.db
+        .prepare(
+          "SELECT table_id FROM access_memberships WHERE user_id=? LIMIT 1",
+        )
+        .get(f.hostId)!.table_id,
+    );
+    const orphan = randomUUID();
+    f.db
+      .prepare("INSERT INTO access_users(id,name,created_at) VALUES(?,?,0)")
+      .run(orphan, "Unclaimed identity");
+    const people = Array.from({ length: 105 }, (_, i) => ({
+      id: randomUUID(),
+      name:
+        i < 2
+          ? "Same local name"
+          : i === 2
+            ? "Zoë literal%"
+            : "Listed person " + i,
+    }));
+    for (const person of people) {
+      f.db
+        .prepare("INSERT INTO access_users(id,name,created_at) VALUES(?,?,0)")
+        .run(person.id, person.name);
+      f.db
+        .prepare(
+          "INSERT INTO access_memberships(user_id,table_id,role) VALUES(?,?,'player')",
+        )
+        .run(person.id, tableId);
+    }
+    const before = contents(f.db),
+      first = await get();
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.headers["cache-control"], "no-store");
+    const a = first.json() as {
+      host: { id: string; name: string };
+      people: { id: string; name: string }[];
+      nextCursor: string | null;
+    };
+    assert.equal(a.host.id, f.hostId);
+    assert.equal(a.people.length, 100);
+    assert.equal(a.nextCursor, a.people.at(-1)!.id);
+    const second = await get(path + "?after=" + a.nextCursor),
+      b = second.json() as typeof a;
+    assert.equal(second.statusCode, 200);
+    assert.equal(b.nextCursor, null);
+    const combined = [...a.people, ...b.people];
+    assert.equal(new Set(combined.map((p) => p.id)).size, 107);
+    assert.ok(!combined.some((p) => p.id === orphan));
+    assert.ok(
+      combined.every((p) => Object.keys(p).sort().join(",") === "id,name"),
+    );
+    const matches = await get(path + "?q=Same%20local"),
+      same = matches.json() as typeof a;
+    assert.equal(same.people.length, 2);
+    assert.notEqual(same.people[0]!.id, same.people[1]!.id);
+    const literal = await get(path + "?q=%25");
+    assert.equal(
+      literal.json().people.length,
+      1,
+      "Search treats % literally rather than as a wildcard",
+    );
+    assert.equal(contents(f.db), before);
+    const logout = await f.post("/api/access/logout", "{}", f.cookie);
+    assert.equal(logout.statusCode, 200);
+    assert.equal((await get()).statusCode, 401);
+  } finally {
+    await f.close();
+  }
+});

@@ -6,7 +6,8 @@ import { campaignSchema, versionPinSchema } from "@tableloom/core/campaigns";
 import { StoreError, type TableStore } from "./store.js";
 import type { ContentCatalog } from "./content-catalog.js";
 
-export const MAX_CAMPAIGN_EXPORT_BYTES = 32 * 1024 * 1024;
+import { MAX_TRANSFER_FILE_BYTES } from "@tableloom/core/campaign-transfer";
+export const MAX_CAMPAIGN_EXPORT_BYTES = MAX_TRANSFER_FILE_BYTES;
 export const MAX_CAMPAIGN_EXPORT_ROWS = 100_000;
 const uuid = z.uuid(),
   positive = z.number().int().positive(),

@@ -7,42 +7,18 @@ import type { inspectCampaignTransfer } from "./campaign-preflight.js";
 import { MAX_CAMPAIGN_EXPORT_BYTES } from "./campaign-export.js";
 import { destinationSnapshot, type DestinationReadMode } from "./database.js";
 
+import {
+  ownershipPlanSchema,
+  FRESH_RESOURCE_POLICY,
+  type OwnershipPlan,
+} from "@tableloom/core/campaign-transfer";
+export {
+  ownershipPlanSchema,
+  FRESH_RESOURCE_POLICY,
+} from "@tableloom/core/campaign-transfer";
+export type { OwnershipPlan } from "@tableloom/core/campaign-transfer";
 export const MAX_OWNERSHIP_REVIEW_BYTES = 65 * 1024 * 1024;
-export const FRESH_RESOURCE_POLICY =
-  "fresh-campaign-and-resource-identifiers" as const;
 const MAX_PLAN_BYTES = 512 * 1024;
-const assignmentSchema = z
-  .object({
-    sourceId: z.uuid(),
-    target: z.discriminatedUnion("kind", [
-      z
-        .object({
-          kind: z.literal("existing"),
-          userId: z.uuid(),
-          role: memberSchema.shape.role,
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("new"),
-          name: memberSchema.shape.name,
-          role: memberSchema.shape.role,
-        })
-        .strict(),
-      z.object({ kind: z.literal("unclaimed") }).strict(),
-    ]),
-  })
-  .strict();
-export const ownershipPlanSchema = z
-  .object({
-    version: z.literal(1),
-    archiveSha256: z.string().regex(/^[a-f0-9]{64}$/),
-    acknowledge: z.literal("reviewed-private-content-and-access"),
-    acknowledgeMerges: z.boolean(),
-    assignments: z.array(assignmentSchema).max(1000),
-  })
-  .strict();
-export type OwnershipPlan = z.infer<typeof ownershipPlanSchema>;
 
 export function parseOwnershipPlan(raw: unknown): OwnershipPlan {
   // Charge array length before Zod clones/validates individual entries.
