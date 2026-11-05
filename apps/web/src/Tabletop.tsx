@@ -1,3 +1,4 @@
+import type { BackgroundView } from "@tableloom/core/scene-map";
 import { ResizeSelectionDialog } from "./ResizeSelectionDialog.js";
 import { ResizeTokenDialog } from "./ResizeTokenDialog.js";
 import { drawingBounds, resizedDrawingPoints } from "@tableloom/core/geometry";
@@ -65,6 +66,9 @@ type Gesture =
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
   state: TableView;
+  background: BackgroundView | null;
+  campaignId: string;
+  sceneId: string;
   member: Member | null;
   tool: Tool;
   color: string;
@@ -77,6 +81,9 @@ interface Props {
 const clamp = (v: number) => Math.max(-10000, Math.min(10000, v));
 export function Tabletop({
   state,
+  background,
+  campaignId,
+  sceneId,
   member,
   tool,
   color,
@@ -89,6 +96,7 @@ export function Tabletop({
   const appRef = useRef<Application | null>(null);
   const worldRef = useRef<Container | null>(null);
   const [ready, setReady] = useState(false);
+  const [mapFailure, setMapFailure] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
@@ -147,6 +155,7 @@ export function Tabletop({
       .init({
         resizeTo: element,
         background: "#eae7dd",
+        backgroundAlpha: 0,
         antialias: true,
         resolution: Math.min(devicePixelRatio, 2),
         autoDensity: true,
@@ -639,6 +648,31 @@ export function Tabletop({
           zoom(event.deltaY > 0 ? 0.92 : 1.08, local(event));
       }}
     >
+      {background && (
+        <img
+          key={background.imageId}
+          className="scene-map-image"
+          src={`/api/campaigns/${campaignId}/scene-map/${sceneId}/${background.imageId}/content`}
+          alt="Scene background map"
+          draggable={false}
+          onLoad={() => setMapFailure(null)}
+          onError={() => setMapFailure(background.imageId)}
+          style={{
+            left: view.x + background.position.x * view.scale,
+            top: view.y + background.position.y * view.scale,
+            width: background.width * view.scale,
+            height: background.height * view.scale,
+          }}
+        />
+      )}
+      {background && mapFailure === background.imageId && (
+        <div className="map-load-error" role="status">
+          The map is unavailable. Reconnect or ask the GM to review it.
+        </div>
+      )}
+      {background?.visibility === "gm" && (
+        <div className="private-map-badge">GM-only map</div>
+      )}
       {failure && (
         <div className="canvas-message" role="alert">
           {failure}
@@ -648,6 +682,7 @@ export function Tabletop({
         <div className="canvas-message">Unfolding the table…</div>
       )}
       {ready &&
+        !background &&
         state.drawings.length === 0 &&
         state.tokens.length === 0 &&
         !gesture && (

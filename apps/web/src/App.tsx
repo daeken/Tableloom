@@ -1,3 +1,4 @@
+import { SceneMapDialog } from "./SceneMapDialog.js";
 import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -70,6 +71,7 @@ export function App() {
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sceneOpen, setSceneOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
@@ -126,6 +128,7 @@ export function App() {
     setInviteOpen(false);
     setOwnershipOpen(false);
     setAssetsOpen(false);
+    setMapOpen(false);
   }, [viewerKey]);
 
   async function logout() {
@@ -265,6 +268,15 @@ export function App() {
               Map assets
             </button>
           )}
+          {member?.role === "gm" && table.context && (
+            <button
+              className="add-cast manage-scenes"
+              disabled={!connected}
+              onClick={() => setMapOpen(true)}
+            >
+              Scene map
+            </button>
+          )}
           <div className="rail-section">
             <span className="eyebrow">GAME SYSTEM</span>
             <div className="system-select">
@@ -396,6 +408,9 @@ export function App() {
                 }
                 member={member}
                 state={state}
+                background={table.background}
+                campaignId={member?.tableId ?? ""}
+                sceneId={table.context?.sceneId ?? ""}
                 tool={tool}
                 color={color}
                 tokenName={tokenName}
@@ -651,6 +666,15 @@ export function App() {
           modules={modules}
           accept={accept}
           close={() => setCampaignOpen(false)}
+        />
+      )}
+      {mapOpen && member?.role === "gm" && table.context && (
+        <SceneMapDialog
+          key={`${viewerKey}:${contextKey(table.context)}`}
+          context={table.context}
+          version={table.backgroundVersion}
+          enabled={connected}
+          close={() => setMapOpen(false)}
         />
       )}
       {assetsOpen && member?.role === "gm" && (

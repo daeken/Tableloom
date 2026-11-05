@@ -1,3 +1,4 @@
+import type { BackgroundView } from "@tableloom/core/scene-map";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PROTOCOL_VERSION } from "@tableloom/core";
 import type { CommandInput, TableView } from "@tableloom/core";
@@ -16,6 +17,8 @@ export function useTable(
     viewerKey: string;
     state: TableView;
     history: SceneHistory;
+    background: BackgroundView | null;
+    backgroundVersion: number | null;
     context: CommandContext;
     campaignName: string;
     sceneName: string;
@@ -107,6 +110,8 @@ export function useTable(
     state: current ? snapshot.state : null,
     context,
     history: current ? snapshot.history : null,
+    background: current ? snapshot.background : null,
+    backgroundVersion: current ? snapshot.backgroundVersion : null,
     campaignName: current ? snapshot.campaignName : "",
     sceneName: current ? snapshot.sceneName : "",
     status: connection.current?.viewerKey === viewerKey ? status : "connecting",

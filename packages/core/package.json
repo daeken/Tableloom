@@ -13,6 +13,7 @@
     "./permissions": "./src/permissions.ts",
     "./server": "./src/server.ts",
     "./geometry": "./src/geometry.ts",
-    "./assets": "./src/assets.ts"
+    "./assets": "./src/assets.ts",
+    "./scene-map": "./src/scene-map.ts"
   }
 }

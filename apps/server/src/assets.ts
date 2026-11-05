@@ -12,6 +12,7 @@ import {
 import type { Member } from "@tableloom/core/access";
 import { memberSchema } from "@tableloom/core/access";
 import { transaction } from "./database.js";
+import { backgroundMapSchema } from "@tableloom/core/scene-map";
 import { StoreError } from "./store.js";
 import { sanitizePng } from "./png.js";
 const fields =
@@ -130,14 +131,59 @@ export class AssetStore {
       return asset;
     });
   }
+  metadata(actor: Member, id: string) {
+    const member = this.gm(actor);
+    z.uuid().parse(id);
+    const row = this.db
+      .prepare(
+        `SELECT ${fields} FROM campaign_assets WHERE campaign_id=? AND id=?`,
+      )
+      .get(member.tableId, id);
+    if (!row) throw missing();
+    return assetSchema.parse(row);
+  }
+  contentForScene(actor: Member, sceneId: string, imageId: string) {
+    return transaction(this.db, () => {
+      const member = memberSchema.parse(actor);
+      z.uuid().parse(sceneId);
+      z.uuid().parse(imageId);
+      const role = this.db
+          .prepare(
+            "SELECT role FROM access_memberships WHERE user_id=? AND table_id=?",
+          )
+          .get(member.id, member.tableId),
+        campaign = this.db
+          .prepare("SELECT active_scene_id FROM campaign_records WHERE id=?")
+          .get(member.tableId);
+      if (!role || campaign?.active_scene_id !== sceneId) throw missing();
+      const row = this.db
+        .prepare(
+          "SELECT asset_id,map_json FROM scene_backgrounds WHERE campaign_id=? AND scene_id=? AND image_id=?",
+        )
+        .get(member.tableId, sceneId, imageId);
+      if (!row) throw missing();
+      const map = backgroundMapSchema.parse(JSON.parse(String(row.map_json)));
+      if (map.imageId !== imageId || map.assetId !== row.asset_id)
+        throw new Error("Stored background references disagree.");
+      if (
+        z.enum(["gm", "player"]).parse(role.role) !== "gm" &&
+        map.visibility !== "public"
+      )
+        throw missing();
+      return this.read(member.tableId, map.assetId);
+    });
+  }
   content(actor: Member, id: string) {
     const member = this.gm(actor, true);
+    return this.read(member.tableId, id);
+  }
+  private read(campaignId: string, id: string) {
     z.uuid().parse(id);
     const row = this.db
       .prepare(
         `SELECT ${fields},sha256,bytes FROM campaign_assets WHERE campaign_id=? AND id=?`,
       )
-      .get(member.tableId, id);
+      .get(campaignId, id);
     if (!row) throw missing();
     const { bytes: raw, sha256, ...metadata } = row,
       asset = assetSchema.parse(metadata);
@@ -158,11 +204,30 @@ export class AssetStore {
     return { asset, bytes };
   }
   delete(actor: Member, id: string) {
-    this.gm(actor);
-    z.uuid().parse(id);
-    const removed = this.db
-      .prepare("DELETE FROM campaign_assets WHERE campaign_id=? AND id=?")
-      .run(actor.tableId, id);
-    if (!removed.changes) throw missing();
+    return transaction(this.db, () => {
+      const member = this.gm(actor);
+      z.uuid().parse(id);
+      const hasMaps = this.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='scene_backgrounds'",
+        )
+        .get();
+      if (
+        hasMaps &&
+        this.db
+          .prepare(
+            "SELECT 1 FROM scene_backgrounds WHERE campaign_id=? AND asset_id=? LIMIT 1",
+          )
+          .get(member.tableId, id)
+      )
+        throw new StoreError(
+          "Remove this asset from every scene map before deleting it.",
+          409,
+        );
+      const removed = this.db
+        .prepare("DELETE FROM campaign_assets WHERE campaign_id=? AND id=?")
+        .run(member.tableId, id);
+      if (!removed.changes) throw missing();
+    });
   }
 }

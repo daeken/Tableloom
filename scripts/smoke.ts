@@ -1,3 +1,4 @@
+import { backgroundStateSchema } from "@tableloom/core/scene-map";
 import { assetSchema, assetPageSchema } from "@tableloom/core/assets";
 import { pngFixture } from "../apps/server/src/png-fixture.js";
 import { spawn } from "node:child_process";
@@ -966,6 +967,77 @@ try {
     );
     assert.equal(unauthenticatedImage.status, 401);
     await unauthenticatedImage.text();
+    const mapRoot = `${url}/api/campaigns/${campaign.id}/scene-map`,
+      controls = await fetch(mapRoot, { headers: { Cookie: nextCookie } }),
+      mapState = backgroundStateSchema.parse(await controls.json());
+    const privateMapView = snapshot(
+      live,
+      (message) =>
+        message.background?.visibility === "gm" &&
+        message.backgroundVersion === 1,
+    );
+    const placeMap = await fetch(`${mapRoot}/set`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        context: mapState.context,
+        expectedVersion: 0,
+        assetId: asset.id,
+        position: { x: 20, y: 30 },
+        width: 320,
+      }),
+    });
+    assert.equal(placeMap.status, 200);
+    const placedMap = backgroundStateSchema.parse(await placeMap.json());
+    assert.equal(
+      (await privateMapView).background!.imageId,
+      placedMap.map!.imageId,
+    );
+    const protectedMap = await fetch(
+      `${mapRoot}/${mapState.context.sceneId}/${placedMap.map!.imageId}/content`,
+      { headers: { Cookie: nextCookie } },
+    );
+    assert.equal(protectedMap.status, 200);
+    assert.deepEqual(Buffer.from(await protectedMap.arrayBuffer()), png);
+    const stillUsed = await fetch(`${assetRoot}/${asset.id}/delete`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: "{}",
+    });
+    assert.equal(stillUsed.status, 409);
+    await stillUsed.json();
+    const publicMapView = snapshot(
+      live,
+      (message) =>
+        message.background?.visibility === "public" &&
+        message.backgroundVersion === 2,
+    );
+    const revealMap = await fetch(`${mapRoot}/visibility`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        context: mapState.context,
+        expectedVersion: 1,
+        visibility: "public",
+        acknowledgeReveal: true,
+      }),
+    });
+    assert.equal(revealMap.status, 200);
+    await revealMap.json();
+    await publicMapView;
+    const removedMapView = snapshot(
+      live,
+      (message) =>
+        message.background === null && message.backgroundVersion === 3,
+    );
+    const removeMap = await fetch(`${mapRoot}/remove`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({ context: mapState.context, expectedVersion: 2 }),
+    });
+    assert.equal(removeMap.status, 200);
+    await removeMap.json();
+    await removedMapView;
     const removedAsset = await fetch(`${assetRoot}/${asset.id}/delete`, {
       method: "POST",
       headers: documentHeaders,
@@ -1013,5 +1085,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG asset upload/list/download/removal, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG asset upload/list/download/removal and private/revealed scene backgrounds, roll archive/cleanup, and clean shutdown.",
 );

@@ -1,8 +1,9 @@
+import { backgroundViewSchema } from "./scene-map.js";
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -453,6 +454,8 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("snapshot"),
     protocolVersion: z.literal(PROTOCOL_VERSION),
     history: sceneHistorySchema,
+    background: backgroundViewSchema.nullable(),
+    backgroundVersion: z.number().int().nonnegative().nullable(),
     state: tableViewSchema,
     context: commandContextSchema,
     campaignName: z.string().min(1).max(120),

@@ -47,6 +47,8 @@ function fixture() {
         forces.push(force);
         return {
           type: "snapshot",
+          background: null,
+          backgroundVersion: null,
           protocolVersion: PROTOCOL_VERSION,
           history: { undo: null, redo: null },
           state: projectTable(createTable(), {
@@ -249,6 +251,8 @@ test("large single snapshots remain supported without accumulating another seria
         });
         return {
           type: "snapshot",
+          background: null,
+          backgroundVersion: null,
           protocolVersion: PROTOCOL_VERSION,
           history: { undo: null, redo: null },
           state: {

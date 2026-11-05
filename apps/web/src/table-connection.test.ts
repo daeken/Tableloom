@@ -30,6 +30,8 @@ const member = {
 };
 const snapshot = (next = context) => ({
   type: "snapshot" as const,
+  background: null,
+  backgroundVersion: null,
   protocolVersion: PROTOCOL_VERSION,
   history: { undo: null, redo: null },
   state: projectTable(createTable(), member),
@@ -249,7 +251,7 @@ test("protocol mismatch, malformed snapshots, foreign campaigns, and policy clos
   for (const message of [
     { ...snapshot(), protocolVersion: PROTOCOL_VERSION - 1 },
     { ...snapshot(), context: { ...context, campaignId: crypto.randomUUID() } },
-    { type: "snapshot", state: {} },
+    { type: "snapshot", background: null, backgroundVersion: null, state: {} },
     "invalid",
   ]) {
     const f = fixture();

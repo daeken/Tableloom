@@ -1776,3 +1776,84 @@ p {
   border: 1px solid #9b5146;
   border-radius: 5px;
 }
+.tabletop {
+  background: #eae7dd;
+}
+.tabletop .scene-map-image {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+.tabletop canvas {
+  z-index: 1;
+}
+.tabletop > :not(canvas):not(.scene-map-image) {
+  z-index: 2;
+}
+.private-map-badge {
+  position: absolute;
+  top: 16px;
+  left: 180px;
+  padding: 3px 6px;
+  background: #faf9f5;
+  color: #9b5146;
+  border-radius: 4px;
+  font-size: 10px;
+}
+.map-load-error {
+  position: absolute;
+  left: 16px;
+  bottom: 70px;
+  background: #faf9f5;
+  padding: 8px;
+  font-size: 12px;
+}
+.scene-map-dialog {
+  width: min(550px, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.scene-map-dialog > p {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.scene-map-dialog select {
+  width: 100%;
+  padding: 9px;
+  color: #405f4d;
+  background: #fffef8;
+}
+.map-fields {
+  display: flex;
+  gap: 10px;
+  margin: 14px 0;
+}
+.map-fields label {
+  flex: 1;
+  min-width: 0;
+}
+.map-fields input {
+  padding: 8px;
+}
+.scene-map-dialog > .form-error {
+  color: #9b5146;
+}
+.scene-map-dialog .map-reveal-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 18px 0 8px;
+}
+.map-reveal-check input {
+  width: auto;
+}
+.map-action {
+  padding: 8px 12px;
+  border: 1px solid #d8ddcd;
+  border-radius: 5px;
+  color: #405f4d;
+  margin: 4px;
+}
+.tabletop {
+  isolation: isolate;
+}

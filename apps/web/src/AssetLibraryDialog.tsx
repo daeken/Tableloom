@@ -172,8 +172,8 @@ export function AssetLibraryDialog({
       <span className="eyebrow">PRIVATE GM LIBRARY</span>
       <h1 id="asset-library-title">Maps & images</h1>
       <p>
-        Store maps here before sharing them. These uploads stay private to your
-        campaign’s GMs. Battlefield placement is coming next.
+        Your asset library is GM-only. Use Scene map to place an image, then
+        reveal the background when your group is ready.
       </p>
       <p>
         {usage.count}/200 images · {(usage.bytes / 1024 / 1024).toFixed(1)}/100

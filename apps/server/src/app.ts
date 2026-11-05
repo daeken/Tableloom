@@ -1,3 +1,5 @@
+import { SceneMapStore } from "./scene-map.js";
+import { registerSceneMapRoutes } from "./scene-map-http.js";
 import { AssetStore } from "./assets.js";
 import { registerAssetRoutes } from "./assets-http.js";
 import Fastify from "fastify";
@@ -68,6 +70,7 @@ export async function createApp(options: {
   let bindings: CommandBindings;
   let sceneHistory: SceneHistoryStore;
   let assets: AssetStore;
+  let sceneMaps: SceneMapStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
@@ -77,6 +80,7 @@ export async function createApp(options: {
     bindings = new CommandBindings(database);
     sceneHistory = new SceneHistoryStore(database, store);
     assets = new AssetStore(database, now);
+    sceneMaps = new SceneMapStore(database, store, assets);
   } catch (error) {
     database.close();
     throw error;
@@ -130,11 +134,13 @@ export async function createApp(options: {
     const scene = store.getScene(campaign.id, campaign.activeSceneId);
     const view = projectTable(store.load(member.tableId), member);
     const history = sceneHistory.status(member);
-    const fingerprint = `${contextKey(context)}:${view.version}:${JSON.stringify(history)}`;
+    const background = sceneMaps.project(member);
+    const fingerprint = `${contextKey(context)}:${view.version}:${JSON.stringify(history)}:${JSON.stringify(background)}`;
     if (!force && sentVersions.get(socket) === fingerprint) return null;
     sentVersions.set(socket, fingerprint);
     return {
       type: "snapshot",
+      ...background,
       protocolVersion: PROTOCOL_VERSION,
       history,
       state: view,
@@ -198,6 +204,7 @@ export async function createApp(options: {
   });
   registerDocumentRoutes(app, access, documents);
   await registerAssetRoutes(app, access, assets);
+  registerSceneMapRoutes(app, access, sceneMaps, assets, refreshCampaign);
   registerRollHistoryRoutes(app, access, history, refreshCampaign);
   app.get("/api/health", async () => ({
     status: "ok",
