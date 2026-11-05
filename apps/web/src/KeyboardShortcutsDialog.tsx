@@ -49,6 +49,13 @@ export function KeyboardShortcutsDialog({
             </td>
           </tr>
           <tr>
+            <th scope="row">Create an object</th>
+            <td>
+              <kbd>N</kbd> Enter coordinates for a token, room or text label.
+              Tab between fields, then Create shared object.
+            </td>
+          </tr>
+          <tr>
             <th scope="row">Select objects</th>
             <td>
               <kbd>L</kbd> Open searchable object choices; use Tab and Space,

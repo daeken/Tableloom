@@ -277,6 +277,7 @@ Click the battlefield or Tab to its **Shared battlefield** region to focus it; a
 | `P`, `R`, `T` | Freehand pen, Room, Text label |
 | `O`, `E` | Token placement, Eraser |
 | `L` | Open searchable editable-object choices |
+| `N` | Create a token, room or text label using exact coordinates |
 | Arrow keys / Shift + arrow | Move selected objects by one / ten canvas units; with Snap on, one / ten grid spacings |
 | `S` | Toggle local Snap to grid |
 | `+` or `=`, `-`, `0` | Zoom in, zoom out, reset camera |
@@ -297,6 +298,14 @@ Future refinements include keyboard creation/coordinate entry, numeric ruler end
 Focus **Shared battlefield**, press **L** or choose **Select objects…**, then search by name, text or ID. Only current-scene objects you can edit appear, with at most 50 rows per page and 100 selected objects. Choices persist across filtering/pages; missing or no-longer-editable choices block confirmation instead of silently shrinking the set. Tab/Space selects checkboxes, **Use selection** applies the local set and switches to Select, and Cancel/Escape returns battlefield focus without applying a draft.
 
 With the battlefield focused in Select mode, arrows move the complete selection by **one canvas unit**, or **ten** with Shift. With Snap on, these become one/ten current grid spacings, preserving existing offsets rather than realigning an off-grid group. Movement clamps rigidly at world bounds and uses the existing version-checked `objects.move` command, permissions and durable undo/redo. Each accepted keypress is one edit. Held repeats, pending edits, active pointer gestures and disconnected views do not issue moves. Fields/dialogs/native browser modifiers retain their own keys; arrows with no editable Select-mode selection retain native behavior. Keyboard creation and the broader accessibility audit remain in the README task list.
+
+## Keyboard object creation
+
+Focus **Shared battlefield** and press **N**, or choose **Create object…** in the battlefield/selection controls. The native modal focuses Object type and offers Token, Room and Text label. The active Room/Text tool preselects that kind; other tools start with Token. Draft coordinates begin at the rounded visible center, frozen when the dialog opens. Tab/Shift-Tab navigate fields; Enter submits the form when valid (textareas retain native line breaks). Cancel/Escape discards the draft and closing restores battlefield focus. Scene/viewer/context replacement unmounts the draft with the tabletop.
+
+Coordinates are exact canvas units, independent of zoom and Snap: token center or room/label upper-left corner, with rightward X and downward Y. Numbers must be finite and within ±10000. Room dimensions must be positive and its second corner must remain in bounds. Text uses the existing neutral label box and style preview; a box that would require clamping is rejected instead of silently shifting the entered anchor. Token names, colors, plain text and styles use existing core validation; blank numeric fields never become zero. Tokens retain the server's default radius and can be resized after creation. Freehand creation still uses pointer input.
+
+Creation issues existing `token.add` / `drawing.add` commands with a fresh object ID; the server assigns ownership, versions and history. No new wire/storage format or authorization path is introduced. Offline, pending, repeated-key and active-gesture shortcut guards apply. The dialog checks live limits of 200 tokens / 2000 drawings; the server remains authoritative if a concurrent edit fills the scene. A successful send closes the draft, with confirmation/rejection handled by the existing command UI.
 
 ## Pointer ownership and cancellation
 

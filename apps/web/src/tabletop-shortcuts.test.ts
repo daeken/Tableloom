@@ -245,3 +245,31 @@ test("object lookup and arrow nudges require battlefield scope, preserve native 
     });
   assert.equal(tabletopShortcut(key("l"), scope({ focused: false })), null);
 });
+
+test("coordinate creation requires battlefield focus and an idle live scene but no selection", () => {
+  assert.deepEqual(
+    tabletopShortcut(key("n"), scope({ editableSelection: false })),
+    { type: "create" },
+  );
+  for (const changes of [{ focused: false }, { dialogOpen: true }])
+    assert.equal(tabletopShortcut(key("n"), scope(changes)), null);
+  for (const changes of [
+    { pending: true },
+    { enabled: false },
+    { gesture: true },
+  ])
+    assert.deepEqual(tabletopShortcut(key("n"), scope(changes)), {
+      type: "blocked",
+    });
+  assert.deepEqual(tabletopShortcut(key("n", { repeat: true }), scope()), {
+    type: "blocked",
+  });
+  for (const changes of [
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { shiftKey: true },
+    { isComposing: true },
+  ])
+    assert.equal(tabletopShortcut(key("n", changes), scope()), null);
+});

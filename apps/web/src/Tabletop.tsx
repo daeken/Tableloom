@@ -1,3 +1,5 @@
+import { CreateObjectDialog } from "./CreateObjectDialog.js";
+import type { CreationKind } from "./object-creation.js";
 import { ObjectPickerDialog } from "./ObjectPickerDialog.js";
 import { keyboardMoveCommand } from "./keyboard-objects.js";
 import { PointerSession, withinTap } from "./pointer-session.js";
@@ -162,6 +164,10 @@ export function Tabletop({
   const gestureScope = `${tool}:${grid.version}`;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [objectPickerOpen, setObjectPickerOpen] = useState(false);
+  const [creation, setCreation] = useState<{
+    anchor: Point;
+    kind: CreationKind;
+  } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
   useEffect(() => setSelectionActionsOpen(false), [tool, selected.join("|")]);
@@ -1050,6 +1056,16 @@ export function Tabletop({
   function focusBattlefield() {
     requestAnimationFrame(() => host.current?.focus({ preventScroll: true }));
   }
+  function openCreation() {
+    if (!enabled || !ready || pending || session.current.active) return;
+    setCreation({
+      anchor: {
+        x: clamp(Math.round((viewport.width / 2 - view.x) / view.scale)),
+        y: clamp(Math.round((viewport.height / 2 - view.y) / view.scale)),
+      },
+      kind: tool === "rectangle" || tool === "text" ? tool : "token",
+    });
+  }
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     const action = tabletopShortcut(
       {
@@ -1104,6 +1120,9 @@ export function Tabletop({
         if (command) send(command);
         break;
       }
+      case "create":
+        openCreation();
+        break;
       case "objects":
         setObjectPickerOpen(true);
         break;
@@ -1303,9 +1322,26 @@ export function Tabletop({
         Share my cursor
       </label>
       <span className="keyboard-focus-hint" id="tabletop-keyboard-hint">
-        Click or Tab to focus the battlefield. Press L to select objects; in
-        Select mode use arrow keys to move them. Press ? for keyboard shortcuts.
+        Click or Tab to focus the battlefield. Press N to create an object or L
+        to select objects; in Select mode use arrow keys to move them. Press ?
+        for keyboard shortcuts.
       </span>
+      {creation && (
+        <CreateObjectDialog
+          anchor={creation.anchor}
+          kind={creation.kind}
+          color={color}
+          tokenName={tokenName}
+          state={state}
+          enabled={enabled && ready}
+          pending={pending}
+          send={send}
+          close={() => {
+            setCreation(null);
+            focusBattlefield();
+          }}
+        />
+      )}
       {objectPickerOpen && (
         <ObjectPickerDialog
           state={state}
@@ -1359,6 +1395,13 @@ export function Tabletop({
           >
             Select objects…
           </button>
+          <button
+            disabled={!enabled || !ready || pending || !!gesture}
+            aria-keyshortcuts="N"
+            onClick={openCreation}
+          >
+            Create object…
+          </button>
           {(["drawing", "token"] as const).map((kind) => (
             <button
               key={kind}
@@ -1401,6 +1444,14 @@ export function Tabletop({
             <span>{selectionActionsOpen ? "Hide actions" : "Actions…"}</span>
           </button>
           <div className="selection-actions-body" id="selection-actions-body">
+            <button
+              disabled={!enabled || !ready || pending || !!gesture}
+              aria-keyshortcuts="N"
+              onClick={openCreation}
+            >
+              Create object…
+            </button>
+
             <button
               onClick={() => {
                 setGesture(null);

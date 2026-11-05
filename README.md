@@ -60,7 +60,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Fit dense selection actions and resize/review dialogs on narrow screens.
 - [ ] **Needs device access:** verify touch/pen behavior on real hardware.
 - [x] Add keyboard object selection and bounded arrow-key movement with existing undo/redo.
-- [ ] **Next:** finish keyboard creation/geometry workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
+- [x] Add keyboard creation of tokens, rooms and text labels using exact coordinate entry.
+- [ ] **Next:** finish remaining keyboard geometry workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
 ### Make game modules playable
