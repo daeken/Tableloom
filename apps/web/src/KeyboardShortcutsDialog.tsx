@@ -71,6 +71,13 @@ export function KeyboardShortcutsDialog({
             </td>
           </tr>
           <tr>
+            <th scope="row">Position selection</th>
+            <td>
+              <kbd>G</kbd> Enter exact X/Y for the selected token, drawing or
+              group. Select mode only.
+            </td>
+          </tr>
+          <tr>
             <th scope="row">Snap</th>
             <td>
               <kbd>S</kbd> Toggle local snapping

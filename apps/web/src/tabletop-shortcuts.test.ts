@@ -273,3 +273,29 @@ test("coordinate creation requires battlefield focus and an idle live scene but 
   ])
     assert.equal(tabletopShortcut(key("n", changes), scope()), null);
 });
+
+test("exact positioning requires an editable selection, idle live scene and battlefield focus", () => {
+  assert.deepEqual(tabletopShortcut(key("g"), scope()), { type: "position" });
+  for (const changes of [
+    { editableSelection: false },
+    { pending: true },
+    { enabled: false },
+    { gesture: true },
+  ])
+    assert.deepEqual(tabletopShortcut(key("g"), scope(changes)), {
+      type: "blocked",
+    });
+  for (const changes of [{ focused: false }, { dialogOpen: true }])
+    assert.equal(tabletopShortcut(key("g"), scope(changes)), null);
+  assert.deepEqual(tabletopShortcut(key("g", { repeat: true }), scope()), {
+    type: "blocked",
+  });
+  for (const changes of [
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { shiftKey: true },
+    { isComposing: true },
+  ])
+    assert.equal(tabletopShortcut(key("g", changes), scope()), null);
+});

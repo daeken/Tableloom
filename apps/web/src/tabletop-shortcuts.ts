@@ -47,6 +47,7 @@ export type TabletopShortcut =
         | "zoom-reset"
         | "objects"
         | "create"
+        | "position"
         | "blocked";
     };
 /** Return null to preserve native editing/browser keys outside the focused battlefield. */
@@ -89,6 +90,7 @@ export function tabletopShortcut(
     if (tool) action = { type: "tool", tool };
     else if (key.key === "Escape")
       action = { type: scope.gesture ? "cancel" : "clear" };
+    else if (key.key.toLowerCase() === "g") action = { type: "position" };
     else if (key.key.toLowerCase() === "n") action = { type: "create" };
     else if (key.key.toLowerCase() === "l") action = { type: "objects" };
     else if (key.key.toLowerCase() === "s") action = { type: "snap" };
@@ -111,7 +113,8 @@ export function tabletopShortcut(
   if (
     (action.type === "delete-review" ||
       action.type === "nudge" ||
-      action.type === "create") &&
+      action.type === "create" ||
+      action.type === "position") &&
     (scope.pending || (action.type !== "create" && !scope.editableSelection))
   )
     return { type: "blocked" };

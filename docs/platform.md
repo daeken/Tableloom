@@ -278,6 +278,7 @@ Click the battlefield or Tab to its **Shared battlefield** region to focus it; a
 | `O`, `E` | Token placement, Eraser |
 | `L` | Open searchable editable-object choices |
 | `N` | Create a token, room or text label using exact coordinates |
+| `G` | Position the editable selection using exact coordinates in Select mode |
 | Arrow keys / Shift + arrow | Move selected objects by one / ten canvas units; with Snap on, one / ten grid spacings |
 | `S` | Toggle local Snap to grid |
 | `+` or `=`, `-`, `0` | Zoom in, zoom out, reset camera |
@@ -298,6 +299,12 @@ Future refinements include keyboard creation/coordinate entry, numeric ruler end
 Focus **Shared battlefield**, press **L** or choose **Select objects…**, then search by name, text or ID. Only current-scene objects you can edit appear, with at most 50 rows per page and 100 selected objects. Choices persist across filtering/pages; missing or no-longer-editable choices block confirmation instead of silently shrinking the set. Tab/Space selects checkboxes, **Use selection** applies the local set and switches to Select, and Cancel/Escape returns battlefield focus without applying a draft.
 
 With the battlefield focused in Select mode, arrows move the complete selection by **one canvas unit**, or **ten** with Shift. With Snap on, these become one/ten current grid spacings, preserving existing offsets rather than realigning an off-grid group. Movement clamps rigidly at world bounds and uses the existing version-checked `objects.move` command, permissions and durable undo/redo. Each accepted keypress is one edit. Held repeats, pending edits, active pointer gestures and disconnected views do not issue moves. Fields/dialogs/native browser modifiers retain their own keys; arrows with no editable Select-mode selection retain native behavior. Keyboard creation and the broader accessibility audit remain in the README task list.
+
+### Exact selection position
+
+In Select mode, press **G** with the battlefield focused or choose **Position selection…** in the selection actions. The native dialog captures the exact selected objects/versions and focuses/selects X. X/Y set a token center, a drawing’s minimum X/Y corner, or the minimum X/Y across all selected token centers and drawing points. Group anchors deliberately exclude token radii, matching the server’s movement bounds. Shapes, sizes and relative spacing remain unchanged; entered coordinates ignore zoom and Snap.
+
+Blank/nonfinite/out-of-range coordinates, no-op positions and any translated point/center outside ±10000 block submission. Explicit positions are rejected rather than clamped. One existing `objects.move` command carries every captured expected version and one rigid delta; existing atomic permissions, receipts and durable undo/redo apply. A changed, deleted or transferred object blocks the whole open draft instead of refreshing its anchor or shrinking its targets. Offline/pending states disable saving. Cancel/Escape discards the draft and returns battlefield focus; switching context discards it with the tabletop. Token/group size controls already support keyboard input; individual drawing dimensions and ruler endpoints still require pointer workflows.
 
 ## Keyboard object creation
 

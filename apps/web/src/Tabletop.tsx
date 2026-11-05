@@ -1,3 +1,4 @@
+import { PositionSelectionDialog } from "./PositionSelectionDialog.js";
 import { CreateObjectDialog } from "./CreateObjectDialog.js";
 import type { CreationKind } from "./object-creation.js";
 import { ObjectPickerDialog } from "./ObjectPickerDialog.js";
@@ -202,6 +203,9 @@ export function Tabletop({
     update();
     return () => observer.disconnect();
   }, []);
+  const [positionSelection, setPositionSelection] = useState<
+    SceneObject[] | null
+  >(null);
   const [resizeSelection, setResizeSelection] = useState<SceneObject[] | null>(
     null,
   );
@@ -1056,6 +1060,20 @@ export function Tabletop({
   function focusBattlefield() {
     requestAnimationFrame(() => host.current?.focus({ preventScroll: true }));
   }
+  function openPosition() {
+    if (
+      !enabled ||
+      !ready ||
+      pending ||
+      session.current.active ||
+      tool !== "select" ||
+      !selected.length ||
+      selectedObjects.length !== selected.length ||
+      !selectedObjects.every((object) => canEditObject(member, object))
+    )
+      return;
+    setPositionSelection(selectedObjects);
+  }
   function openCreation() {
     if (!enabled || !ready || pending || session.current.active) return;
     setCreation({
@@ -1120,6 +1138,9 @@ export function Tabletop({
         if (command) send(command);
         break;
       }
+      case "position":
+        openPosition();
+        break;
       case "create":
         openCreation();
         break;
@@ -1474,6 +1495,24 @@ export function Tabletop({
               {selectionError ||
                 `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
             </span>
+            <button
+              disabled={
+                !enabled ||
+                !ready ||
+                pending ||
+                !!gesture ||
+                tool !== "select" ||
+                !selectedObjects.length ||
+                selectedObjects.length !== selected.length ||
+                !selectedObjects.every((object) =>
+                  canEditObject(member, object),
+                )
+              }
+              aria-keyshortcuts="G"
+              onClick={openPosition}
+            >
+              Position selection…
+            </button>
             {selectedObjects.length === 1 &&
               "points" in selectedObjects[0]! &&
               canResize(selectedObjects[0]) &&
@@ -1561,6 +1600,20 @@ export function Tabletop({
             </button>
           </div>
         </div>
+      )}
+      {positionSelection && (
+        <PositionSelectionDialog
+          objects={positionSelection}
+          state={state}
+          member={member}
+          enabled={enabled && ready}
+          pending={pending}
+          send={send}
+          close={() => {
+            setPositionSelection(null);
+            focusBattlefield();
+          }}
+        />
       )}
       {resizeSelection && (
         <ResizeSelectionDialog
