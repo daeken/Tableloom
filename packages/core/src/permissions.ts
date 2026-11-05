@@ -11,6 +11,8 @@ import {
   shapeStyleOf,
   sameShapeStyle,
   objectOrderMatches,
+  tokenLayerOf,
+  tokenLayersOf,
   drawingLayerOf,
   drawingLayersOf,
 } from "./index.js";
@@ -77,6 +79,7 @@ export function authorizeCommand(
       resizedObjects(objects, command.scale);
       return;
     }
+    case "token.layer.update":
     case "token.reorder": {
       const token = state.tokens.find((d) => d.id === command.tokenId);
       if (!token) throw new Error("That token is unavailable.");
@@ -96,8 +99,22 @@ export function authorizeCommand(
           "Token order changed. Review the current stack before arranging again.",
         );
       if (
-        (command.direction === "front" ? state.tokens.at(-1) : state.tokens[0])
-          ?.id === token.id
+        !objectOrderMatches(tokenLayersOf(state.tokens), command.expectedLayers)
+      )
+        throw new Error(
+          "Token layers changed. Review the current stack before arranging again.",
+        );
+      if (command.type === "token.layer.update") {
+        if (tokenLayerOf(token) === command.layer)
+          throw new Error("This token is already in that layer.");
+        return;
+      }
+      const layer = state.tokens.filter(
+        (t) => tokenLayerOf(t) === tokenLayerOf(token),
+      );
+      if (
+        (command.direction === "front" ? layer.at(-1) : layer[0])?.id ===
+        token.id
       )
         throw new Error("This token is already at that end of the layer.");
       return;

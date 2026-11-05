@@ -271,7 +271,7 @@ test("history 12 to 13 preserves shape payload bytes/cursors and rejects future 
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        16,
+        17,
       );
       assert.deepEqual(
         f.db
@@ -586,7 +586,7 @@ test("history 13 upgrades reorder and legacy deletion inverses byte-for-byte wit
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        16,
+        17,
       );
       assert.deepEqual(rows(), original);
       assert.deepEqual(migrated.status(f.player.member), cursor);

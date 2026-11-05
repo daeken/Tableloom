@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   pointSchema,
-  tokenSchema,
+  preLayerTokenSchema,
   DEFAULT_TOKEN_RADIUS,
   preTextDrawingSchema,
   preStyleDrawingSchema,
@@ -21,7 +21,7 @@ function sizedLegacyPayload(serialized: string): string {
     .parse(JSON.parse(serialized));
   let changed = false;
   const size = (value: unknown) => {
-    const token = tokenSchema
+    const token = preLayerTokenSchema
       .omit({ radius: true })
       .extend({ radius: z.literal(DEFAULT_TOKEN_RADIUS).optional() })
       .strict()
@@ -134,6 +134,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
           z.literal(14),
           z.literal(15),
           z.literal(16),
+          z.literal(17),
         ])
         .parse(
           db
@@ -148,7 +149,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
       exists("scene_move_history")
     )
       throw new Error("Scene history storage is incomplete or inconsistent.");
-    if (version < 16) {
+    if (version < 17) {
       const entries = db
           .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
           .all()
@@ -164,10 +165,21 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
         const payload = entry.payload;
         if (
           (payload.kind === "create" || payload.kind === "delete") &&
+          payload.objectType === "token"
+        )
+          preLayerTokenSchema.strict().parse(payload.object);
+        if (payload.kind === "delete-many")
+          for (const saved of payload.objects)
+            if (saved.objectType === "token")
+              preLayerTokenSchema.strict().parse(saved.object);
+
+        if (
+          version < 16 &&
+          (payload.kind === "create" || payload.kind === "delete") &&
           payload.objectType === "drawing"
         )
           preLayerDrawingSchema.parse(payload.object);
-        if (payload.kind === "delete-many")
+        if (version < 16 && payload.kind === "delete-many")
           for (const saved of payload.objects)
             if (saved.objectType === "drawing")
               preLayerDrawingSchema.parse(saved.object);
@@ -192,10 +204,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
             if (saved.objectType === "drawing")
               preTextDrawingSchema.parse(saved.object);
         if (
-          payload.kind === "layer" ||
+          (payload.kind === "layer" &&
+            (version < 16 || payload.objectType === "token")) ||
           (payload.kind === "reorder" &&
-            payload.objectType === "drawing" &&
-            payload.layers !== undefined) ||
+            payload.layers !== undefined &&
+            (version < 16 || payload.objectType === "token")) ||
           (version < 14 &&
             "drawingOrder" in payload &&
             payload.drawingOrder !== undefined) ||
@@ -241,7 +254,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
         db.prepare(
           "UPDATE scene_history_entries SET payload_json=? WHERE id=?",
         ).run(entry.payload_json, entry.id);
-      db.exec("UPDATE scene_history_version SET version=16 WHERE id=1");
+      db.exec("UPDATE scene_history_version SET version=17 WHERE id=1");
     }
     return identities;
   }
@@ -383,11 +396,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
     )
       throw new Error("Scene history references unavailable data.");
     db.exec(
-      `DROP TABLE ${source}; UPDATE scene_history_version SET version=16 WHERE id=1;`,
+      `DROP TABLE ${source}; UPDATE scene_history_version SET version=17 WHERE id=1;`,
     );
   } else
     db.exec(
-      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,16);",
+      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,17);",
     );
   return identities;
 }

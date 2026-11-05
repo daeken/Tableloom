@@ -484,7 +484,7 @@ test("campaign 6/history 15 upgrades all scenes and inverse defaults atomically,
       assert.equal(
         f.db.prepare("SELECT version FROM campaign_storage_version").get()!
           .version,
-        7,
+        8,
       );
       assert.deepEqual(
         f.db.prepare("SELECT * FROM scene_records ORDER BY id").all(),
@@ -502,7 +502,7 @@ test("campaign 6/history 15 upgrades all scenes and inverse defaults atomically,
           ...row,
           state_json: {
             ...JSON.parse(String(row.state_json)),
-            schemaVersion: 10,
+            schemaVersion: 11,
           },
         })),
       );
@@ -561,7 +561,7 @@ test("campaign 6/history 15 upgrades all scenes and inverse defaults atomically,
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        16,
+        17,
       );
       assert.deepEqual(historyRows(), originalHistory);
       assert.deepEqual(history.status(f.player.member), status);

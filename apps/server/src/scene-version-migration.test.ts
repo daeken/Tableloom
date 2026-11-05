@@ -178,7 +178,7 @@ test("campaign storage 1 upgrades every active/offstage/other-campaign object at
     );
     assert.equal(
       db.prepare("SELECT version FROM campaign_storage_version").get()?.version,
-      7,
+      8,
     );
     for (const row of db.prepare("SELECT state_json FROM scene_records").all())
       for (const object of JSON.parse(String(row.state_json)).tokens)
@@ -242,7 +242,7 @@ test("failed version upgrades preserve all rows and marker; malformed hidden sce
       offstage.id,
     );
     const upgraded = new TableStore(db);
-    assert.equal(upgraded.load().schemaVersion, 10);
+    assert.equal(upgraded.load().schemaVersion, 11);
     const active = upgraded.getCampaign().activeSceneId;
     const activeRow = db
       .prepare(
@@ -257,7 +257,7 @@ test("failed version upgrades preserve all rows and marker; malformed hidden sce
     assert.throws(() => new TableStore(db).load());
     assert.equal(
       db.prepare("SELECT version FROM campaign_storage_version").get()?.version,
-      7,
+      8,
     );
     db.exec("UPDATE campaign_storage_version SET version=99");
     assert.throws(() => new TableStore(db));

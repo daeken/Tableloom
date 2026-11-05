@@ -51,3 +51,27 @@ export function layeredDrawings<
     ...drawings.filter((d) => drawingLayerOf(d) === "above-tokens"),
   ];
 }
+
+export const tokenLayerSchema = z.enum(["between-drawings", "above-drawings"]);
+export type TokenLayer = z.infer<typeof tokenLayerSchema>;
+export const tokenLayersSchema = z.array(tokenLayerSchema).max(200);
+export function tokenLayerOf(token: {
+  id: string;
+  layer?: TokenLayer | undefined;
+}): TokenLayer {
+  return token.layer ?? "between-drawings";
+}
+export function tokenLayersOf(
+  tokens: readonly { id: string; layer?: TokenLayer | undefined }[],
+): TokenLayer[] {
+  return tokens.map(tokenLayerOf);
+}
+/** Visible back-to-front token order, with upper drawings between these groups. */
+export function layeredTokens<
+  T extends { id: string; layer?: TokenLayer | undefined },
+>(tokens: readonly T[]): T[] {
+  return [
+    ...tokens.filter((d) => tokenLayerOf(d) === "between-drawings"),
+    ...tokens.filter((d) => tokenLayerOf(d) === "above-drawings"),
+  ];
+}

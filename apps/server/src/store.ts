@@ -9,6 +9,7 @@ import {
   preStyleDrawingSchema,
   preShapeDrawingSchema,
   preLayerDrawingSchema,
+  preLayerTokenSchema,
 } from "@tableloom/core";
 import type { TableState } from "@tableloom/core";
 import {
@@ -34,7 +35,7 @@ import { transaction } from "./database.js";
 
 const campaignDataSchema = z
   .object({
-    schemaVersion: z.literal(10),
+    schemaVersion: z.literal(11),
     revision: tableSchema.shape.revision,
     rolls: tableSchema.shape.rolls,
     notes: tableSchema.shape.notes,
@@ -114,6 +115,7 @@ export class TableStore {
         z.literal(5),
         z.literal(6),
         z.literal(7),
+        z.literal(8),
       ]).parse(stored?.version);
       if (
         ["campaign_records", "scene_records", "campaign_receipts"].some(
@@ -131,7 +133,8 @@ export class TableStore {
         stored?.version === 3 ||
         stored?.version === 4 ||
         stored?.version === 5 ||
-        stored?.version === 6
+        stored?.version === 6 ||
+        stored?.version === 7
       )
         this.upgradeTextDrawings(stored.version);
       return;
@@ -197,7 +200,7 @@ export class TableStore {
     }
     this.db
       .prepare(
-        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 7)",
+        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 8)",
       )
       .run();
   }
@@ -213,9 +216,7 @@ export class TableStore {
       .object({
         tokens: z
           .array(
-            tableSchema.shape.tokens.element
-              .omit({ version: true, radius: true })
-              .strict(),
+            preLayerTokenSchema.omit({ version: true, radius: true }).strict(),
           )
           .max(200),
         drawings: z
@@ -261,13 +262,13 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json = ? WHERE id = ?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 10 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 11 }),
           ),
           id,
         );
     }
     this.db.exec(
-      "UPDATE campaign_storage_version SET version = 7 WHERE id = 1",
+      "UPDATE campaign_storage_version SET version = 8 WHERE id = 1",
     );
   }
 
@@ -278,9 +279,7 @@ export class TableStore {
       oldScene = sceneDataSchema.extend({
         drawings: z.array(preTextDrawingSchema).max(2000),
         tokens: z
-          .array(
-            tableSchema.shape.tokens.element.omit({ radius: true }).strict(),
-          )
+          .array(preLayerTokenSchema.omit({ radius: true }).strict())
           .max(200),
       });
     if (this.db.prepare("PRAGMA foreign_key_check(scene_records)").all().length)
@@ -323,15 +322,15 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json=? WHERE id=?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 10 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 11 }),
           ),
           id,
         );
     }
-    this.db.exec("UPDATE campaign_storage_version SET version=7 WHERE id=1");
+    this.db.exec("UPDATE campaign_storage_version SET version=8 WHERE id=1");
   }
 
-  private upgradeTextDrawings(storageVersion: 3 | 4 | 5 | 6) {
+  private upgradeTextDrawings(storageVersion: 3 | 4 | 5 | 6 | 7) {
     const oldCampaign = campaignDataSchema.extend({
         schemaVersion: z.literal(
           storageVersion === 3
@@ -340,10 +339,13 @@ export class TableStore {
               ? 7
               : storageVersion === 5
                 ? 8
-                : 9,
+                : storageVersion === 6
+                  ? 9
+                  : 10,
         ),
       }),
       oldScene = sceneDataSchema.extend({
+        tokens: z.array(preLayerTokenSchema.strict()).max(200),
         drawings: z
           .array(
             storageVersion === 3
@@ -352,7 +354,9 @@ export class TableStore {
                 ? preStyleDrawingSchema
                 : storageVersion === 5
                   ? preShapeDrawingSchema
-                  : preLayerDrawingSchema,
+                  : storageVersion === 6
+                    ? preLayerDrawingSchema
+                    : tableSchema.shape.drawings.element,
           )
           .max(2000),
       });
@@ -377,7 +381,7 @@ export class TableStore {
           ...oldScene.parse(json(scene.state_json)),
           systemId: campaign.system.id,
         }).state;
-        if (storageVersion === 6) continue; // Defaults are implicit; preserve validated scene bytes.
+        if (storageVersion === 6 || storageVersion === 7) continue; // Defaults are implicit; preserve validated scene bytes.
         this.db
           .prepare(
             "UPDATE scene_records SET state_json=? WHERE campaign_id=? AND id=?",
@@ -397,12 +401,12 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json=? WHERE id=?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 10 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 11 }),
           ),
           id,
         );
     }
-    this.db.exec("UPDATE campaign_storage_version SET version=7 WHERE id=1");
+    this.db.exec("UPDATE campaign_storage_version SET version=8 WHERE id=1");
   }
   listCampaigns(): Campaign[] {
     return this.db

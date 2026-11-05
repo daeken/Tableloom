@@ -1,6 +1,6 @@
 import { SceneOrderDialog } from "./SceneOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
-import { shapeStyleOf, drawingLayerOf } from "@tableloom/core";
+import { shapeStyleOf, drawingLayerOf, tokenLayerOf } from "@tableloom/core";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { EditTextDialog } from "./EditTextDialog.js";
 import { TextPlacementDialog } from "./TextPlacementDialog.js";
@@ -225,8 +225,15 @@ export function Tabletop({
     const drawingLayer = new Container({ label: "Drawings" }),
       tokenLayer = new Container({ label: "Tokens" }),
       upperDrawingLayer = new Container({ label: "Drawings above tokens" }),
+      upperTokenLayer = new Container({ label: "Tokens above drawings" }),
       selectionLayer = new Container({ label: "Selection" });
-    world.addChild(drawingLayer, tokenLayer, upperDrawingLayer, selectionLayer);
+    world.addChild(
+      drawingLayer,
+      tokenLayer,
+      upperDrawingLayer,
+      upperTokenLayer,
+      selectionLayer,
+    );
     const previews = new Map<string, SceneObject>();
     if (gesture?.kind === "move") {
       const delta = dragDelta(
@@ -327,6 +334,8 @@ export function Tabletop({
     for (const original of state.tokens) {
       const preview = previews.get(original.id);
       const token = preview && "position" in preview ? preview : original;
+      const contentLayer =
+        tokenLayerOf(token) === "above-drawings" ? upperTokenLayer : tokenLayer;
       const { x, y } = token.position;
       const graphic = new Graphics();
       graphic
@@ -342,7 +351,7 @@ export function Tabletop({
         .circle(x, y, token.radius)
         .fill(token.color)
         .stroke({ color: "#fffaf0", width: 3 });
-      tokenLayer.addChild(graphic);
+      contentLayer.addChild(graphic);
       const initial = new Text({
         text: token.name.slice(0, 1).toUpperCase(),
         style: {
@@ -353,7 +362,7 @@ export function Tabletop({
       });
       initial.anchor.set(0.5);
       initial.position.set(x, y - 1);
-      tokenLayer.addChild(initial);
+      contentLayer.addChild(initial);
       const label = new Text({
         text: token.name,
         style: {
@@ -365,7 +374,7 @@ export function Tabletop({
       });
       label.anchor.set(0.5, 0);
       label.position.set(x, y + token.radius + 8);
-      tokenLayer.addChild(label);
+      contentLayer.addChild(label);
     }
     const resizable =
       tool === "select" && selected.length === 1 && !pending && enabled
@@ -919,7 +928,11 @@ export function Tabletop({
                 command.type === "drawing.layer.update")
             )
               setSelected([command.drawingId]);
-            if (queued && command.type === "token.reorder")
+            if (
+              queued &&
+              (command.type === "token.reorder" ||
+                command.type === "token.layer.update")
+            )
               setSelected([command.tokenId]);
             return queued;
           }}

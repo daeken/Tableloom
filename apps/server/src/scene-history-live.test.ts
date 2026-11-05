@@ -2234,6 +2234,7 @@ test("token order is publicly synchronized with requester-only cursors, stack/ve
       );
     await until(() => q.latest().state.tokens.length === 3);
     const edit = {
+      expectedLayers: [a, b, c].map(() => "between-drawings" as const),
       id: randomUUID(),
       type: "token.reorder",
       tokenId: a,
@@ -2325,6 +2326,7 @@ test("token order is publicly synchronized with requester-only cursors, stack/ve
     assert.equal(
       (
         await g.send({
+          expectedLayers: [c, a, b].map(() => "between-drawings" as const),
           id: randomUUID(),
           type: "token.reorder",
           tokenId: c,
@@ -2542,6 +2544,204 @@ test("drawing layers synchronize publicly with private cursors, exact retries, a
     assert.equal(store.load().drawings[1]!.version, 3);
     assert.deepEqual(
       store.load().drawings.map((d) => d.id),
+      [a, b, c],
+    );
+    const final = store.load();
+    assert.equal((await p.send(command)).type, "ack");
+    assert.deepEqual(store.load(), final);
+  } finally {
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("token layers synchronize publicly with private cursors, exact retries, atomic binding rollback and restart-safe inverses", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-live-layer-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, body: Record<string, unknown>, cookie = "") =>
+    app.inject({
+      method: "POST",
+      url: `/api/access/${route}`,
+      headers: { origin: "http://localhost", cookie },
+      payload: body,
+    });
+  const cookieOf = (response: { headers: Record<string, unknown> }) =>
+    String(response.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      invite = async (name: string) =>
+        cookieOf(
+          await post("join", {
+            name,
+            code: (await post("invitations", {}, gm)).json().token,
+          }),
+        ),
+      player = await invite("Editor"),
+      other = await invite("Other");
+    let p = await connect(url, player),
+      g = await connect(url, gm),
+      q = await connect(url, other);
+    sockets.push(p.ws, g.ws, q.ws);
+    const a = randomUUID(),
+      b = randomUUID(),
+      c = randomUUID();
+    for (const id of [a, b, c])
+      assert.equal(
+        (
+          await p.send({
+            id: randomUUID(),
+            type: "token.add",
+            token: {
+              id,
+              name: "Scout",
+              color: "#123456",
+              position: { x: 100, y: 100 },
+            },
+          })
+        ).type,
+        "ack",
+      );
+    const command = {
+      id: randomUUID(),
+      type: "token.layer.update",
+      tokenId: a,
+      expectedVersion: 1,
+      expectedOrder: [a, b, c],
+      expectedLayers: [
+        "between-drawings",
+        "between-drawings",
+        "between-drawings",
+      ],
+      layer: "above-drawings",
+    };
+    assert.equal((await q.send(command)).type, "error");
+    assert.equal((await p.send(command)).type, "ack");
+    await until(
+      () =>
+        g.latest().state.tokens[0]?.layer === "above-drawings" &&
+        q.latest().state.tokens[0]?.layer === "above-drawings",
+    );
+    const cursor = p.latest().history.undo!;
+    assert.equal(cursor.action, "layer");
+    assert.equal(cursor.objectType, "token");
+    assert.equal(cursor.objectCount, 1);
+    assert.ok(
+      !JSON.stringify([...g.messages, ...q.messages]).includes(cursor.id),
+    );
+    assert.ok(!JSON.stringify(cursor).includes("layers"));
+    const saved = store.load();
+    assert.equal((await p.send(command)).type, "ack");
+    assert.deepEqual(store.load(), saved);
+    const stale = { ...command, id: randomUUID(), tokenId: b };
+    assert.equal((await p.send(stale)).type, "error");
+    assert.equal(store.hasCommand(stale.id), false);
+    assert.equal(store.load().tokens[1]!.version, 1);
+    const next = {
+        ...stale,
+        id: randomUUID(),
+        expectedLayers: [
+          "above-drawings",
+          "between-drawings",
+          "between-drawings",
+        ],
+      },
+      rows = db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+    db.exec(
+      "CREATE TRIGGER reject_layer_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture layer binding'); END",
+    );
+    assert.equal((await p.send(next)).type, "error");
+    assert.deepEqual(store.load(), saved);
+    assert.equal(store.hasCommand(next.id), false);
+    assert.deepEqual(
+      db.prepare("SELECT * FROM scene_history_entries ORDER BY sequence").all(),
+      rows,
+    );
+    db.exec("DROP TRIGGER reject_layer_binding");
+    const undo = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: cursor.id,
+      expectedVersion: cursor.version,
+    };
+    assert.equal((await p.send(undo)).type, "ack");
+    await until(() => p.latest().state.tokens[0]?.layer === undefined);
+    const redo = p.latest().history.redo!;
+    sockets.forEach((socket) => socket.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    g = await connect(url, gm);
+    q = await connect(url, other);
+    sockets.push(p.ws, g.ws, q.ws);
+    assert.deepEqual(p.latest().history.redo, redo);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => q.latest().state.tokens[0]?.layer === "above-drawings");
+    assert.equal((await g.send({ ...next, id: randomUUID() })).type, "ack");
+    await until(() => p.latest().history.undo?.available === false);
+    const blocked = p.latest().history.undo!,
+      current = store.load();
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: blocked.id,
+          expectedVersion: blocked.version,
+        })
+      ).type,
+      "error",
+    );
+    assert.deepEqual(store.load(), current);
+    const gmUndo = g.latest().history.undo!;
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: gmUndo.id,
+          expectedVersion: gmUndo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().history.undo?.available === true);
+    const edge = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: edge.id,
+          expectedVersion: edge.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.equal(store.load().tokens[0]!.layer, undefined);
+    assert.equal(store.load().tokens[0]!.version, 5);
+    assert.equal(store.load().tokens[1]!.version, 3);
+    assert.deepEqual(
+      store.load().tokens.map((d) => d.id),
       [a, b, c],
     );
     const final = store.load();

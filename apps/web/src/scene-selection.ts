@@ -1,4 +1,4 @@
-import { shapeStyleOf, drawingLayerOf } from "@tableloom/core";
+import { shapeStyleOf, drawingLayerOf, tokenLayerOf } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
 import type { TableView } from "@tableloom/core";
 import { canEditObject } from "@tableloom/core/permissions";
@@ -199,6 +199,12 @@ export function pickSceneObject(
 ): SceneObject | undefined {
   const drawings = [...state.drawings].reverse();
   return (
+    [...state.tokens]
+      .reverse()
+      .find(
+        (token) =>
+          tokenLayerOf(token) === "above-drawings" && hitToken(token, point),
+      ) ??
     drawings.find((drawing) => {
       if (drawingLayerOf(drawing) !== "above-tokens") return false;
       if (hitDrawing(drawing, point, tolerance)) return true;
@@ -214,7 +220,11 @@ export function pickSceneObject(
         point.y <= Math.max(first.y, last.y)
       );
     }) ??
-    [...state.tokens].reverse().find((t) => hitToken(t, point)) ??
+    [...state.tokens]
+      .reverse()
+      .find(
+        (t) => tokenLayerOf(t) === "between-drawings" && hitToken(t, point),
+      ) ??
     drawings.find(
       (d) =>
         drawingLayerOf(d) === "below-tokens" && hitDrawing(d, point, tolerance),

@@ -11,6 +11,8 @@ import {
   drawingOrderSchema,
   tokenOrderSchema,
   objectOrderMatches,
+  tokenLayerSchema,
+  tokenLayersSchema,
   drawingLayerSchema,
   drawingLayersSchema,
 } from "@tableloom/core";
@@ -65,6 +67,22 @@ const basePayloadSchema = z.union([
   z
     .object({
       kind: z.literal("layer"),
+      objectType: z.literal("token"),
+      before: tokenLayerSchema.nullable(),
+      after: tokenLayerSchema,
+      order: tokenOrderSchema.min(1),
+      layers: tokenLayersSchema.min(1),
+    })
+    .strict()
+    .refine(
+      (p) =>
+        p.order.length === p.layers.length &&
+        (p.before ?? "between-drawings") !== p.after,
+      "Layer history must change layers and capture every token.",
+    ),
+  z
+    .object({
+      kind: z.literal("layer"),
       objectType: z.literal("drawing"),
       before: drawingLayerSchema.nullable(),
       after: drawingLayerSchema,
@@ -84,11 +102,13 @@ const basePayloadSchema = z.union([
       objectType: z.literal("token"),
       before: tokenOrderSchema,
       after: tokenOrderSchema,
+      layers: tokenLayersSchema.optional(),
     })
     .strict()
     .refine((p) => {
       const after = new Set(p.after);
       return (
+        (p.layers === undefined || p.layers.length === p.before.length) &&
         p.before.length === p.after.length &&
         p.before.every((id) => after.has(id)) &&
         !objectOrderMatches(p.before, p.after)
@@ -312,7 +332,11 @@ export function entryOf(row: unknown): Entry {
     if (
       targets.length !== 1 ||
       index < 0 ||
-      payload.layers[index] !== (payload.before ?? "below-tokens")
+      payload.layers[index] !==
+        (payload.before ??
+          (payload.objectType === "token"
+            ? "between-drawings"
+            : "below-tokens"))
     )
       throw new Error(
         "Layer history must match its target and previous layer.",

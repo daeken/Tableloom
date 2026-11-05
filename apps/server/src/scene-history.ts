@@ -7,6 +7,8 @@ import {
   sceneTextSnapshot,
   shapeSnapshot,
   objectOrderMatches,
+  tokenLayerOf,
+  tokenLayersOf,
   drawingLayerOf,
   drawingLayersOf,
 } from "@tableloom/core";
@@ -52,7 +54,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 16;
+          ?.version === 17;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -143,17 +145,18 @@ export class SceneHistoryStore {
       )
     )
       return false;
-    if (
-      payload.kind === "layer" ||
-      (payload.kind === "reorder" && payload.objectType === "drawing")
-    ) {
-      const order = payload.kind === "layer" ? payload.order : payload.before,
-        layers = payload.layers ?? order.map(() => "below-tokens" as const);
-      const byId = new Map(order.map((id, i) => [id, layers[i]!]));
+    if (payload.kind === "layer" || payload.kind === "reorder") {
+      const order = payload.kind === "layer" ? payload.order : payload.before;
+      const defaultLayer =
+        payload.objectType === "token" ? "between-drawings" : "below-tokens";
+      const layers = payload.layers ?? order.map(() => defaultLayer),
+        byId = new Map(order.map((id, i) => [id, layers[i]!]));
+      const objects =
+        payload.objectType === "token" ? state.tokens : state.drawings;
       if (payload.kind === "layer") {
         if (
           !objectOrderMatches(
-            state.drawings.map((d) => d.id),
+            objects.map((object) => object.id),
             order,
           )
         )
@@ -162,10 +165,17 @@ export class SceneHistoryStore {
           entry.targets[0]!.objectId,
           entry.state === "done"
             ? payload.after
-            : (payload.before ?? "below-tokens"),
+            : (payload.before ?? defaultLayer),
         );
       }
-      if (state.drawings.some((d) => drawingLayerOf(d) !== byId.get(d.id)))
+      if (
+        objects.some(
+          (object) =>
+            ("position" in object
+              ? tokenLayerOf(object)
+              : drawingLayerOf(object)) !== byId.get(object.id),
+        )
+      )
         return false;
     }
     if (expectsPresent(entry))
@@ -298,6 +308,7 @@ export class SceneHistoryStore {
                           ?.name ??
                         (payload.kind === "move" ||
                         payload.kind === "token-resize" ||
+                        payload.kind === "layer" ||
                         payload.kind === "reorder"
                           ? "Token"
                           : payload.object.name)),
@@ -346,6 +357,7 @@ export class SceneHistoryStore {
         "drawing.reorder",
         "drawing.layer.update",
         "token.reorder",
+        "token.layer.update",
         "token.resize",
         "objects.resize",
         "token.move",
@@ -374,7 +386,28 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "drawing.layer.update") {
+      if (command.type === "token.layer.update") {
+        ids = [command.tokenId];
+        const from = before.tokens.find((d) => d.id === command.tokenId),
+          to = after.tokens.find((d) => d.id === command.tokenId);
+        if (
+          !from ||
+          !to ||
+          to.version !== from.version + 1 ||
+          to.layer !== command.layer ||
+          JSON.stringify({ ...from, layer: to.layer, version: to.version }) !==
+            JSON.stringify(to)
+        )
+          throw new Error("Invalid token layer transition.");
+        payload = {
+          kind: "layer",
+          objectType: "token",
+          before: from.layer ?? null,
+          after: to.layer,
+          order: before.tokens.map((d) => d.id),
+          layers: tokenLayersOf(before.tokens),
+        };
+      } else if (command.type === "drawing.layer.update") {
         ids = [command.drawingId];
         const from = before.drawings.find((d) => d.id === command.drawingId),
           to = after.drawings.find((d) => d.id === command.drawingId);
@@ -417,15 +450,16 @@ export class SceneHistoryStore {
             JSON.stringify(to)
         )
           throw new Error("Invalid scene order transition.");
-        payload = {
+        payload = payloadSchema.parse({
           kind: "reorder",
           objectType: kind,
           before: original.map((object) => object.id),
           after: changed.map((object) => object.id),
-          ...(kind === "drawing"
-            ? { layers: drawingLayersOf(before.drawings) }
-            : {}),
-        };
+          layers:
+            kind === "drawing"
+              ? drawingLayersOf(before.drawings)
+              : tokenLayersOf(before.tokens),
+        });
       } else if (command.type === "drawing.style.update") {
         ids = [command.drawingId];
         const from = before.drawings.find((d) => d.id === command.drawingId),
@@ -761,11 +795,19 @@ export class SceneHistoryStore {
       let next: TableState;
       if (payload.kind === "layer") {
         next = structuredClone(state);
-        const drawing = next.drawings.find((d) => d.id === target.objectId)!,
-          layer = undo ? payload.before : payload.after;
-        if (layer === null) delete drawing.layer;
-        else drawing.layer = layer;
-        drawing.version += 1;
+        if (payload.objectType === "drawing") {
+          const object = next.drawings.find((d) => d.id === target.objectId)!,
+            layer = undo ? payload.before : payload.after;
+          if (layer === null) delete object.layer;
+          else object.layer = layer;
+          object.version += 1;
+        } else {
+          const object = next.tokens.find((t) => t.id === target.objectId)!,
+            layer = undo ? payload.before : payload.after;
+          if (layer === null) delete object.layer;
+          else object.layer = layer;
+          object.version += 1;
+        }
         next.revision += 1;
         next = tableSchema.parse(next);
       } else if (payload.kind === "reorder") {

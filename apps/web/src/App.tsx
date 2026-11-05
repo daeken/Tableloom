@@ -111,6 +111,7 @@ export function App() {
         "drawing.reorder",
         "drawing.layer.update",
         "token.reorder",
+        "token.layer.update",
         "token.resize",
         "objects.resize",
         "token.move",

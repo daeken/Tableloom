@@ -3,8 +3,10 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 import {
+  tokenLayerSchema,
+  tokenLayersSchema,
   drawingLayerSchema,
   drawingLayersSchema,
   drawingOrderSchema,
@@ -12,18 +14,23 @@ import {
   orderDirectionSchema,
 } from "./object-order.js";
 export {
+  tokenLayerSchema,
+  tokenLayersSchema,
   drawingLayerSchema,
   drawingLayersSchema,
   drawingOrderSchema,
   tokenOrderSchema,
   orderDirectionSchema,
+  tokenLayerOf,
+  tokenLayersOf,
+  layeredTokens,
   drawingLayerOf,
   drawingLayersOf,
   layeredDrawings,
   objectOrderMatches,
   reorderedObjects,
 } from "./object-order.js";
-export type { DrawingLayer } from "./object-order.js";
+export type { DrawingLayer, TokenLayer } from "./object-order.js";
 import { shapeStyleSchema, shapeContentSchema } from "./shape-style.js";
 import type { ShapeStyle } from "./shape-style.js";
 export {
@@ -166,7 +173,7 @@ export const drawingInputSchema = drawingDataSchema
 export type DrawingInput = z.infer<typeof drawingInputSchema>;
 export const DEFAULT_TOKEN_RADIUS = 24;
 export const tokenRadiusSchema = z.number().finite().min(4).max(300);
-export const tokenSchema = z.object({
+export const preLayerTokenSchema = z.object({
   radius: tokenRadiusSchema,
   id: z.uuid(),
   name: z.string().trim().min(1).max(32),
@@ -175,9 +182,12 @@ export const tokenSchema = z.object({
   ownerId: z.uuid().nullable(),
   version: z.number().int().positive(),
 });
+export const tokenSchema = preLayerTokenSchema
+  .extend({ layer: tokenLayerSchema.optional() })
+  .strict();
 export type Token = z.infer<typeof tokenSchema>;
 export const tokenInputSchema = tokenSchema
-  .omit({ ownerId: true, version: true, radius: true })
+  .omit({ ownerId: true, version: true, radius: true, layer: true })
   .strict();
 
 export const diceResultSchema = z.object({
@@ -221,7 +231,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(10),
+  schemaVersion: z.literal(11),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -267,7 +277,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 10,
+  schemaVersion: 11,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -279,37 +289,49 @@ export const createTable = (): TableState => ({
 const legacyDrawingSchema = preTextDrawingSchema
   .omit({ version: true })
   .strict();
-const legacyTokenSchema = tokenSchema
+const legacyTokenSchema = preLayerTokenSchema
   .omit({ version: true, radius: true })
+  .strict();
+const version10TableSchema = tableDataSchema
+  .extend({
+    schemaVersion: z.literal(10),
+    tokens: z.array(preLayerTokenSchema.strict()).max(200),
+  })
   .strict();
 const version9TableSchema = tableDataSchema
   .extend({
     schemaVersion: z.literal(9),
+    tokens: z.array(preLayerTokenSchema.strict()).max(200),
     drawings: z.array(preLayerDrawingSchema).max(2000),
   })
   .strict();
 const version8TableSchema = tableDataSchema
   .extend({
     schemaVersion: z.literal(8),
+    tokens: z.array(preLayerTokenSchema.strict()).max(200),
     drawings: z.array(preShapeDrawingSchema).max(2000),
   })
   .strict();
 const version7TableSchema = tableDataSchema
   .extend({
     schemaVersion: z.literal(7),
+    tokens: z.array(preLayerTokenSchema.strict()).max(200),
     drawings: z.array(preStyleDrawingSchema).max(2000),
   })
   .strict();
 const version6TableSchema = tableDataSchema
   .extend({
     schemaVersion: z.literal(6),
+    tokens: z.array(preLayerTokenSchema.strict()).max(200),
     drawings: z.array(preTextDrawingSchema).max(2000),
   })
   .strict();
 const version5TableSchema = version6TableSchema
   .extend({
     schemaVersion: z.literal(5),
-    tokens: z.array(tokenSchema.omit({ radius: true }).strict()).max(200),
+    tokens: z
+      .array(preLayerTokenSchema.omit({ radius: true }).strict())
+      .max(200),
   })
   .strict();
 const version4TableSchema = tableDataSchema
@@ -342,17 +364,23 @@ export function restoreTable(value: unknown): {
 } {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
+  const regularTokens = version10TableSchema.safeParse(value);
+  if (regularTokens.success)
+    return {
+      migrated: true,
+      state: tableSchema.parse({ ...regularTokens.data, schemaVersion: 11 }),
+    };
   const unlayered = version9TableSchema.safeParse(value);
   if (unlayered.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...unlayered.data, schemaVersion: 10 }),
+      state: tableSchema.parse({ ...unlayered.data, schemaVersion: 11 }),
     };
   const unshaped = version8TableSchema.safeParse(value);
   if (unshaped.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...unshaped.data, schemaVersion: 10 }),
+      state: tableSchema.parse({ ...unshaped.data, schemaVersion: 11 }),
     };
   const unstyled = version7TableSchema.safeParse(value);
   if (unstyled.success)
@@ -360,7 +388,7 @@ export function restoreTable(value: unknown): {
       migrated: true,
       state: tableSchema.parse({
         ...unstyled.data,
-        schemaVersion: 10,
+        schemaVersion: 11,
         drawings: unstyled.data.drawings.map((d) =>
           d.kind === "text"
             ? { ...d, textStyle: { ...DEFAULT_TEXT_STYLE } }
@@ -372,7 +400,7 @@ export function restoreTable(value: unknown): {
   if (previous.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...previous.data, schemaVersion: 10 }),
+      state: tableSchema.parse({ ...previous.data, schemaVersion: 11 }),
     };
   const sized = version5TableSchema.safeParse(value);
   if (sized.success)
@@ -380,7 +408,7 @@ export function restoreTable(value: unknown): {
       migrated: true,
       state: tableSchema.parse({
         ...sized.data,
-        schemaVersion: 10,
+        schemaVersion: 11,
         tokens: sized.data.tokens.map((token) => ({
           ...token,
           radius: DEFAULT_TOKEN_RADIUS,
@@ -397,7 +425,7 @@ export function restoreTable(value: unknown): {
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 10,
+    schemaVersion: 11,
     notes: legacy.schemaVersion === 4 ? legacy.notes : [],
     drawings: legacy.drawings.map((drawing) => ({
       ...drawing,
@@ -491,6 +519,21 @@ export const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...envelope,
+      type: z.literal("token.layer.update"),
+      tokenId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      layer: tokenLayerSchema,
+      expectedOrder: tokenOrderSchema.min(1),
+      expectedLayers: tokenLayersSchema.min(1),
+    })
+    .strict()
+    .refine(
+      (c) => c.expectedOrder.length === c.expectedLayers.length,
+      "Token layers must match the captured order.",
+    ),
+  z
+    .object({
+      ...envelope,
       type: z.literal("drawing.layer.update"),
       drawingId: z.uuid(),
       expectedVersion: z.number().int().positive(),
@@ -511,8 +554,13 @@ export const commandSchema = z.discriminatedUnion("type", [
       expectedVersion: z.number().int().positive(),
       expectedOrder: tokenOrderSchema.min(1),
       direction: orderDirectionSchema,
+      expectedLayers: tokenLayersSchema.min(1),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (c) => c.expectedOrder.length === c.expectedLayers.length,
+      "Token layers must match the captured order.",
+    ),
   z
     .object({
       ...envelope,

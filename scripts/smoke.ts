@@ -1423,6 +1423,9 @@ try {
       JSON.stringify({
         context: shapeState.context,
         command: {
+          expectedLayers: originalTokenOrder.map(
+            () => "between-drawings" as const,
+          ),
           id: randomUUID(),
           type: "token.reorder",
           tokenId: orderTokenId,
@@ -1492,6 +1495,136 @@ try {
         { x: 180, y: 120 },
       );
     }
+    const tokenLayerOrder = shapeState.state.tokens.map((token) => token.id);
+    const raisedToken = snapshot(
+      live,
+      (message) =>
+        message.state.tokens.find((token) => token.id === orderTokenId)
+          ?.layer === "above-drawings",
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "token.layer.update",
+          tokenId: orderTokenId,
+          expectedVersion: shapeState.state.tokens.find(
+            (token) => token.id === orderTokenId,
+          )!.version,
+          expectedOrder: tokenLayerOrder,
+          expectedLayers: shapeState.state.tokens.map(
+            (token) => token.layer ?? "between-drawings",
+          ),
+          layer: "above-drawings",
+        },
+      }),
+    );
+    shapeState = await raisedToken;
+    assert.equal(shapeState.history.undo!.action, "layer");
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+        type === "scene.undo"
+          ? shapeState.history.undo!
+          : shapeState.history.redo!;
+      const result = snapshot(
+        live,
+        (message) =>
+          message.state.tokens.find((token) => token.id === orderTokenId)
+            ?.layer === (type === "scene.undo" ? undefined : "above-drawings"),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      assert.deepEqual(
+        shapeState.state.tokens.map((token) => token.id),
+        tokenLayerOrder,
+      );
+    }
+    const removedUpperToken = snapshot(
+      live,
+      (message) =>
+        !message.state.tokens.some((token) => token.id === orderTokenId),
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "object.delete",
+          objectId: orderTokenId,
+          expectedVersion: shapeState.state.tokens.find(
+            (token) => token.id === orderTokenId,
+          )!.version,
+        },
+      }),
+    );
+    shapeState = await removedUpperToken;
+    for (const [type, expected] of [
+      ["scene.undo", "above-drawings"],
+      ["scene.undo", undefined],
+      ["scene.redo", "above-drawings"],
+    ] as const) {
+      const edge =
+        type === "scene.undo"
+          ? shapeState.history.undo!
+          : shapeState.history.redo!;
+      const result = snapshot(live, (message) =>
+        message.state.tokens.some(
+          (token) => token.id === orderTokenId && token.layer === expected,
+        ),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      assert.deepEqual(
+        shapeState.state.tokens.map((token) => token.id),
+        tokenLayerOrder,
+      );
+    }
+    const loweredToken = snapshot(
+      live,
+      (message) =>
+        message.state.tokens.find((token) => token.id === orderTokenId)
+          ?.layer === "between-drawings",
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "token.layer.update",
+          tokenId: orderTokenId,
+          expectedVersion: shapeState.state.tokens.find(
+            (token) => token.id === orderTokenId,
+          )!.version,
+          expectedOrder: tokenLayerOrder,
+          expectedLayers: shapeState.state.tokens.map(
+            (token) => token.layer ?? "between-drawings",
+          ),
+          layer: "between-drawings",
+        },
+      }),
+    );
+    shapeState = await loweredToken;
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(
@@ -1715,5 +1848,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public below/above-token drawing layers and exact default restoration, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

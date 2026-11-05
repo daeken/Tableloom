@@ -200,6 +200,7 @@ test("token stack reviews freeze identity/version/order, survive unrelated edits
       ...command,
       id: randomUUID(),
       expectedOrder: max,
+      expectedLayers: max.map(() => "between-drawings"),
     }).success,
   );
   assert.ok(
@@ -211,6 +212,7 @@ test("token stack reviews freeze identity/version/order, survive unrelated edits
       ...command,
       id: randomUUID(),
       expectedOrder: [...max, randomUUID()],
+      expectedLayers: [...max, randomUUID()].map(() => "between-drawings"),
     }).success,
     false,
   );

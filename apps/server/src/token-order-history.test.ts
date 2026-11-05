@@ -75,6 +75,7 @@ test("token arrangement preserves content/ownership and target-only versions thr
     ) =>
       f.run(
         {
+          expectedLayers: ids().map(() => "between-drawings" as const),
           type: "token.reorder",
           tokenId: id,
           direction,
@@ -101,6 +102,7 @@ test("token arrangement preserves content/ownership and target-only versions thr
     assert.throws(() => arrange(b, "back"));
     assert.throws(() =>
       f.run({
+        expectedLayers: [a, b, c].map(() => "between-drawings" as const),
         type: "token.reorder",
         tokenId: a,
         expectedVersion: 1,
@@ -249,6 +251,7 @@ test("mixed restoration guards both stacks, retains survivor edits and original 
       // Removing unchanged targets preserves a newer survivor stack, then remembers it.
       f.run(
         {
+          expectedLayers: [a, b, c].map(() => "between-drawings" as const),
           type: "token.reorder",
           tokenId: b,
           expectedVersion: 2,
@@ -352,7 +355,7 @@ test("history 14 upgrades drawing slots byte-for-byte but rejects future token o
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        16,
+        17,
       );
       assert.deepEqual(rows(), original);
       assert.deepEqual(upgraded.status(f.player.member), status);
@@ -383,6 +386,7 @@ test("token inverse orders validate target relationships and strict restoration 
     const a = f.add(),
       b = f.add();
     f.run({
+      expectedLayers: [a, b].map(() => "between-drawings" as const),
       type: "token.reorder",
       tokenId: a,
       expectedVersion: 1,

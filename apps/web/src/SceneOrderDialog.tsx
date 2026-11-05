@@ -3,7 +3,12 @@ import { createPortal } from "react-dom";
 import type { CommandInput, TableView } from "@tableloom/core";
 import type { SceneObject } from "./scene-selection.js";
 import type { Member } from "@tableloom/core/access";
-import { drawingLayerOf, layeredDrawings } from "@tableloom/core";
+import {
+  drawingLayerOf,
+  layeredDrawings,
+  tokenLayerOf,
+  layeredTokens,
+} from "@tableloom/core";
 import { canEditObject } from "@tableloom/core/permissions";
 import {
   captureSceneOrder,
@@ -12,6 +17,7 @@ import {
   sceneOrderName,
   sceneOrderIds,
   sceneLayerCommand,
+  sceneObjectLayerName,
 } from "./scene-order.js";
 const PAGE_SIZE = 12;
 export function SceneOrderDialog({
@@ -47,21 +53,24 @@ export function SceneOrderDialog({
   }, []);
   const title = kind === "drawing" ? "Drawing" : "Token";
   const list = [
-      ...(kind === "drawing" ? layeredDrawings(state.drawings) : state.tokens),
+      ...(kind === "drawing"
+        ? layeredDrawings(state.drawings)
+        : layeredTokens(state.tokens)),
     ].reverse(),
     lastPage = Math.max(0, Math.ceil(list.length / PAGE_SIZE) - 1),
     visiblePage = Math.min(page, lastPage),
     current = review ? sceneOrderCurrent(review, state, member) : false;
   function changeLayer() {
-    if (!review || !enabled || pending || !("points" in review.object)) return;
-    const command = sceneLayerCommand(
-      review,
-      state,
-      member,
-      drawingLayerOf(review.object) === "above-tokens"
-        ? "below-tokens"
-        : "above-tokens",
-    );
+    if (!review || !enabled || pending) return;
+    const layer =
+      review.kind === "token"
+        ? tokenLayerOf(review.object) === "above-drawings"
+          ? "between-drawings"
+          : "above-drawings"
+        : drawingLayerOf(review.object) === "above-tokens"
+          ? "below-tokens"
+          : "above-tokens";
+    const command = sceneLayerCommand(review, state, member, layer);
     if (command && send(command)) close();
     else if (command)
       setError(
@@ -95,8 +104,8 @@ export function SceneOrderDialog({
       <h1 id="drawing-order-title">{title} order</h1>
       <p>
         {kind === "drawing"
-          ? "Drawings can sit below or above tokens; both layers stay above maps."
-          : "Between the lower and upper drawing layers, above background maps."}{" "}
+          ? "Drawings sit below or above regular tokens. Tokens above drawings stay on top."
+          : "Tokens can sit between the drawing layers or above all drawings. Both stay above maps."}{" "}
         {title}s at the front cover and are picked before {kind}s behind them.
       </p>
       {review ? (
@@ -112,17 +121,10 @@ export function SceneOrderDialog({
             layer. Change this {kind}’s position for everyone; Undo restores the
             previous stack.
           </p>
-          {"points" in review.object && (
-            <p>
-              Layer:{" "}
-              <strong>
-                {drawingLayerOf(review.object) === "above-tokens"
-                  ? "Above tokens"
-                  : "Below tokens"}
-              </strong>
-              . Front/back changes stay within this layer.
-            </p>
-          )}
+          <p>
+            Layer: <strong>{sceneObjectLayerName(review.object)}</strong>.
+            Front/back changes stay within this layer.
+          </p>
           {!current && (
             <p role="alert" className="form-error">
               This {kind} or its stack changed, or it is no longer editable. The
@@ -144,19 +146,19 @@ export function SceneOrderDialog({
               </button>
             ))}
           </div>
-          {"points" in review.object && (
-            <button
-              className="drawing-layer-change"
-              disabled={!enabled || pending || !current}
-              onClick={changeLayer}
-            >
-              Move{" "}
-              {drawingLayerOf(review.object) === "above-tokens"
-                ? "below"
-                : "above"}{" "}
-              tokens
-            </button>
-          )}
+          <button
+            className="drawing-layer-change"
+            disabled={!enabled || pending || !current}
+            onClick={changeLayer}
+          >
+            {review.kind === "token"
+              ? tokenLayerOf(review.object) === "above-drawings"
+                ? "Move between drawing layers"
+                : "Move above drawings"
+              : drawingLayerOf(review.object) === "above-tokens"
+                ? "Move below tokens"
+                : "Move above tokens"}
+          </button>
           <button
             className="drawing-order-choose"
             onClick={() => {
@@ -193,15 +195,7 @@ export function SceneOrderDialog({
                       style={{ background: d.color }}
                     />
                     {sceneOrderName(d)}
-                    {"points" in d && (
-                      <small>
-                        {" "}
-                        ·{" "}
-                        {drawingLayerOf(d) === "above-tokens"
-                          ? "Above tokens"
-                          : "Below tokens"}
-                      </small>
-                    )}
+                    <small> · {sceneObjectLayerName(d)}</small>
                     {!canEditObject(member, d) && <small> · Read only</small>}
                   </button>
                 </li>
