@@ -4,14 +4,12 @@ import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DIMENSION,
   MAX_ASSET_PIXELS,
+  MAX_PNG_INFLATE_BYTES,
 } from "@tableloom/core/assets";
 import { StoreError } from "./store.js";
 const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const invalid = () =>
-  new StoreError(
-    "Upload a valid static, non-interlaced PNG: RGB/RGBA or grayscale-alpha at 8 bits, grayscale/indexed at 1, 2, 4 or 8 bits, within the image limits.",
-    400,
-  );
+  new StoreError("Upload a valid static PNG within the image limits.", 400);
 /** Validate bounded image data; keep decoding-critical palette/transparency, discard other metadata.
  * Mode, palette, transparency and row reconstruction contracts: https://www.w3.org/TR/png-3/ (§7, §9, §11).
  */
@@ -29,6 +27,7 @@ export function sanitizePng(input: Buffer) {
     channels = 0,
     color = 0,
     depth = 0,
+    interlace = 0,
     dataStarted = false,
     dataEnded = false,
     ended = false,
@@ -61,9 +60,13 @@ export function sanitizePng(input: Buffer) {
       height = body.readUInt32BE(4);
       color = body[9]!;
       depth = body[8]!;
-      const validMode = [0, 3].includes(color)
-        ? [1, 2, 4, 8].includes(depth)
-        : [2, 4, 6].includes(color) && depth === 8;
+      interlace = body[12]!;
+      const validMode =
+        color === 3
+          ? [1, 2, 4, 8].includes(depth)
+          : color === 0
+            ? [1, 2, 4, 8, 16].includes(depth)
+            : [2, 4, 6].includes(color) && [8, 16].includes(depth);
       if (
         !width ||
         !height ||
@@ -73,7 +76,7 @@ export function sanitizePng(input: Buffer) {
         !validMode ||
         body[10] !== 0 ||
         body[11] !== 0 ||
-        body[12] !== 0
+        ![0, 1].includes(interlace)
       )
         throw invalid();
       channels = color === 2 ? 3 : color === 6 ? 4 : color === 4 ? 2 : 1;
@@ -123,9 +126,37 @@ export function sanitizePng(input: Buffer) {
     offset = end;
   }
   if (!ended) throw invalid();
-  const packed = Buffer.concat(compressed),
-    stride = Math.ceil((width * channels * depth) / 8) + 1,
-    expected = stride * height;
+  // Each Adam7 pass is an independent reduced image; empty passes have no rows.
+  const layout: ReadonlyArray<readonly [number, number, number, number]> =
+    interlace === 0
+      ? [[0, 0, 1, 1]]
+      : [
+          [0, 0, 8, 8],
+          [4, 0, 8, 8],
+          [0, 4, 4, 8],
+          [2, 0, 4, 4],
+          [0, 2, 2, 4],
+          [1, 0, 2, 2],
+          [0, 1, 1, 2],
+        ];
+  const passes = layout
+    .map(([x, y, dx, dy]) => {
+      const columns = Math.max(0, Math.ceil((width - x) / dx)),
+        rows = Math.max(0, Math.ceil((height - y) / dy));
+      return {
+        columns,
+        rows,
+        stride: Math.ceil((columns * channels * depth) / 8) + 1,
+      };
+    })
+    .filter((p) => p.columns > 0 && p.rows > 0);
+  const expected = passes.reduce((sum, p) => sum + p.stride * p.rows, 0);
+  if (expected > MAX_PNG_INFLATE_BYTES)
+    throw new StoreError(
+      "This PNG exceeds the decoded scanline budget (64 MiB plus 8 KiB). Reduce its dimensions and try again.",
+      400,
+    );
+  const packed = Buffer.concat(compressed);
   try {
     const raw: unknown = inflateSync(packed, {
       maxOutputLength: expected + 1,
@@ -142,43 +173,48 @@ export function sanitizePng(input: Buffer) {
       decoded.engine.bytesWritten !== packed.length
     )
       throw invalid();
-    for (let row = 0; row < height; row++) {
-      const start = row * stride,
-        filter = decoded.buffer[start]!;
-      if (filter > 4) throw invalid();
-      if (color !== 3) continue;
-      // Indexed samples must refer to real palette entries, even after filtering.
-      // Reverse in the bounded inflate buffer; original compressed bytes stay intact.
-      for (let byte = 1; byte < stride; byte++) {
-        const left = byte > 1 ? decoded.buffer[start + byte - 1]! : 0,
-          up = row > 0 ? decoded.buffer[start - stride + byte]! : 0,
-          upperLeft =
-            row > 0 && byte > 1
-              ? decoded.buffer[start - stride + byte - 1]!
-              : 0;
-        let predictor = 0;
-        if (filter === 1) predictor = left;
-        else if (filter === 2) predictor = up;
-        else if (filter === 3) predictor = Math.floor((left + up) / 2);
-        else if (filter === 4) {
-          const p = left + up - upperLeft,
-            a = Math.abs(p - left),
-            b = Math.abs(p - up),
-            c = Math.abs(p - upperLeft);
-          predictor = a <= b && a <= c ? left : b <= c ? up : upperLeft;
+    let passStart = 0;
+    for (const { columns, rows, stride } of passes) {
+      for (let row = 0; row < rows; row++) {
+        const start = passStart + row * stride,
+          filter = decoded.buffer[start]!;
+        if (filter > 4) throw invalid();
+        if (color !== 3) continue;
+        // Indexed samples must refer to real palette entries, even after filtering.
+        // Reverse in the bounded inflate buffer; original compressed bytes stay intact.
+        for (let byte = 1; byte < stride; byte++) {
+          const left = byte > 1 ? decoded.buffer[start + byte - 1]! : 0,
+            up = row > 0 ? decoded.buffer[start - stride + byte]! : 0,
+            upperLeft =
+              row > 0 && byte > 1
+                ? decoded.buffer[start - stride + byte - 1]!
+                : 0;
+          let predictor = 0;
+          if (filter === 1) predictor = left;
+          else if (filter === 2) predictor = up;
+          else if (filter === 3) predictor = Math.floor((left + up) / 2);
+          else if (filter === 4) {
+            const p = left + up - upperLeft,
+              a = Math.abs(p - left),
+              b = Math.abs(p - up),
+              c = Math.abs(p - upperLeft);
+            predictor = a <= b && a <= c ? left : b <= c ? up : upperLeft;
+          }
+          decoded.buffer[start + byte] =
+            (decoded.buffer[start + byte]! + predictor) & 255;
         }
-        decoded.buffer[start + byte] =
-          (decoded.buffer[start + byte]! + predictor) & 255;
+        for (let pixel = 0; pixel < columns; pixel++) {
+          const bit = pixel * depth,
+            value =
+              (decoded.buffer[start + 1 + Math.floor(bit / 8)]! >>
+                (8 - depth - (bit % 8))) &
+              ((1 << depth) - 1);
+          if (value >= paletteEntries) throw invalid();
+        }
       }
-      for (let pixel = 0; pixel < width; pixel++) {
-        const bit = pixel * depth,
-          value =
-            (decoded.buffer[start + 1 + Math.floor(bit / 8)]! >>
-              (8 - depth - (bit % 8))) &
-            ((1 << depth) - 1);
-        if (value >= paletteEntries) throw invalid();
-      }
+      passStart += stride * rows;
     }
+    if (passStart !== expected) throw invalid();
   } catch {
     throw invalid();
   }

@@ -2,6 +2,8 @@ import { z } from "zod";
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024;
 export const MAX_ASSET_PIXELS = 16 * 1024 * 1024;
 export const MAX_ASSET_DIMENSION = 8192;
+// Preserve the original maximum RGBA8 scanlines plus one filter byte per row.
+export const MAX_PNG_INFLATE_BYTES = MAX_ASSET_PIXELS * 4 + MAX_ASSET_DIMENSION;
 export const MAX_CAMPAIGN_ASSETS = 200;
 export const MAX_CAMPAIGN_ASSET_BYTES = 100 * 1024 * 1024;
 export const assetNameSchema = z.string().trim().min(1).max(120);

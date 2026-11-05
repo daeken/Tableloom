@@ -165,7 +165,7 @@ test("palette/transparency cardinality, ordering, color modes and sample values 
       color: 2,
       extra: Buffer.concat([transparency(0, 0, 0, 0, 0, 0), palette()]),
     }),
-    ...[0, 2, 4, 6].map((color) => pngFixture(1, 1, { color, depth: 16 })),
+    pngFixture(1, 1, { color: 3, depth: 16 }),
     ...[0, 3, 4].map((color) => pngFixture(1, 1, { color, depth: 3 })),
     ...[2, 4, 6].map((color) => pngFixture(1, 1, { color, depth: 4 })),
     indexed(8, 1, [5, 0]),

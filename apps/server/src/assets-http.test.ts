@@ -14,6 +14,11 @@ import { DEFAULT_CAMPAIGN_ID } from "@tableloom/core/campaigns";
 import { createApp } from "./app.js";
 import { TestWebSocket, contextReady } from "./test-client.js";
 import { backgroundStateSchema } from "@tableloom/core/scene-map";
+import {
+  advancedMapFixture,
+  indexedPassFixture,
+  pngPassFixture,
+} from "./png-pass-fixture.js";
 import { pngFixture, indexedMapFixture, pngChunk } from "./png-fixture.js";
 const KEY = "tableloom-asset-http-test-host-key";
 test("asset HTTP uploads stay GM-private and out of snapshots, preserve scope/origin/size/auth checks and survive restart", async () => {
@@ -180,7 +185,7 @@ test("asset HTTP uploads stay GM-private and out of snapshots, preserve scope/or
   }
 });
 
-test("indexed and grayscale PNG uploads retain transparency through private storage, revealed scene delivery, restart, and authorization guards", async () => {
+test("PNG modes, 16-bit precision and Adam7 data retain transparency through private storage, scene replacement/reveal, restart, and authorization guards", async () => {
   const directory = mkdtempSync(join(tmpdir(), "tableloom-asset-modes-")),
     options = { databasePath: join(directory, "table.sqlite"), hostKey: KEY };
   let app = await createApp(options);
@@ -266,6 +271,22 @@ test("indexed and grayscale PNG uploads retain transparency through private stor
         height: 1,
       },
     ];
+    fixtures.push(
+      { input: advancedMapFixture(), width: 320, height: 240 },
+      { input: indexedPassFixture(), width: 17, height: 13 },
+      {
+        input: pngPassFixture({
+          width: 9,
+          height: 5,
+          color: 0,
+          depth: 16,
+          interlace: 0,
+          extra: pngChunk("tRNS", Buffer.from([0x12, 0x34])),
+        }),
+        width: 9,
+        height: 5,
+      },
+    );
     const assets: ReturnType<typeof assetSchema.parse>[] = [];
     const beforeFrames = frames.length,
       core = (await get("table", player)).body;
@@ -300,8 +321,15 @@ test("indexed and grayscale PNG uploads retain transparency through private stor
     assert.equal((await upload(bad)).statusCode, 400);
     assert.equal(
       assetPageSchema.parse((await get(root, gm)).json()).totalCount,
-      4,
+      7,
     );
+    const priorPage = (await get(root, gm)).body;
+    const excessive = await upload(
+      pngFixture(8192, 2048, { color: 6, depth: 16, raw: Buffer.alloc(2) }),
+    );
+    assert.equal(excessive.statusCode, 400);
+    assert.match(excessive.json().error, /decoded scanline budget/);
+    assert.equal((await get(root, gm)).body, priorPage);
     const control = backgroundStateSchema.parse((await get(maps, gm)).json());
     const placed = backgroundStateSchema.parse(
       (
@@ -318,7 +346,9 @@ test("indexed and grayscale PNG uploads retain transparency through private stor
         )
       ).json(),
     );
-    const image = `${maps}/${control.context.sceneId}/${placed.map!.imageId}/content`;
+    let image = `${maps}/${control.context.sceneId}/${placed.map!.imageId}/content`,
+      expectedShared = indexed;
+    let lastImageId = placed.map!.imageId;
     assert.equal((await get(image, player)).statusCode, 404);
     await post(
       `${maps}/visibility`,
@@ -335,9 +365,51 @@ test("indexed and grayscale PNG uploads retain transparency through private stor
     assert.deepEqual(shared.rawPayload, indexed);
     assert.equal(shared.headers["x-content-type-options"], "nosniff");
     assert.equal(shared.headers["cache-control"], "no-store");
+    // Replace the public scene with each new mode: the replacement starts private.
+    for (let i = 4; i < fixtures.length; i++) {
+      const current = backgroundStateSchema.parse((await get(maps, gm)).json()),
+        oldImage = image;
+      const next = backgroundStateSchema.parse(
+        (
+          await post(
+            `${maps}/set`,
+            {
+              context: current.context,
+              expectedVersion: current.version,
+              assetId: assets[i]!.id,
+              position: { x: 0, y: 0 },
+              width: 400,
+            },
+            gm,
+          )
+        ).json(),
+      );
+      image = `${maps}/${next.context.sceneId}/${next.map!.imageId}/content`;
+      expectedShared = fixtures[i]!.input;
+      lastImageId = next.map!.imageId;
+      assert.equal((await get(image, player)).statusCode, 404);
+      assert.equal((await get(oldImage, player)).statusCode, 404);
+      assert.equal((await get(image, gm)).statusCode, 200);
+      assert.equal(
+        (
+          await post(
+            `${maps}/visibility`,
+            {
+              context: next.context,
+              expectedVersion: next.version,
+              visibility: "public",
+              acknowledgeReveal: true,
+            },
+            gm,
+          )
+        ).statusCode,
+        200,
+      );
+      assert.deepEqual((await get(image, player)).rawPayload, expectedShared);
+    }
     // A later visible snapshot lets us check the whole stream for private identifiers.
     const end = Date.now() + 5000;
-    while (!frames.some((f) => f.includes(placed.map!.imageId))) {
+    while (!frames.some((f) => f.includes(lastImageId))) {
       assert.ok(Date.now() < end);
       await new Promise((r) => setTimeout(r, 5));
     }
@@ -351,7 +423,7 @@ test("indexed and grayscale PNG uploads retain transparency through private stor
         (await get(`${root}/${assets[i]!.id}/content`, gm)).rawPayload,
         fixtures[i]!.expected ?? fixtures[i]!.input,
       );
-    assert.deepEqual((await get(image, player)).rawPayload, indexed);
+    assert.deepEqual((await get(image, player)).rawPayload, expectedShared);
     await post(`access/members/${playerGrant.json().member.id}/remove`, {}, gm);
     assert.equal((await get(image, player)).statusCode, 401);
   } finally {

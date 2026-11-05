@@ -211,11 +211,12 @@ export function AssetLibraryDialog({
         onChange={(event) => setName(event.target.value)}
       />
       <p className="asset-help">
-        Static, non-interlaced PNGs: RGB/RGBA, indexed color, or grayscale, with
-        transparency. JPEGs are converted to PNG with orientation applied and
-        metadata removed; CMYK is unsupported. Both the upload and saved PNG
-        must fit 5 MiB, up to 8192 pixels per side and 16 megapixels. 16-bit and
-        interlaced PNG support are queued.
+        Static PNGs: RGB/RGBA, indexed color, or grayscale, including 16-bit and
+        interlaced images, with transparency. JPEGs are converted to PNG with
+        orientation applied and metadata removed; CMYK is unsupported. Both the
+        upload and saved PNG must fit 5 MiB, up to 8192 pixels per side and 16
+        megapixels. Large 16-bit or interlaced PNGs may need smaller dimensions
+        to fit the image memory limit.
       </p>
       <div className="selection-delete-actions">
         <button
