@@ -40,7 +40,7 @@ import {
 } from "./access-http.js";
 
 import type { ServerSystemDefinition } from "@tableloom/module-sdk/server";
-const installedSystems = new Set(installedModules.map((module) => module.id));
+import type { InstalledCatalog } from "./store.js";
 
 export async function createApp(options: {
   databasePath: string;
@@ -51,11 +51,51 @@ export async function createApp(options: {
   secureCookies?: boolean;
   now?: () => number;
   documentSystems?: readonly ServerSystemDefinition<unknown>[];
+  catalog?: InstalledCatalog;
+  sessionCookieName?: string;
 }) {
+  const installedSystems = new Set(
+    (options.catalog?.systems ?? installedModules).map((module) => module.id),
+  );
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: 256 * 1024,
   });
+  // HTTP cookies do not distinguish ports; isolated local instances can opt out
+  // of the default namespace without changing the stores' credential parser.
+  if (
+    options.sessionCookieName !== undefined &&
+    options.sessionCookieName !== "tableloom_session"
+  ) {
+    const name = z
+      .string()
+      .regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)
+      .parse(options.sessionCookieName);
+    app.addHook("onRequest", async (request) => {
+      const matches = (request.headers.cookie ?? "")
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => part.startsWith(`${name}=`));
+      request.headers.cookie =
+        matches.length === 1
+          ? `tableloom_session=${matches[0]!.slice(name.length + 1)}`
+          : "";
+    });
+    app.addHook("onSend", async (_request, reply, payload) => {
+      const header = reply.getHeader("set-cookie"),
+        rename = (value: string) =>
+          value.replace(/^tableloom_session=/, `${name}=`);
+      if (typeof header === "string" || Array.isArray(header)) {
+        // Fastify appends Set-Cookie values unless the existing header is removed.
+        reply.removeHeader("set-cookie");
+        reply.header(
+          "Set-Cookie",
+          typeof header === "string" ? rename(header) : header.map(rename),
+        );
+      }
+      return payload;
+    });
+  }
   const now = options.now ?? Date.now;
   let publicOrigin: string | undefined;
   if (options.publicOrigin) {
@@ -83,7 +123,7 @@ export async function createApp(options: {
   let sceneGrids: SceneGridStore;
   let chat: ChatStore;
   try {
-    store = new TableStore(database);
+    store = new TableStore(database, options.catalog);
     access = new AccessStore(database, options.hostKey, now);
     store.load();
     documents = new DocumentStore(database, store, options.documentSystems);

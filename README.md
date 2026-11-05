@@ -77,10 +77,10 @@ This is the **single source of truth for goals and remaining work**. Work top to
 
 - [x] Add validated, versioned server actions for persisted module documents.
 - [x] Connect saved module documents to module-provided sheet editors and versioned action callbacks.
-- [ ] **Next:** add a module preview/test harness with synthetic integration examples; add sourced rules examples when PDFs arrive.
-- [ ] Load content packs with stable definitions, owned item instances and campaign homebrew overrides.
-- [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references.
-- [ ] **Needs PDFs:** inventory and implement Kids on Bikes and Kids on Brooms separately; extract shared code only where demonstrated.
+- [x] Add an isolated module preview/test harness with synthetic sheet/action examples.
+- [ ] **Next:** load content packs with stable definitions, owned item instances and campaign homebrew overrides.
+- [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references and sourced preview cases.
+- [ ] **Needs PDFs:** inventory and implement Kids on Bikes and Kids on Brooms separately, with sourced preview cases; extract shared code only where demonstrated.
 - [ ] Run character creation, sheet editing, rolls and resource updates in two structurally different systems without changing core.
 
 ### Make self-hosting dependable
@@ -98,6 +98,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [Platform reference](docs/platform.md) — architecture, tools, APIs, limits and upgrade behavior
 - [Development history](docs/progress.md) — detailed changes and verification results
 - [Agent instructions](AGENTS.md) — repository workflow and constraints
+
+Module authors can run `npm run modules:preview` for a temporary local sheet/action workspace, or `npm run modules:check` for automated HTTP/client checks. See the [platform reference](docs/platform.md#module-authoring-preview).
 
 Run `npm run check` before completing cross-cutting changes. Keep this README short: update task status and material scope changes here, and put detailed implementation notes in `docs/`. The existing five-minute build automation follows this task list; completed verified increments are committed and pushed to the current branch.
 

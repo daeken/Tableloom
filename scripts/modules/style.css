@@ -1,0 +1,56 @@
+body {
+  overflow: auto;
+}
+.preview-page {
+  width: min(100%, 820px);
+  padding: 24px;
+  margin: auto;
+}
+.preview-page h1 {
+  font-family: Georgia, serif;
+  font-size: 30px;
+}
+.preview-page p {
+  line-height: 1.6;
+}
+.preview-controls,
+.example-fields {
+  display: grid;
+  gap: 10px;
+}
+.preview-controls select,
+.preview-controls button,
+.example-fields button {
+  min-height: 44px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  padding: 10px;
+}
+.preview-controls select {
+  width: 100%;
+  min-width: 0;
+}
+.preview-page .module-documents {
+  padding: 20px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  margin-top: 16px;
+}
+.example-check {
+  min-height: 44px;
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+}
+.example-check input {
+  width: 24px;
+  min-height: 24px;
+}
+@media (max-width: 600px) {
+  .preview-page {
+    padding: 12px;
+  }
+  .preview-page .module-documents {
+    padding: 12px;
+  }
+}
