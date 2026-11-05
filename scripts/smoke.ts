@@ -1063,6 +1063,87 @@ try {
           : { font: "serif", weight: "bold", align: "center" },
       );
     }
+    const shapeId = randomUUID(),
+      shapeAdded = snapshot(live, (m) =>
+        m.state.drawings.some((d) => d.id === shapeId),
+      );
+    live.send(
+      JSON.stringify({
+        context: textEdited.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: {
+            id: shapeId,
+            kind: "rectangle",
+            color: "#405f4d",
+            points: [
+              { x: 20, y: 20 },
+              { x: 220, y: 160 },
+            ],
+          },
+        },
+      }),
+    );
+    let shapeState = await shapeAdded;
+    const styled = snapshot(
+      live,
+      (m) =>
+        m.state.drawings.find((d) => d.id === shapeId)?.shapeStyle
+          ?.lineWidth === 12,
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.style.update",
+          drawingId: shapeId,
+          expectedVersion: 1,
+          changes: {
+            color: "#b45f4e",
+            shapeStyle: {
+              lineWidth: 12,
+              fill: { color: "#627d9c", opacity: 0.35 },
+            },
+          },
+        },
+      }),
+    );
+    shapeState = await styled;
+    assert.equal(shapeState.history.undo!.action, "edit");
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const result = snapshot(
+          live,
+          (m) =>
+            Boolean(
+              m.state.drawings.find((d) => d.id === shapeId)?.shapeStyle,
+            ) ===
+            (type === "scene.redo"),
+        ),
+        edge =
+          type === "scene.undo"
+            ? shapeState.history.undo!
+            : shapeState.history.redo!;
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      const shape = shapeState.state.drawings.find((d) => d.id === shapeId)!;
+      assert.deepEqual(shape.points, [
+        { x: 20, y: 20 },
+        { x: 220, y: 160 },
+      ]);
+      assert.equal(shape.color, type === "scene.undo" ? "#405f4d" : "#b45f4e");
+    }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(
@@ -1286,5 +1367,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

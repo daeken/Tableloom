@@ -1,7 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { tokenSchema, tableSchema, sceneTextSnapshot } from "@tableloom/core";
+import {
+  tokenSchema,
+  tableSchema,
+  sceneTextSnapshot,
+  shapeSnapshot,
+} from "@tableloom/core";
 import type { Command, TableState, Token } from "@tableloom/core";
 import { applyCommand } from "@tableloom/core/server";
 import { memberSchema } from "@tableloom/core/access";
@@ -42,7 +47,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 11;
+          ?.version === 12;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -143,11 +148,14 @@ export class SceneHistoryStore {
             )) &&
           (payload.kind !== "text-update" ||
             ("kind" in object && object.kind === "text")) &&
+          (payload.kind !== "shape-update" ||
+            ("kind" in object && object.kind !== "text")) &&
           canEditObject(member, object) &&
           object.version === target.expectedVersion
         );
       });
     if (
+      payload.kind === "shape-update" ||
       payload.kind === "text-update" ||
       payload.kind === "move" ||
       payload.kind === "move-many" ||
@@ -198,7 +206,7 @@ export class SceneHistoryStore {
           objectId: target.objectId,
           objectCount: entry.targets.length,
           action:
-            payload.kind === "text-update"
+            payload.kind === "text-update" || payload.kind === "shape-update"
               ? "edit"
               : payload.kind === "token-resize" ||
                   payload.kind === "resize-many"
@@ -276,6 +284,7 @@ export class SceneHistoryStore {
         "drawing.add",
         "drawing.resize",
         "drawing.text.update",
+        "drawing.style.update",
         "token.resize",
         "objects.resize",
         "token.move",
@@ -304,7 +313,27 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "drawing.text.update") {
+      if (command.type === "drawing.style.update") {
+        ids = [command.drawingId];
+        const from = before.drawings.find((d) => d.id === command.drawingId),
+          to = after.drawings.find((d) => d.id === command.drawingId);
+        if (
+          !from ||
+          !to ||
+          from.kind === "text" ||
+          to.kind !== from.kind ||
+          to.ownerId !== from.ownerId ||
+          to.version !== from.version + 1 ||
+          JSON.stringify(from.points) !== JSON.stringify(to.points)
+        )
+          throw new Error("Invalid shape style transition.");
+        payload = {
+          kind: "shape-update",
+          objectType: "drawing",
+          before: shapeSnapshot(from),
+          after: shapeSnapshot(to),
+        };
+      } else if (command.type === "drawing.text.update") {
         ids = [command.drawingId];
         const from = before.drawings.find((d) => d.id === command.drawingId),
           to = after.drawings.find((d) => d.id === command.drawingId);
@@ -588,7 +617,17 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "text-update") {
+      if (payload.kind === "shape-update") {
+        next = structuredClone(state);
+        const drawing = next.drawings.find((d) => d.id === target.objectId)!,
+          saved = undo ? payload.before : payload.after;
+        drawing.color = saved.color;
+        if (saved.shapeStyle === null) delete drawing.shapeStyle;
+        else drawing.shapeStyle = structuredClone(saved.shapeStyle);
+        drawing.version += 1;
+        next.revision += 1;
+        next = tableSchema.parse(next);
+      } else if (payload.kind === "text-update") {
         next = applyCommand(
           state,
           {

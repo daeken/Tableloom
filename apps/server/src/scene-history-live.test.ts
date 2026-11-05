@@ -1680,3 +1680,204 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("shape styles synchronize publicly with private cursors, exact retries/absence restoration, binding rollback and restart conflicts", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-shape-style-live-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, payload: Record<string, unknown>, cookie = "") =>
+      app.inject({
+        method: "POST",
+        url: `/api/access/${route}`,
+        headers: { cookie, origin: "http://localhost" },
+        payload,
+      }),
+    cookieOf = (r: { headers: Record<string, unknown> }) =>
+      String(r.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      invite = async (name: string) =>
+        cookieOf(
+          await post("join", {
+            name,
+            code: (await post("invitations", {}, gm)).json().token,
+          }),
+        ),
+      player = await invite("Editor"),
+      other = await invite("Other");
+    let p = await connect(url, player),
+      g = await connect(url, gm),
+      q = await connect(url, other);
+    sockets.push(p.ws, g.ws, q.ws);
+    const id = randomUUID(),
+      points = [
+        { x: 60, y: 90 },
+        { x: 260, y: 250 },
+      ];
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: { id, kind: "rectangle", color: "#405f4d", points },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => q.latest().state.drawings.length === 1);
+    const edit = {
+      id: randomUUID(),
+      type: "drawing.style.update",
+      drawingId: id,
+      expectedVersion: 1,
+      changes: {
+        color: "#b45f4e",
+        shapeStyle: {
+          lineWidth: 16,
+          fill: { color: "#627d9c", opacity: 0.35 },
+        },
+      },
+    };
+    assert.equal((await q.send(edit)).type, "error");
+    assert.equal((await p.send(edit)).type, "ack");
+    await until(
+      () =>
+        g.latest().state.drawings[0]?.version === 2 &&
+        q.latest().state.drawings[0]?.version === 2,
+    );
+    assert.deepEqual(
+      q.latest().state.drawings[0]!.shapeStyle,
+      edit.changes.shapeStyle,
+    );
+    assert.deepEqual(g.latest().state.drawings[0]!.points, points);
+    const cursor = p.latest().history.undo!;
+    assert.equal(cursor.action, "edit");
+    assert.equal(g.latest().history.undo, null);
+    assert.equal(q.latest().history.undo, null);
+    assert.ok(
+      !JSON.stringify([...g.messages, ...q.messages]).includes(cursor.id),
+    );
+    const saved = store.load();
+    assert.equal((await p.send(edit)).type, "ack");
+    assert.deepEqual(store.load(), saved);
+    assert.equal(
+      (
+        await p.send({
+          ...edit,
+          changes: { ...edit.changes, color: "#123456" },
+        })
+      ).type,
+      "error",
+    );
+    assert.deepEqual(store.load(), saved);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: cursor.id,
+          expectedVersion: cursor.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.equal(Object.hasOwn(store.load().drawings[0]!, "shapeStyle"), false);
+    assert.equal(store.load().drawings[0]!.color, "#405f4d");
+    const redo = p.latest().history.redo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    const next = {
+        ...edit,
+        id: randomUUID(),
+        expectedVersion: 4,
+        changes: { color: "#a27a44", shapeStyle: { lineWidth: 6, fill: null } },
+      },
+      before = store.load();
+    db.exec(
+      "CREATE TRIGGER reject_shape_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture shape binding'); END",
+    );
+    assert.equal((await p.send(next)).type, "error");
+    assert.deepEqual(store.load(), before);
+    assert.equal(store.hasCommand(next.id), false);
+    db.exec("DROP TRIGGER reject_shape_binding");
+    assert.equal((await p.send(next)).type, "ack");
+    const edge = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: edge.id,
+          expectedVersion: edge.version,
+        })
+      ).type,
+      "ack",
+    );
+    const remaining = p.latest().history.redo!;
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    assert.deepEqual(
+      p.latest().state.drawings[0]!.shapeStyle,
+      edit.changes.shapeStyle,
+    );
+    assert.equal(p.latest().history.redo!.id, remaining.id);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: remaining.id,
+          expectedVersion: remaining.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.deepEqual(
+      store.load().drawings[0]!.shapeStyle,
+      next.changes.shapeStyle,
+    );
+    await until(() => g.latest().state.drawings[0]?.version === 7);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "objects.move",
+          objects: [{ objectId: id, expectedVersion: 7 }],
+          delta: { x: 60, y: 0 },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.drawings[0]?.version === 8);
+    assert.equal(p.latest().history.undo!.available, false);
+    assert.equal(
+      (await p.send({ ...next, id: randomUUID(), expectedVersion: 7 })).type,
+      "error",
+    );
+    assert.equal((await p.send(next)).type, "ack");
+    assert.equal(store.load().drawings[0]!.version, 8);
+  } finally {
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -3,7 +3,18 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
+import { shapeStyleSchema, shapeContentSchema } from "./shape-style.js";
+import type { ShapeStyle } from "./shape-style.js";
+export {
+  shapeStyleSchema,
+  shapeContentSchema,
+  shapeSnapshotSchema,
+  shapeStyleOf,
+  sameShapeStyle,
+  shapeSnapshot,
+} from "./shape-style.js";
+export type { ShapeStyle } from "./shape-style.js";
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -55,6 +66,7 @@ const drawingDataSchema = z.object({
   kind: z.enum(["stroke", "rectangle", "text"]),
   text: sceneTextSchema.optional(),
   textStyle: sceneTextStyleSchema.optional(),
+  shapeStyle: shapeStyleSchema.optional(),
   points: z.array(pointSchema).min(2).max(2000),
   color: colorSchema,
   ownerId: z.uuid().nullable(),
@@ -65,6 +77,7 @@ function validateTextDrawing(
     kind: string;
     text?: string | undefined;
     textStyle?: SceneTextStyle | undefined;
+    shapeStyle?: ShapeStyle | undefined;
     points: Point[];
   },
   context: z.RefinementCtx,
@@ -72,6 +85,7 @@ function validateTextDrawing(
 ) {
   if (drawing.kind === "text") {
     if (
+      drawing.shapeStyle !== undefined ||
       drawing.text === undefined ||
       (requireStyle && drawing.textStyle === undefined) ||
       drawing.points.length !== 2 ||
@@ -83,7 +97,15 @@ function validateTextDrawing(
         message:
           "Text labels need text and two ordered corners with positive width and height.",
       });
-  } else if (drawing.text !== undefined || drawing.textStyle !== undefined)
+  } else if (drawing.kind === "stroke" && drawing.shapeStyle?.fill)
+    context.addIssue({
+      code: "custom",
+      message: "Freehand strokes cannot have a fill.",
+    });
+  if (
+    drawing.kind !== "text" &&
+    (drawing.text !== undefined || drawing.textStyle !== undefined)
+  )
     context.addIssue({
       code: "custom",
       message: "Only text labels may contain text.",
@@ -92,12 +114,16 @@ function validateTextDrawing(
 export const drawingSchema = drawingDataSchema
   .strict()
   .superRefine(validateTextDrawing);
+export const preShapeDrawingSchema = drawingDataSchema
+  .omit({ shapeStyle: true })
+  .strict()
+  .superRefine(validateTextDrawing);
 export const preStyleDrawingSchema = drawingDataSchema
-  .omit({ textStyle: true })
+  .omit({ textStyle: true, shapeStyle: true })
   .strict()
   .superRefine((d, c) => validateTextDrawing(d, c, false));
 export const preTextDrawingSchema = drawingDataSchema
-  .omit({ text: true, textStyle: true })
+  .omit({ text: true, textStyle: true, shapeStyle: true })
   .extend({ kind: z.enum(["stroke", "rectangle"]) })
   .strict();
 export type Drawing = z.infer<typeof drawingSchema>;
@@ -170,7 +196,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(8),
+  schemaVersion: z.literal(9),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -216,7 +242,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 8,
+  schemaVersion: 9,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -230,6 +256,12 @@ const legacyDrawingSchema = preTextDrawingSchema
   .strict();
 const legacyTokenSchema = tokenSchema
   .omit({ version: true, radius: true })
+  .strict();
+const version8TableSchema = tableDataSchema
+  .extend({
+    schemaVersion: z.literal(8),
+    drawings: z.array(preShapeDrawingSchema).max(2000),
+  })
   .strict();
 const version7TableSchema = tableDataSchema
   .extend({
@@ -279,13 +311,19 @@ export function restoreTable(value: unknown): {
 } {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
+  const unshaped = version8TableSchema.safeParse(value);
+  if (unshaped.success)
+    return {
+      migrated: true,
+      state: tableSchema.parse({ ...unshaped.data, schemaVersion: 9 }),
+    };
   const unstyled = version7TableSchema.safeParse(value);
   if (unstyled.success)
     return {
       migrated: true,
       state: tableSchema.parse({
         ...unstyled.data,
-        schemaVersion: 8,
+        schemaVersion: 9,
         drawings: unstyled.data.drawings.map((d) =>
           d.kind === "text"
             ? { ...d, textStyle: { ...DEFAULT_TEXT_STYLE } }
@@ -297,7 +335,7 @@ export function restoreTable(value: unknown): {
   if (previous.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...previous.data, schemaVersion: 8 }),
+      state: tableSchema.parse({ ...previous.data, schemaVersion: 9 }),
     };
   const sized = version5TableSchema.safeParse(value);
   if (sized.success)
@@ -305,7 +343,7 @@ export function restoreTable(value: unknown): {
       migrated: true,
       state: tableSchema.parse({
         ...sized.data,
-        schemaVersion: 8,
+        schemaVersion: 9,
         tokens: sized.data.tokens.map((token) => ({
           ...token,
           radius: DEFAULT_TOKEN_RADIUS,
@@ -322,7 +360,7 @@ export function restoreTable(value: unknown): {
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 8,
+    schemaVersion: 9,
     notes: legacy.schemaVersion === 4 ? legacy.notes : [],
     drawings: legacy.drawings.map((drawing) => ({
       ...drawing,
@@ -413,6 +451,15 @@ export const resizeBoundsSchema = z
 export type ResizeBounds = z.infer<typeof resizeBoundsSchema>;
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("drawing.style.update"),
+      drawingId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      changes: shapeContentSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

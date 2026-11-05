@@ -7,6 +7,9 @@ import {
   tokenRadiusSchema,
   sceneTextContentSchema,
   sameTextStyle,
+  shapeContentSchema,
+  shapeStyleOf,
+  sameShapeStyle,
 } from "./index.js";
 import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -69,6 +72,24 @@ export function authorizeCommand(
           return object;
         });
       resizedObjects(objects, command.scale);
+      return;
+    }
+    case "drawing.style.update": {
+      const drawing = state.drawings.find((d) => d.id === command.drawingId);
+      if (!drawing || drawing.kind === "text")
+        throw new Error("That shape is unavailable.");
+      if (!canEditObject(member, drawing))
+        throw new Error("Only the owner or GM can style this shape.");
+      if (drawing.version !== command.expectedVersion)
+        throw new Error("This shape changed. Review it before styling again.");
+      const changes = shapeContentSchema.parse(command.changes);
+      if (drawing.kind === "stroke" && changes.shapeStyle.fill !== null)
+        throw new Error("Freehand strokes cannot have a fill.");
+      if (
+        changes.color === drawing.color &&
+        sameShapeStyle(changes.shapeStyle, shapeStyleOf(drawing))
+      )
+        throw new Error("Change the line or fill before saving.");
       return;
     }
     case "drawing.text.update": {

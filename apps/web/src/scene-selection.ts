@@ -1,3 +1,4 @@
+import { shapeStyleOf } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
 import type { TableView } from "@tableloom/core";
 import { canEditObject } from "@tableloom/core/permissions";
@@ -79,6 +80,7 @@ export function hitDrawing(
       point.y <= box.bottom + tolerance
     );
   }
+  tolerance += shapeStyleOf(drawing).lineWidth / 2;
   let points = drawing.points;
   if (drawing.kind === "rectangle") {
     const first = points[0]!,

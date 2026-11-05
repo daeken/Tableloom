@@ -108,6 +108,13 @@ export function applyCommand(
       }
       break;
     }
+    case "drawing.style.update": {
+      const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
+      drawing.color = command.changes.color;
+      drawing.shapeStyle = structuredClone(command.changes.shapeStyle);
+      drawing.version += 1;
+      break;
+    }
     case "drawing.text.update": {
       const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
       drawing.text = command.changes.text;

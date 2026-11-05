@@ -1,3 +1,5 @@
+import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
+import { shapeStyleOf } from "@tableloom/core";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { EditTextDialog } from "./EditTextDialog.js";
 import { TextPlacementDialog } from "./TextPlacementDialog.js";
@@ -135,6 +137,7 @@ export function Tabletop({
   const [resizeSelection, setResizeSelection] = useState<SceneObject[] | null>(
     null,
   );
+  const [editShape, setEditShape] = useState<Drawing | null>(null);
   const [editText, setEditText] = useState<Drawing | null>(null);
   const [resizeToken, setResizeToken] = useState<Token | null>(null);
   const [selectionError, setSelectionError] = useState("");
@@ -159,7 +162,8 @@ export function Tabletop({
     void app
       .init({
         resizeTo: element,
-        background: "#eae7dd",
+        // Transparent premultiplied surfaces must clear RGB to zero as well.
+        background: "#000000",
         backgroundAlpha: 0,
         antialias: true,
         resolution: Math.min(devicePixelRatio, 2),
@@ -278,7 +282,8 @@ export function Tabletop({
           Math.max(1, Math.abs(last.y - first.y)),
           3,
         );
-        graphic.fill({ color: drawing.color, alpha: 0.07 });
+        const fill = shapeStyleOf(drawing).fill;
+        if (fill) graphic.fill({ color: fill.color, alpha: fill.opacity });
       } else {
         graphic.moveTo(first.x, first.y);
         for (const point of drawing.points.slice(1))
@@ -287,7 +292,7 @@ export function Tabletop({
       if (drawing.kind !== "text")
         graphic.stroke({
           color: drawing.color,
-          width: 3,
+          width: shapeStyleOf(drawing).lineWidth,
           cap: "round",
           join: "round",
         });
@@ -794,6 +799,19 @@ export function Tabletop({
                 Edit label…
               </button>
             )}
+          {selectedObjects.length === 1 &&
+            "kind" in selectedObjects[0]! &&
+            selectedObjects[0].kind !== "text" && (
+              <button
+                disabled={!enabled || pending}
+                onClick={() => {
+                  setGesture(null);
+                  setEditShape(selectedObjects[0] as Drawing);
+                }}
+              >
+                Style shape…
+              </button>
+            )}
           {selectedObjects.length > 1 && (
             <button
               disabled={!enabled || pending}
@@ -834,6 +852,17 @@ export function Tabletop({
           pending={pending}
           send={send}
           close={() => setResizeSelection(null)}
+        />
+      )}
+      {editShape && (
+        <ShapeStyleDialog
+          drawing={editShape}
+          state={state}
+          member={member}
+          enabled={enabled}
+          pending={pending}
+          send={send}
+          close={() => setEditShape(null)}
         />
       )}
       {editText && (

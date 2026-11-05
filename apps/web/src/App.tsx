@@ -107,6 +107,7 @@ export function App() {
         "drawing.add",
         "drawing.resize",
         "drawing.text.update",
+        "drawing.style.update",
         "token.resize",
         "objects.resize",
         "token.move",
