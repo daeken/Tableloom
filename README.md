@@ -6,7 +6,7 @@ The goal is support for **any game system** through independently versioned code
 
 ## Current state
 
-The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available.
+The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** now saves module-provided character records with private/shared access.
 
 **Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility, performance and deployment/recovery tooling still need work.
 
@@ -76,8 +76,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 ### Make game modules playable
 
 - [x] Add validated, versioned server actions for persisted module documents.
-- [ ] **Next:** connect persisted module documents to custom character sheets and action controls.
-- [ ] Add a module preview/test harness with worked rules examples.
+- [x] Connect saved module documents to module-provided sheet editors and versioned action callbacks.
+- [ ] **Next:** add a module preview/test harness with synthetic integration examples; add sourced rules examples when PDFs arrive.
 - [ ] Load content packs with stable definitions, owned item instances and campaign homebrew overrides.
 - [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references.
 - [ ] **Needs PDFs:** inventory and implement Kids on Bikes and Kids on Brooms separately; extract shared code only where demonstrated.

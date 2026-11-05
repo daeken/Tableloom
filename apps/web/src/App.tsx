@@ -26,9 +26,9 @@ import {
 import { manifest as cyberpunk } from "@tableloom/cyberpunk-red";
 import { manifest as bikes } from "@tableloom/kids-on-bikes";
 import { manifest as brooms } from "@tableloom/kids-on-brooms";
-import { SystemPanel as CyberpunkPanel } from "@tableloom/cyberpunk-red/client";
-import { SystemPanel as BikesPanel } from "@tableloom/kids-on-bikes/client";
-import { SystemPanel as BroomsPanel } from "@tableloom/kids-on-brooms/client";
+import { browserSystem as cyberpunkBrowser } from "@tableloom/cyberpunk-red/client";
+import { browserSystem as bikesBrowser } from "@tableloom/kids-on-bikes/client";
+import { browserSystem as broomsBrowser } from "@tableloom/kids-on-brooms/client";
 import { parseDice } from "@tableloom/core";
 import type { RollVisibility } from "@tableloom/core";
 import { BattlefieldBoundary } from "./BattlefieldBoundary.js";
@@ -45,14 +45,15 @@ import { contextKey } from "@tableloom/core/campaigns";
 import { SceneHistoryControls } from "./SceneHistoryControls.js";
 import { CommandStatus } from "./CommandStatus.js";
 import { NotesPanel } from "./NotesPanel.js";
+import { ModuleDocumentsPanel } from "./ModuleDocumentsPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
 
 const modules = [cyberpunk, bikes, brooms];
 const panels = {
-  "cyberpunk-red": CyberpunkPanel,
-  "kids-on-bikes": BikesPanel,
-  "kids-on-brooms": BroomsPanel,
+  "cyberpunk-red": cyberpunkBrowser,
+  "kids-on-bikes": bikesBrowser,
+  "kids-on-brooms": broomsBrowser,
 };
 const Tabletop = lazy(() =>
   import("./Tabletop.js").then((module) => ({ default: module.Tabletop })),
@@ -172,7 +173,7 @@ export function App() {
   );
   const currentModule =
     modules.find((m) => m.id === state?.systemId) ?? cyberpunk;
-  const Panel = panels[currentModule.id as keyof typeof panels];
+  const browserModule = panels[currentModule.id as keyof typeof panels];
   useEffect(() => {
     setDraft({ viewerKey, expression: "2d6", visibility: "public" });
     setRollError("");
@@ -657,7 +658,15 @@ export function App() {
             tabIndex={0}
             hidden={tab !== "game"}
           >
-            {tab === "game" && <Panel />}
+            {member && state && (
+              <ModuleDocumentsPanel
+                key={`documents:${viewerKey}:${browserModule.manifest.id}:${browserModule.manifest.version}`}
+                member={member}
+                module={browserModule}
+                enabled={connected}
+                active={tab === "game"}
+              />
+            )}
           </section>
           <section
             id="table-panel-rolls"
