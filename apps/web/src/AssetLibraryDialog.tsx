@@ -100,7 +100,12 @@ export function AssetLibraryDialog({
         {
           method: "POST",
           credentials: "same-origin",
-          headers: { "Content-Type": "image/png" },
+          headers: {
+            "Content-Type":
+              file.type === "image/jpeg" || /\.jpe?g$/i.test(file.name)
+                ? "image/jpeg"
+                : "image/png",
+          },
           body: file,
           signal: controller.signal,
         },
@@ -179,12 +184,12 @@ export function AssetLibraryDialog({
         {usage.count}/200 images · {(usage.bytes / 1024 / 1024).toFixed(1)}/100
         MiB stored
       </p>
-      <label htmlFor="asset-file">PNG image (up to 5 MiB)</label>
+      <label htmlFor="asset-file">PNG or JPEG image (up to 5 MiB)</label>
       <input
         ref={fileInput}
         id="asset-file"
         type="file"
-        accept="image/png,.png"
+        accept="image/png,image/jpeg,.png,.jpg,.jpeg"
         disabled={busy}
         onChange={(event) => {
           const selected = event.target.files?.[0] ?? null;
@@ -192,7 +197,7 @@ export function AssetLibraryDialog({
           setName(selected?.name.slice(0, 120) ?? "");
           setError(
             selected && selected.size > MAX_ASSET_BYTES
-              ? "Choose a PNG no larger than 5 MiB."
+              ? "Choose an image no larger than 5 MiB."
               : "",
           );
         }}
@@ -207,8 +212,10 @@ export function AssetLibraryDialog({
       />
       <p className="asset-help">
         Static, non-interlaced PNGs: RGB/RGBA, indexed color, or grayscale, with
-        transparency. Up to 8192 pixels on either side and 16 megapixels. JPEG,
-        16-bit and interlaced PNG support are queued.
+        transparency. JPEGs are converted to PNG with orientation applied and
+        metadata removed; CMYK is unsupported. Both the upload and saved PNG
+        must fit 5 MiB, up to 8192 pixels per side and 16 megapixels. 16-bit and
+        interlaced PNG support are queued.
       </p>
       <div className="selection-delete-actions">
         <button

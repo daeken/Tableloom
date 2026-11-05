@@ -79,7 +79,7 @@ test("asset HTTP uploads stay GM-private and out of snapshots, preserve scope/or
       403,
     );
     assert.equal(
-      (await upload(gm, binary, "http://localhost", "image/jpeg")).statusCode,
+      (await upload(gm, binary, "http://localhost", "image/webp")).statusCode,
       415,
     );
     assert.equal(

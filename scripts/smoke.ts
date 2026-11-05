@@ -1,3 +1,4 @@
+import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
 import { backgroundStateSchema } from "@tableloom/core/scene-map";
 import { assetSchema, assetPageSchema } from "@tableloom/core/assets";
 import { indexedMapFixture } from "../apps/server/src/png-fixture.js";
@@ -967,6 +968,35 @@ try {
     );
     assert.equal(unauthenticatedImage.status, 401);
     await unauthenticatedImage.text();
+    const jpegUpload = await fetch(`${assetRoot}?name=Oriented%20JPEG.jpg`, {
+      method: "POST",
+      headers: {
+        Cookie: nextCookie,
+        Origin: url,
+        "Content-Type": "image/jpeg",
+      },
+      body: new Uint8Array(jpegFixture(32, 24, 6)),
+    });
+    assert.equal(jpegUpload.status, 201);
+    const normalized = assetSchema.parse(await jpegUpload.json());
+    assert.equal(normalized.mimeType, "image/png");
+    assert.equal(normalized.width, 24);
+    assert.equal(normalized.height, 32);
+    const normalizedDownload = await fetch(
+      `${assetRoot}/${normalized.id}/content`,
+      { headers: { Cookie: nextCookie } },
+    );
+    assert.equal(normalizedDownload.headers.get("content-type"), "image/png");
+    const normalizedBytes = Buffer.from(await normalizedDownload.arrayBuffer());
+    assert.equal(normalizedBytes.readUInt32BE(16), 24);
+    assert.equal(normalizedBytes.readUInt32BE(20), 32);
+    assert.ok(!normalizedBytes.includes(Buffer.from("Exif")));
+    const removeNormalized = await fetch(
+      `${assetRoot}/${normalized.id}/delete`,
+      { method: "POST", headers: documentHeaders, body: "{}" },
+    );
+    assert.equal(removeNormalized.status, 200);
+    await removeNormalized.json();
     const mapRoot = `${url}/api/campaigns/${campaign.id}/scene-map`,
       controls = await fetch(mapRoot, { headers: { Cookie: nextCookie } }),
       mapState = backgroundStateSchema.parse(await controls.json());
@@ -1127,5 +1157,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private indexed/transparency PNG asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG/JPEG normalization and asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

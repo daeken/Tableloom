@@ -14,6 +14,7 @@ import { memberSchema } from "@tableloom/core/access";
 import { transaction } from "./database.js";
 import { backgroundMapSchema } from "@tableloom/core/scene-map";
 import { StoreError } from "./store.js";
+import { sanitizeJpeg } from "./jpeg.js";
 import { sanitizePng } from "./png.js";
 const fields =
   "id,campaign_id AS campaignId,name,'image/png' AS mimeType,byte_length AS byteLength,width,height,created_at AS createdAt";
@@ -86,12 +87,19 @@ export class AssetStore {
       ...usage,
     });
   }
-  upload(actor: Member, name: string, input: Buffer) {
+  upload(
+    actor: Member,
+    name: string,
+    input: Buffer,
+    mimeType: "image/png" | "image/jpeg" = "image/png",
+  ) {
     this.gm(actor);
     const parsedName = assetNameSchema.parse(name);
     if (input.length > MAX_ASSET_BYTES)
       throw new StoreError("This image exceeds the 5 MiB upload limit.", 400);
-    const image = sanitizePng(input);
+    const mime = z.enum(["image/png", "image/jpeg"]).parse(mimeType);
+    const image =
+      mime === "image/jpeg" ? sanitizeJpeg(input) : sanitizePng(input);
     return transaction(this.db, () => {
       const member = this.gm(actor),
         usage = this.list(member);

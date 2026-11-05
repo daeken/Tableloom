@@ -29,7 +29,7 @@ export async function registerAssetRoutes(
       z.uuid().parse(paramsSchema.parse(request.params).id);
     const root = "/api/campaigns/:campaignId/assets";
     api.addContentTypeParser(
-      "image/png",
+      ["image/png", "image/jpeg"],
       { parseAs: "buffer", bodyLimit: MAX_ASSET_BYTES },
       (_request, body, done) => done(null, body),
     );
@@ -63,13 +63,24 @@ export async function registerAssetRoutes(
             .strict()
             .parse(request.query);
         if (
-          request.headers["content-type"] !== "image/png" ||
+          !["image/png", "image/jpeg"].includes(
+            request.headers["content-type"] ?? "",
+          ) ||
           !Buffer.isBuffer(request.body)
         )
-          throw new StoreError("Upload a PNG image.", 400);
+          throw new StoreError("Upload a PNG or JPEG image.", 400);
         return reply
           .code(201)
-          .send(assets.upload(member, query.name, request.body));
+          .send(
+            assets.upload(
+              member,
+              query.name,
+              request.body,
+              z
+                .enum(["image/png", "image/jpeg"])
+                .parse(request.headers["content-type"]),
+            ),
+          );
       },
     );
     api.get(`${root}/:id/content`, async (request, reply) => {

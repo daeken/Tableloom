@@ -9,9 +9,10 @@
   },
   "dependencies": {
     "@tableloom/core": "*",
-    "@tableloom/module-sdk": "*",
     "@tableloom/cyberpunk-red": "*",
     "@tableloom/kids-on-bikes": "*",
-    "@tableloom/kids-on-brooms": "*"
+    "@tableloom/kids-on-brooms": "*",
+    "@tableloom/module-sdk": "*",
+    "jpeg-js": "0.4.4"
   }
 }

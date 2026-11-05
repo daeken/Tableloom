@@ -185,7 +185,9 @@ export function SceneMapDialog({
           </option>
         ))}
       </select>
-      {!loading && !assets.length && <p>Upload a PNG in Map assets first.</p>}
+      {!loading && !assets.length && (
+        <p>Upload an image in Map assets first.</p>
+      )}
       <div className="map-fields">
         <label>
           X
