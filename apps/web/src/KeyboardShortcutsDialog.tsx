@@ -121,6 +121,11 @@ export function KeyboardShortcutsDialog({
         </tbody>
       </table>
       <p>
+        After selecting objects, Tab to the selection actions for Resize
+        drawing, Resize token or Resize selection. These dialogs accept numeric
+        sizes without dragging.
+      </p>
+      <p>
         Finish or cancel a drag before using other shortcuts. Undo, redo and
         deletion review wait for pending edits and a live connection. Held keys
         act once.

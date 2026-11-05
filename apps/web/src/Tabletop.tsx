@@ -1,3 +1,4 @@
+import { ResizeDrawingDialog } from "./ResizeDrawingDialog.js";
 import { PositionSelectionDialog } from "./PositionSelectionDialog.js";
 import { CreateObjectDialog } from "./CreateObjectDialog.js";
 import type { CreationKind } from "./object-creation.js";
@@ -216,6 +217,7 @@ export function Tabletop({
   const [editShape, setEditShape] = useState<Drawing | null>(null);
   const [editText, setEditText] = useState<Drawing | null>(null);
   const [resizeToken, setResizeToken] = useState<Token | null>(null);
+  const [resizeDrawing, setResizeDrawing] = useState<Drawing | null>(null);
   const [selectionError, setSelectionError] = useState("");
   const [deleteReview, setDeleteReview] = useState<DeletionReviewItem[] | null>(
     null,
@@ -1515,8 +1517,29 @@ export function Tabletop({
             </button>
             {selectedObjects.length === 1 &&
               "points" in selectedObjects[0]! &&
-              canResize(selectedObjects[0]) &&
-              tool === "select" && <small>Drag a corner to resize</small>}
+              tool === "select" && (
+                <button
+                  disabled={
+                    !enabled ||
+                    !ready ||
+                    pending ||
+                    !!gesture ||
+                    !canEditObject(member, selectedObjects[0]) ||
+                    !canResize(selectedObjects[0])
+                  }
+                  title={
+                    canResize(selectedObjects[0])
+                      ? "Enter exact width and height"
+                      : "Flat drawings cannot be resized individually"
+                  }
+                  onClick={() => {
+                    if (session.current.active) return;
+                    setResizeDrawing(selectedObjects[0] as Drawing);
+                  }}
+                >
+                  Resize drawing…
+                </button>
+              )}
             {selectedObjects.length === 1 &&
               "position" in selectedObjects[0]! && (
                 <button
@@ -1600,6 +1623,20 @@ export function Tabletop({
             </button>
           </div>
         </div>
+      )}
+      {resizeDrawing && (
+        <ResizeDrawingDialog
+          drawing={resizeDrawing}
+          state={state}
+          member={member}
+          enabled={enabled && ready}
+          pending={pending}
+          send={send}
+          close={() => {
+            setResizeDrawing(null);
+            focusBattlefield();
+          }}
+        />
       )}
       {positionSelection && (
         <PositionSelectionDialog

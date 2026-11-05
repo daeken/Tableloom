@@ -62,7 +62,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add keyboard object selection and bounded arrow-key movement with existing undo/redo.
 - [x] Add keyboard creation of tokens, rooms and text labels using exact coordinate entry.
 - [x] Add exact coordinate positioning for selected tokens, drawings and mixed groups.
-- [ ] **Next:** add keyboard drawing resize and ruler endpoint entry.
+- [x] Add keyboard width/height entry for individual rooms, freehand drawings and text labels.
+- [ ] **Next:** add keyboard ruler endpoint entry.
 - [ ] Check screen-reader navigation, contrast, zoom and mobile-keyboard behavior.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
