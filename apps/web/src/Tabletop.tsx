@@ -1,3 +1,11 @@
+import { MeasurementControls } from "./MeasurementControls.js";
+import {
+  beginMeasurement,
+  updateMeasurement,
+  finishMeasurement,
+  measurementCurrent,
+} from "./measurement.js";
+import type { Measurement, MeasurementDrag } from "./measurement.js";
 import type { SceneGrid } from "@tableloom/core/scene-grid";
 import { SceneOrderDialog } from "./SceneOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
@@ -44,8 +52,16 @@ import type { SceneObject } from "./scene-selection.js";
 import { canEditObject } from "@tableloom/core/permissions";
 
 export type Tool =
-  "select" | "hand" | "pen" | "rectangle" | "token" | "erase" | "text";
+  | "select"
+  | "hand"
+  | "pen"
+  | "rectangle"
+  | "token"
+  | "erase"
+  | "text"
+  | "measure";
 type Gesture =
+  | { kind: "measure"; ruler: MeasurementDrag; pointerId: number }
   | {
       kind: "resize";
       drawing: Drawing;
@@ -104,6 +120,7 @@ export function Tabletop({
   const [failure, setFailure] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
+  const [measurement, setMeasurement] = useState<Measurement | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [snap, setSnap] = useState(false);
@@ -202,7 +219,18 @@ export function Tabletop({
 
   useEffect(() => {
     setGesture(null);
+    setMeasurement(null);
   }, [tool, enabled, grid.version]);
+  const activeMeasurement =
+    tool === "measure" && enabled
+      ? gesture?.kind === "measure"
+        ? gesture.ruler
+        : measurement
+      : null;
+  const ruler =
+    activeMeasurement && measurementCurrent(activeMeasurement, grid)
+      ? activeMeasurement
+      : null;
 
   useEffect(() => {
     const world = worldRef.current;
@@ -398,6 +426,24 @@ export function Tabletop({
         );
       }
     }
+    if (ruler) {
+      const line = new Graphics();
+      for (const [color, width] of [
+        ["#fffaf0", 5],
+        ["#9b5146", 2],
+      ] as const) {
+        line
+          .moveTo(ruler.start.x, ruler.start.y)
+          .lineTo(ruler.end.x, ruler.end.y)
+          .stroke({ color, width: width / view.scale });
+      }
+      for (const p of [ruler.start, ruler.end])
+        line
+          .circle(p.x, p.y, 4 / view.scale)
+          .fill("#fffaf0")
+          .stroke({ color: "#9b5146", width: 2 / view.scale });
+      selectionLayer.addChild(line);
+    }
     if (gesture?.kind === "marquee") {
       const { start, end } = gesture;
       const rectangle = new Graphics().rect(
@@ -413,6 +459,7 @@ export function Tabletop({
     }
   }, [
     ready,
+    ruler,
     state,
     grid,
     gesture,
@@ -440,6 +487,16 @@ export function Tabletop({
     if (!ready || !enabled || event.button !== 0 || textAnchor) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = point(event);
+    if (tool === "measure") {
+      event.preventDefault();
+      setMeasurement(null);
+      setGesture({
+        kind: "measure",
+        ruler: beginMeasurement(p, grid, snap),
+        pointerId: event.pointerId,
+      });
+      return;
+    }
     if (tool === "hand") {
       setGesture({ kind: "pan", start: local(event), origin: view });
       return;
@@ -566,6 +623,14 @@ export function Tabletop({
   }
   function move(event: ReactPointerEvent) {
     if (!gesture) return;
+    if (gesture.kind === "measure") {
+      if (gesture.pointerId !== event.pointerId) return;
+      setGesture({
+        ...gesture,
+        ruler: updateMeasurement(gesture.ruler, point(event)),
+      });
+      return;
+    }
     if (gesture.kind === "pan") {
       const p = local(event);
       setView((v) => ({
@@ -604,6 +669,14 @@ export function Tabletop({
     }
   }
   function up(event: ReactPointerEvent) {
+    if (gesture?.kind === "measure") {
+      if (gesture.pointerId !== event.pointerId) return;
+      setMeasurement(
+        finishMeasurement(gesture.ruler, point(event), view.scale, grid),
+      );
+      setGesture(null);
+      return;
+    }
     if (
       gesture &&
       "gridVersion" in gesture &&
@@ -714,6 +787,11 @@ export function Tabletop({
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={() => setGesture(null)}
+      onLostPointerCapture={() =>
+        setGesture((previous) =>
+          previous?.kind === "measure" ? null : previous,
+        )
+      }
       onWheel={(event) => {
         if (enabled && !gesture && !textAnchor)
           zoom(event.deltaY > 0 ? 0.92 : 1.08, local(event));
@@ -765,7 +843,8 @@ export function Tabletop({
         !background &&
         state.drawings.length === 0 &&
         state.tokens.length === 0 &&
-        !gesture && (
+        !gesture &&
+        tool !== "measure" && (
           <div className="canvas-welcome">
             <span className="compass">✧</span>
             <h2>
@@ -785,7 +864,7 @@ export function Tabletop({
       </div>
       <label
         className="snap-controls"
-        title="Token centers snap to cells; room corners and drawing anchors snap to grid lines. Groups keep their spacing."
+        title="Token centers snap to cells; room corners, drawing anchors and ruler endpoints snap to grid intersections. Groups keep their spacing."
         onPointerDown={(event) => event.stopPropagation()}
         onPointerUp={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
@@ -797,7 +876,19 @@ export function Tabletop({
         />{" "}
         Snap to grid
       </label>
-      {selected.length === 0 && (
+      {tool === "measure" && (
+        <MeasurementControls
+          measurement={ruler}
+          snapping={snap}
+          dragging={gesture?.kind === "measure"}
+          enabled={enabled}
+          clear={() => {
+            setMeasurement(null);
+            setGesture(null);
+          }}
+        />
+      )}
+      {tool !== "measure" && selected.length === 0 && (
         <div
           className="drawing-order-open"
           onPointerDown={(e) => e.stopPropagation()}
@@ -820,7 +911,7 @@ export function Tabletop({
           ))}
         </div>
       )}
-      {(selected.length > 0 || selectionError) && (
+      {tool !== "measure" && (selected.length > 0 || selectionError) && (
         <div
           className="selection-controls"
           onPointerDown={(event) => event.stopPropagation()}

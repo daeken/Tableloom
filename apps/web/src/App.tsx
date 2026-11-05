@@ -17,6 +17,7 @@ import {
   Pencil,
   Plus,
   Square,
+  Ruler,
   Type,
   Users,
   X,
@@ -55,6 +56,7 @@ const panels = {
 const tools = [
   { id: "select", label: "Select & move objects", Icon: MousePointer2 },
   { id: "hand", label: "Pan the table", Icon: Hand },
+  { id: "measure", label: "Measure distance", Icon: Ruler },
   { id: "pen", label: "Freehand drawing", Icon: Pencil },
   { id: "rectangle", label: "Draw a room", Icon: Square },
   { id: "text", label: "Place a text label", Icon: Type },
@@ -486,17 +488,19 @@ export function App() {
               <span className="keyboard-hint">↖</span>
               {tool === "select"
                 ? "Shift-click to select several · Drag to move"
-                : tool === "hand"
-                  ? "Drag to explore the table"
-                  : tool === "pen"
-                    ? "Drag to sketch something"
-                    : tool === "text"
-                      ? "Click to place a shared text label"
-                      : tool === "rectangle"
-                        ? "Drag to draw a room"
-                        : tool === "erase"
-                          ? "Click a token or drawing edge to remove it"
-                          : "Click to place your token"}
+                : tool === "measure"
+                  ? "Drag to measure straight-line distance · Only you"
+                  : tool === "hand"
+                    ? "Drag to explore the table"
+                    : tool === "pen"
+                      ? "Drag to sketch something"
+                      : tool === "text"
+                        ? "Click to place a shared text label"
+                        : tool === "rectangle"
+                          ? "Drag to draw a room"
+                          : tool === "erase"
+                            ? "Click a token or drawing edge to remove it"
+                            : "Click to place your token"}
             </span>
             <span>
               Scroll to zoom <span className="footer-dot">·</span> Made for your
