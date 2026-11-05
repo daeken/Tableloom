@@ -4,6 +4,7 @@ import { z } from "zod";
 import { memberSchema } from "@tableloom/core/access";
 import type { Member } from "@tableloom/core/access";
 import { accessRequest } from "../../apps/web/src/useAccess.js";
+import { ModuleContentPanel } from "../../apps/web/src/ModuleContentPanel.js";
 import { ModuleDocumentsPanel } from "../../apps/web/src/ModuleDocumentsPanel.js";
 import { previewKinds } from "./shared.js";
 import { previewBrowsers } from "./definitions-client.js";
@@ -43,8 +44,8 @@ function Preview() {
       <h1>Module authoring preview</h1>
       <p>
         Temporary synthetic modules, with no RPG rules or published game
-        content. Uses the real record editor and server API. All data is
-        discarded on normal exit.
+        content. Uses the real record, catalog and copy editors with their
+        server APIs. All data is discarded on normal exit.
       </p>
       <div className="preview-controls">
         <label htmlFor="preview-example">Example</label>
@@ -94,6 +95,13 @@ function Preview() {
             Active: {previewBrowsers[session.kind].manifest.name} ·{" "}
             {session.member.name}
           </p>
+          <ModuleContentPanel
+            key={`content:${session.kind}:${session.member.id}:${session.member.role}:${session.member.tableId}`}
+            member={session.member}
+            module={previewBrowsers[session.kind]}
+            enabled
+            active
+          />
           <ModuleDocumentsPanel
             key={`${session.kind}:${session.member.id}:${session.member.tableId}`}
             member={session.member}

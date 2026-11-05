@@ -7,6 +7,8 @@ import {
   DocumentRequestError,
 } from "../../apps/web/src/document-client.js";
 import type { DocumentView } from "../../apps/web/src/document-client.js";
+import { ContentClient } from "../../apps/web/src/content-client.js";
+import type { ContentState } from "../../apps/web/src/content-client.js";
 import { previewKinds } from "./shared.js";
 import { previewBrowsers } from "./definitions-client.js";
 import { serverCanary } from "./definitions-server.js";
@@ -235,6 +237,112 @@ export async function verifyModulePreview() {
             ).json(),
           ).includes(serverCanary),
         );
+        // Exercise the same catalog/copy client used by the live application's panel.
+        const makeContent = (grant: typeof owner) => {
+          let state: ContentState;
+          const client = new ContentClient(
+            grant.member,
+            previewBrowsers[kind],
+            async (path, signal, body) => {
+              const response = await fetch(url + path, {
+                signal,
+                headers: {
+                  Cookie: grant.cookie,
+                  Origin: url,
+                  ...(body === undefined
+                    ? {}
+                    : { "Content-Type": "application/json" }),
+                },
+                ...(body === undefined
+                  ? {}
+                  : { method: "POST", body: JSON.stringify(body) }),
+              });
+              const json: unknown = await response.json();
+              if (!response.ok)
+                throw new DocumentRequestError(
+                  response.status,
+                  z.object({ error: z.string() }).parse(json).error,
+                );
+              return json;
+            },
+            (value) => {
+              state = value;
+            },
+          );
+          client.start();
+          return { client, view: () => state! };
+        };
+        const content = makeContent(owner),
+          other = makeContent(reader);
+        try {
+          assert.equal(await content.client.refresh(), true);
+          assert.equal(content.view().definitions.length, 1);
+          assert.ok(!JSON.stringify(content.view()).includes(serverCanary));
+          const reference = content.view().definitions[0]!.reference;
+          assert.equal(await content.client.openDefinition(reference), true);
+          assert.equal(await content.client.create(), true);
+          const copy = content.view().instance!;
+          assert.equal(copy.visibility, "gm");
+          assert.equal(await other.client.refresh(), true);
+          assert.equal(other.view().instances.length, 0);
+          content.client.change(
+            {
+              visibility: "public",
+              data:
+                kind === "dossier"
+                  ? { inscription: "Synthetic inscription", folded: true }
+                  : { packed: [{ label: "Synthetic part", checked: true }] },
+            },
+            copy.id,
+            copy.version,
+          );
+          assert.equal(await content.client.save(), true);
+          const savedCopy = content.view().instance!;
+          assert.deepEqual(savedCopy.source, copy.source);
+          assert.equal(await other.client.refresh(), true);
+          assert.equal(other.view().instances.length, 1);
+          assert.equal(await other.client.openInstance(copy.id), true);
+          assert.equal(other.client.editable(), false);
+          assert.equal(await other.client.save(), false);
+          const catalogRoot = `/api/campaigns/${owner.member.tableId}/content/${reference.packId}/${reference.packVersion}`;
+          assert.equal(
+            (await raw(`${catalogRoot}/private`, owner.cookie)).status,
+            404,
+          );
+          assert.equal(
+            (
+              await raw(`${catalogRoot}/blank/override`, gm.cookie, {
+                expectedRevision: 0,
+                name: "Synthetic homebrew",
+                visibility: "public",
+                sources: [],
+                data:
+                  kind === "dossier"
+                    ? { text: "Synthetic replacement" }
+                    : { parts: ["Replacement part"] },
+              })
+            ).status,
+            200,
+          );
+          assert.equal(await content.client.create(), false); // stale definition revision
+          assert.equal(await content.client.refresh(), true);
+          assert.deepEqual(content.view().instance, savedCopy);
+          assert.equal(await content.client.create(), true);
+          assert.equal(content.view().instance!.definitionRevision, 1);
+          assert.equal(
+            (
+              await raw(`${catalogRoot}/blank/reset`, gm.cookie, {
+                expectedRevision: 1,
+              })
+            ).status,
+            200,
+          );
+          assert.equal(await content.client.refresh(), true);
+          assert.equal(content.view().instance!.definitionRevision, 1);
+        } finally {
+          content.client.stop();
+          other.client.stop();
+        }
         reports.push({
           fixture: kind,
           version: saved.version,
@@ -243,6 +351,7 @@ export async function verifyModulePreview() {
           gmVisible: 3,
           action: true,
           rollback: true,
+          catalogAndCopies: true,
         });
       } finally {
         f.client.stop();

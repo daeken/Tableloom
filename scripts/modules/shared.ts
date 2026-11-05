@@ -49,3 +49,26 @@ export const previewRoleSchema = z.enum(["owner", "reader", "gm"]);
 export const previewSessionSchema = z
   .object({ fixture: previewKindSchema, role: previewRoleSchema })
   .strict();
+
+// Shared schemas and pins only; catalog data and creation functions stay server-only.
+export const previewContentPins = {
+  dossier: { id: "preview-paper", version: "0.0.0" },
+  checklist: { id: "preview-kit", version: "0.0.0" },
+} as const;
+export const paperDefinition = z.object({ text: z.string().max(500) }).strict();
+export const paperInstance = z
+  .object({ inscription: z.string().max(500), folded: z.boolean() })
+  .strict();
+export const kitDefinition = z
+  .object({ parts: z.array(z.string().max(60)).min(1).max(10) })
+  .strict();
+export const kitInstance = z
+  .object({
+    packed: z
+      .array(
+        z.object({ label: z.string().max(60), checked: z.boolean() }).strict(),
+      )
+      .min(1)
+      .max(10),
+  })
+  .strict();

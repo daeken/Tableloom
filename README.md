@@ -6,7 +6,7 @@ The goal is support for **any game system** through independently versioned code
 
 ## Current state
 
-The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** saves module-provided character records with private/shared access. The content-pack backend supports pinned definitions, campaign homebrew overrides and owned instances; catalog and inventory controls are still pending.
+The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** saves module-provided character records with private/shared access. The content-pack backend supports pinned definitions, campaign homebrew overrides and owned instances, with module-provided catalog/copy controls and synthetic previews. GM pack-selection and homebrew editing controls are still pending.
 
 **Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility, performance and deployment/recovery tooling still need work.
 
@@ -80,7 +80,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add an isolated module preview/test harness with synthetic sheet/action examples.
 - [x] Load validated, pinned content definitions with versioned campaign homebrew overrides.
 - [x] Persist owned content instances with module-defined state, source snapshots and owner/GM versioned edits.
-- [ ] **Next:** connect content packs and owned instances to module-provided catalog/inventory controls and the preview harness.
+- [x] Connect content packs and owned instances to module-provided catalog/inventory controls and the preview harness.
+- [ ] **Next:** let GMs select installed packs and edit/reset campaign homebrew through module-provided controls.
 - [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references and sourced preview cases.
 - [ ] **Needs PDFs:** inventory and implement Kids on Bikes and Kids on Brooms separately, with sourced preview cases; extract shared code only where demonstrated.
 - [ ] Run character creation, sheet editing, rolls and resource updates in two structurally different systems without changing core.

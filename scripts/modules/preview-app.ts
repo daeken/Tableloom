@@ -6,6 +6,7 @@ import { documentSchema } from "@tableloom/core/documents";
 import { accessStatusSchema } from "@tableloom/core/access";
 import type { Member } from "@tableloom/core/access";
 import {
+  previewContentPins,
   previewKinds,
   previewSessionSchema,
   dossier,
@@ -91,7 +92,7 @@ export async function createModulePreview(
             name: system.manifest.name,
             description: "Temporary synthetic authoring fixture",
             system: pin,
-            contentPacks: [],
+            contentPacks: [previewContentPins[kind]],
           },
           host.cookie,
         )

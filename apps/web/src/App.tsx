@@ -46,6 +46,7 @@ import { SceneHistoryControls } from "./SceneHistoryControls.js";
 import { CommandStatus } from "./CommandStatus.js";
 import { NotesPanel } from "./NotesPanel.js";
 import { ModuleDocumentsPanel } from "./ModuleDocumentsPanel.js";
+import { ModuleContentPanel } from "./ModuleContentPanel.js";
 import { accessStatusSchema } from "@tableloom/core/access";
 import { canEditObject } from "@tableloom/core/permissions";
 
@@ -661,6 +662,15 @@ export function App() {
             {member && state && (
               <ModuleDocumentsPanel
                 key={`documents:${viewerKey}:${browserModule.manifest.id}:${browserModule.manifest.version}`}
+                member={member}
+                module={browserModule}
+                enabled={connected}
+                active={tab === "game"}
+              />
+            )}
+            {member && state && Boolean(browserModule.content?.length) && (
+              <ModuleContentPanel
+                key={`content:${viewerKey}:${member.role}:${browserModule.manifest.id}:${browserModule.manifest.version}`}
                 member={member}
                 module={browserModule}
                 enabled={connected}

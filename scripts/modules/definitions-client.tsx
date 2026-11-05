@@ -1,8 +1,20 @@
 import { useId } from "react";
 import type { z } from "zod";
-import { defineBrowserSystem } from "@tableloom/module-sdk/browser";
+import {
+  defineBrowserContent,
+  defineBrowserSystem,
+} from "@tableloom/module-sdk/browser";
 import type { DocumentSheetProps } from "@tableloom/module-sdk/browser";
-import { dossier, checklist } from "./shared.js";
+import type { InstanceEditorProps } from "@tableloom/module-sdk/browser";
+import {
+  previewContentPins,
+  paperDefinition,
+  paperInstance,
+  kitDefinition,
+  kitInstance,
+  dossier,
+  checklist,
+} from "./shared.js";
 
 function DossierSheet({
   data,
@@ -93,7 +105,84 @@ function ChecklistSheet({
     </div>
   );
 }
+function PaperEditor({
+  data,
+  onChange,
+  readOnly,
+}: InstanceEditorProps<z.infer<typeof paperInstance>>) {
+  const id = useId();
+  return (
+    <div className="example-fields">
+      <label htmlFor={id}>Inscription</label>
+      <textarea
+        id={id}
+        readOnly={readOnly}
+        maxLength={500}
+        value={data.inscription}
+        onChange={(e) => onChange({ ...data, inscription: e.target.value })}
+      />
+      <label className="example-check">
+        <input
+          type="checkbox"
+          disabled={readOnly}
+          checked={data.folded}
+          onChange={(e) => onChange({ ...data, folded: e.target.checked })}
+        />
+        Folded
+      </label>
+    </div>
+  );
+}
+function KitEditor({
+  data,
+  onChange,
+  readOnly,
+}: InstanceEditorProps<z.infer<typeof kitInstance>>) {
+  return (
+    <div className="example-fields">
+      {data.packed.map((part, i) => (
+        <label className="example-check" key={i}>
+          <input
+            type="checkbox"
+            disabled={readOnly}
+            checked={part.checked}
+            onChange={(e) =>
+              onChange({
+                packed: data.packed.map((p, n) =>
+                  n === i ? { ...p, checked: e.target.checked } : p,
+                ),
+              })
+            }
+          />
+          {part.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+const paperBrowser = defineBrowserContent({
+  ...previewContentPins.dossier,
+  schemaVersion: 1,
+  definitionSchema: paperDefinition,
+  instanceSchema: paperInstance,
+  Definition: ({ data }) => <p>{data.text}</p>,
+  Instance: PaperEditor,
+});
+const kitBrowser = defineBrowserContent({
+  ...previewContentPins.checklist,
+  schemaVersion: 1,
+  definitionSchema: kitDefinition,
+  instanceSchema: kitInstance,
+  Definition: ({ data }) => (
+    <ul>
+      {data.parts.map((part, i) => (
+        <li key={i}>{part}</li>
+      ))}
+    </ul>
+  ),
+  Instance: KitEditor,
+});
 export const previewBrowsers = {
-  dossier: defineBrowserSystem(dossier, DossierSheet),
-  checklist: defineBrowserSystem(checklist, ChecklistSheet),
+  dossier: defineBrowserSystem(dossier, DossierSheet, [paperBrowser]),
+  checklist: defineBrowserSystem(checklist, ChecklistSheet, [kitBrowser]),
 };

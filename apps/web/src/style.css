@@ -2908,3 +2908,24 @@ textarea::placeholder {
     font-size: 16px;
   }
 }
+
+.module-content h4 {
+  margin: 22px 0 10px;
+}
+.module-content button {
+  min-height: 44px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+}
+.content-definition {
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+.module-content input[type="checkbox"] {
+  width: 24px;
+  min-height: 24px;
+}
