@@ -56,8 +56,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 ### Make the tabletop comfortable
 
 - [x] Restore compact campaign controls, fit the phone toolbar and add keyboard skip navigation.
-- [ ] **In progress:** make touch/pen gestures safe: one owning pointer, second-contact cancellation and guarded release.
-- [ ] Audit dense selection controls and narrow dialogs; verify touch/pen behavior on real devices.
+- [x] Guard pointer gestures with one owner, second-contact cancellation and release-only tap actions.
+- [ ] **Next:** audit dense selection controls and narrow dialogs; verify touch/pen behavior on real devices.
 - [ ] Complete keyboard object workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 

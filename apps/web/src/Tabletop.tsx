@@ -1,3 +1,4 @@
+import { PointerSession, withinTap } from "./pointer-session.js";
 import { ParticipantCursors } from "./ParticipantCursors.js";
 import type {
   CursorPosition,
@@ -72,6 +73,12 @@ export type Tool =
   | "text"
   | "measure";
 type Gesture =
+  | {
+      kind: "tap";
+      start: Point;
+      gridVersion: number;
+      action: CommandInput | { type: "text.open"; anchor: Point };
+    }
   | { kind: "measure"; ruler: MeasurementDrag; pointerId: number }
   | {
       kind: "resize";
@@ -144,7 +151,13 @@ export function Tabletop({
   cursorView.current = view;
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [measurement, setMeasurement] = useState<Measurement | null>(null);
-  const [gesture, setGesture] = useState<Gesture | null>(null);
+  const session = useRef(new PointerSession<Gesture>());
+  const [gesture, renderGesture] = useState<Gesture | null>(null);
+  function setGesture(value: Gesture | null) {
+    session.current.update(value);
+    renderGesture(value);
+  }
+  const gestureScope = `${tool}:${grid.version}`;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [sharing, setSharing] = useState(false);
@@ -246,9 +259,81 @@ export function Tabletop({
   }, []);
 
   useEffect(() => {
-    setGesture(null);
+    cancelInteraction();
     setMeasurement(null);
   }, [tool, enabled, grid.version]);
+  function cancelInteraction(reset = false) {
+    if (reset) session.current.reset();
+    else session.current.cancel();
+    renderGesture(null);
+    if (pointer.current) {
+      pointer.current = null;
+      cursorSender.current(null);
+    }
+  }
+  useEffect(() => {
+    const down = (event: PointerEvent) => {
+      if (session.current.observeDown(event.pointerId)) cancelInteraction();
+    };
+    const up = (event: PointerEvent) => {
+      if (
+        !session.current.owns(event.pointerId) ||
+        !event.composedPath().includes(host.current as EventTarget)
+      ) {
+        if (session.current.owns(event.pointerId)) cancelInteraction();
+        session.current.finish(event.pointerId, "");
+      }
+    };
+    const cancel = (event: PointerEvent) => {
+      if (session.current.owns(event.pointerId)) cancelInteraction();
+      session.current.finish(event.pointerId, "");
+    };
+    const move = (event: PointerEvent) => {
+      // Recover when a release happened outside the window and no pointerup arrived.
+      if (
+        session.current.tracks(event.pointerId) &&
+        (event.buttons & 1) === 0
+      ) {
+        cancelInteraction();
+        session.current.finish(event.pointerId, "");
+      }
+    };
+    const blur = () => cancelInteraction(true);
+    const visibility = () => {
+      if (document.visibilityState !== "visible") blur();
+    };
+    const observer = new MutationObserver(() => {
+      if (
+        (session.current.active || pointer.current) &&
+        document.querySelector(
+          "dialog[open], [role='dialog'][aria-modal='true']",
+        )
+      )
+        cancelInteraction();
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["open", "aria-modal"],
+    });
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", cancel, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      observer.disconnect();
+      session.current.reset();
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", cancel, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
   const activeMeasurement =
     tool === "measure" && enabled
       ? gesture?.kind === "measure"
@@ -512,6 +597,10 @@ export function Tabletop({
     };
   }
   function trackCursor(event: ReactPointerEvent) {
+    if (session.current.active && !session.current.owns(event.pointerId))
+      return;
+    if (event.pointerType !== "mouse" && !session.current.owns(event.pointerId))
+      return;
     const box = host.current?.getBoundingClientRect();
     if (
       !sharing ||
@@ -581,10 +670,28 @@ export function Tabletop({
       shareCursor(point(pointer.current));
   }, [view]);
   function down(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!ready || !enabled || event.button !== 0 || textAnchor) return;
+    if (
+      !ready ||
+      !enabled ||
+      event.button !== 0 ||
+      textAnchor ||
+      (event.target !== host.current &&
+        event.target !== appRef.current?.canvas) ||
+      document.querySelector(
+        "dialog[open], [role='dialog'][aria-modal='true']",
+      ) ||
+      !session.current.begin(event, gestureScope)
+    )
+      return;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      cancelInteraction();
+      return;
+    }
     trackCursor(event);
+    event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
-    event.currentTarget.setPointerCapture(event.pointerId);
     const p = point(event);
     if (tool === "measure") {
       event.preventDefault();
@@ -602,21 +709,36 @@ export function Tabletop({
     }
     if (tool === "text") {
       event.preventDefault();
-      if (!pending) setTextAnchor(snap ? snapPoint(p, 0, grid.settings) : p);
+      if (!pending)
+        setGesture({
+          kind: "tap",
+          start: local(event),
+          gridVersion: grid.version,
+          action: {
+            type: "text.open",
+            anchor: snap ? snapPoint(p, 0, grid.settings) : p,
+          },
+        });
       return;
     }
     if (tool === "token") {
-      send({
-        type: "token.add",
-        token: {
-          id: crypto.randomUUID(),
-          name: tokenName.trim() || "Token",
-          position: snap
-            ? snapPoint(p, grid.settings.spacing / 2, grid.settings)
-            : p,
-          color,
-        },
-      });
+      if (!pending)
+        setGesture({
+          kind: "tap",
+          start: local(event),
+          gridVersion: grid.version,
+          action: {
+            type: "token.add",
+            token: {
+              id: crypto.randomUUID(),
+              name: tokenName.trim() || "Token",
+              position: snap
+                ? snapPoint(p, grid.settings.spacing / 2, grid.settings)
+                : p,
+              color,
+            },
+          },
+        });
       return;
     }
     if (
@@ -652,23 +774,17 @@ export function Tabletop({
       tool === "select" || tool === "erase"
         ? pickSceneObject(state, p, Math.max(3, 8 / view.scale))
         : undefined;
-    const token = target && "position" in target ? target : undefined;
-    const drawing = target && "points" in target ? target : undefined;
     if (tool === "erase") {
-      if (token) {
-        if (canEditObject(member, token))
-          send({
+      if (!pending && target && canEditObject(member, target))
+        setGesture({
+          kind: "tap",
+          start: local(event),
+          gridVersion: grid.version,
+          action: {
             type: "object.delete",
-            objectId: token.id,
-            expectedVersion: token.version,
-          });
-        return;
-      }
-      if (drawing && canEditObject(member, drawing))
-        send({
-          type: "object.delete",
-          objectId: drawing.id,
-          expectedVersion: drawing.version,
+            objectId: target.id,
+            expectedVersion: target.version,
+          },
         });
     } else if (tool === "select") {
       setSelectionError("");
@@ -722,7 +838,17 @@ export function Tabletop({
   }
   function move(event: ReactPointerEvent) {
     trackCursor(event);
+    const gesture = session.current.read(event.pointerId);
     if (!gesture) return;
+    if ((event.buttons & 1) === 0) {
+      cancelInteraction();
+      session.current.finish(event.pointerId, "");
+      return;
+    }
+    if (gesture.kind === "tap") {
+      if (!withinTap(gesture.start, local(event), 1)) cancelInteraction();
+      return;
+    }
     if (gesture.kind === "measure") {
       if (gesture.pointerId !== event.pointerId) return;
       setGesture({
@@ -750,7 +876,7 @@ export function Tabletop({
       });
     else if (gesture.kind === "marquee")
       setGesture({ ...gesture, end: point(event) });
-    else {
+    else if (gesture.kind === "draw") {
       const raw = point(event),
         p = gesture.snap ? snapPoint(raw, 0, grid.settings) : raw;
       const points = gesture.drawing.points;
@@ -769,9 +895,27 @@ export function Tabletop({
     }
   }
   function up(event: ReactPointerEvent) {
+    const owned = session.current.owns(event.pointerId);
+    const completed = session.current.finish(event.pointerId, gestureScope);
+    if (!completed) {
+      if (owned) cancelInteraction();
+      return;
+    }
+    const gesture = completed.value;
+    renderGesture(null);
+    if (
+      !ready ||
+      !enabled ||
+      document.querySelector("dialog[open], [role='dialog'][aria-modal='true']")
+    ) {
+      cancelInteraction();
+      return;
+    }
     if (event.pointerType !== "mouse") {
-      pointer.current = null;
-      shareCursor(null);
+      if (pointer.current) {
+        pointer.current = null;
+        shareCursor(null);
+      }
     }
     if (gesture?.kind === "measure") {
       if (gesture.pointerId !== event.pointerId) return;
@@ -787,6 +931,22 @@ export function Tabletop({
       gesture.gridVersion !== grid.version
     ) {
       setGesture(null);
+      return;
+    }
+    if (gesture?.kind === "tap") {
+      const box = host.current!.getBoundingClientRect();
+      if (
+        !pending &&
+        withinTap(gesture.start, local(event), 1) &&
+        event.clientX >= box.left &&
+        event.clientX <= box.right &&
+        event.clientY >= box.top &&
+        event.clientY <= box.bottom
+      ) {
+        if (gesture.action.type === "text.open")
+          setTextAnchor(gesture.action.anchor);
+        else send(gesture.action);
+      }
       return;
     }
     if (gesture?.kind === "resize") {
@@ -909,7 +1069,7 @@ export function Tabletop({
           ),
         ),
         enabled: enabled && ready,
-        gesture: gesture !== null,
+        gesture: session.current.active,
         pending,
         canDeleteSelection:
           tool === "select" &&
@@ -943,7 +1103,7 @@ export function Tabletop({
         setSnap((value) => !value);
         break;
       case "cancel":
-        setGesture(null);
+        cancelInteraction();
         break;
       case "clear":
         setGesture(null);
@@ -985,18 +1145,21 @@ export function Tabletop({
         shareCursor(null);
       }}
       onPointerUp={up}
-      onPointerCancel={() => {
-        setGesture(null);
-        pointer.current = null;
-        shareCursor(null);
+      onPointerCancel={(event) => {
+        if (session.current.owns(event.pointerId)) cancelInteraction();
+        session.current.finish(event.pointerId, "");
       }}
-      onLostPointerCapture={() =>
-        setGesture((previous) =>
-          previous?.kind === "measure" ? null : previous,
-        )
-      }
+      onLostPointerCapture={(event) => {
+        if (session.current.owns(event.pointerId)) cancelInteraction();
+      }}
+      onContextMenu={(event) => {
+        if (session.current.active) {
+          event.preventDefault();
+          cancelInteraction();
+        }
+      }}
       onWheel={(event) => {
-        if (enabled && !gesture && !textAnchor)
+        if (enabled && !session.current.active && !textAnchor)
           zoom(event.deltaY > 0 ? 0.92 : 1.08, local(event));
       }}
     >
