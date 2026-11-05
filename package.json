@@ -21,7 +21,9 @@
     "smoke": "node --import tsx scripts/smoke.ts",
     "format": "prettier --write .",
     "start": "node apps/server/dist/index.js",
-    "bundle:report": "node --import tsx scripts/bundle-report.ts"
+    "bundle:report": "node --import tsx scripts/bundle-report.ts",
+    "bench:snapshot": "node --import tsx scripts/snapshot-benchmark.ts",
+    "bench:canvas": "vite build --config scripts/performance/vite.config.ts && vite preview --config scripts/performance/vite.config.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.10",

@@ -70,7 +70,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Make the drawing toolbar keyboard navigable with readable color labels.
 - [x] Fix long campaign-name reflow and check narrow/short viewport layouts.
 - [x] Split initial frontend JavaScript and add reproducible bundle-size reporting.
-- [ ] **Next:** measure canvas redraw/snapshot performance.
+- [x] Add repeatable snapshot/canvas benchmarks and record a synthetic-scene baseline.
+- [ ] **Next:** reuse unchanged scene graphics/text instead of rebuilding everything on each snapshot; compare against the recorded large-scene baseline.
 
 ### Make game modules playable
 

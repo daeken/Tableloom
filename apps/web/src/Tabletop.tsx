@@ -125,6 +125,8 @@ interface Props {
   enabled: boolean;
   pending: boolean;
   send: (command: CommandInput) => boolean;
+  /** Optional local benchmark hook; excludes React, GPU work and presentation. */
+  onSceneRebuild?: (durationMs: number) => void;
 }
 
 const clamp = (v: number) => Math.max(-10000, Math.min(10000, v));
@@ -146,6 +148,7 @@ export function Tabletop({
   enabled,
   pending,
   send,
+  onSceneRebuild,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -370,6 +373,7 @@ export function Tabletop({
   useEffect(() => {
     const world = worldRef.current;
     if (!ready || !world) return;
+    const rebuildStarted = onSceneRebuild ? performance.now() : 0;
     for (const child of world.removeChildren())
       child.destroy({ children: true });
     world.position.set(view.x, view.y);
@@ -592,6 +596,7 @@ export function Tabletop({
         .stroke({ color: "#405f4d", width: 1 / view.scale });
       selectionLayer.addChild(rectangle);
     }
+    onSceneRebuild?.(performance.now() - rebuildStarted);
   }, [
     ready,
     ruler,
@@ -605,6 +610,7 @@ export function Tabletop({
     enabled,
     pending,
     member,
+    onSceneRebuild,
   ]);
 
   function local(event: { clientX: number; clientY: number }): Point {

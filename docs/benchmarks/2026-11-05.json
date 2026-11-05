@@ -1,0 +1,331 @@
+{
+  "measuredOn": "2026-11-05",
+  "renderer": "full scene rebuild",
+  "snapshot": {
+    "environment": {
+      "node": "v24.22.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpu": "Apple M4"
+    },
+    "warmup": 5,
+    "results": [
+      {
+        "scenario": "small",
+        "audience": "gm",
+        "drawings": 20,
+        "points": 474,
+        "tokens": 10,
+        "visibleNotes": 100,
+        "visibleRolls": 100,
+        "bytes": 288307,
+        "projection": {
+          "samples": 30,
+          "p50Ms": 1.081957999999986,
+          "p95Ms": 3.0606670000000236,
+          "maxMs": 3.730583000000024
+        },
+        "serialization": {
+          "samples": 30,
+          "p50Ms": 0.2713749999999777,
+          "p95Ms": 0.3752089999999839,
+          "maxMs": 0.4462080000000128
+        },
+        "jsonParse": {
+          "samples": 30,
+          "p50Ms": 0.2802910000000338,
+          "p95Ms": 0.31279200000000174,
+          "maxMs": 0.31945799999999736
+        },
+        "validation": {
+          "samples": 30,
+          "p50Ms": 0.45529099999998834,
+          "p95Ms": 1.9320830000000342,
+          "maxMs": 6.083208000000013
+        },
+        "receive": {
+          "samples": 30,
+          "p50Ms": 0.7473340000000235,
+          "p95Ms": 1.8098329999999692,
+          "maxMs": 3.0566670000000045
+        }
+      },
+      {
+        "scenario": "small",
+        "audience": "player",
+        "drawings": 20,
+        "points": 474,
+        "tokens": 10,
+        "visibleNotes": 50,
+        "visibleRolls": 50,
+        "bytes": 149120,
+        "projection": {
+          "samples": 30,
+          "p50Ms": 0.6019589999999653,
+          "p95Ms": 2.0271250000000123,
+          "maxMs": 4.67516599999999
+        },
+        "serialization": {
+          "samples": 30,
+          "p50Ms": 0.15091699999999264,
+          "p95Ms": 0.19341600000001336,
+          "maxMs": 0.20524999999997817
+        },
+        "jsonParse": {
+          "samples": 30,
+          "p50Ms": 0.16687500000000455,
+          "p95Ms": 0.17354100000000017,
+          "maxMs": 0.18099999999998317
+        },
+        "validation": {
+          "samples": 30,
+          "p50Ms": 0.33587499999998727,
+          "p95Ms": 0.6398330000000101,
+          "maxMs": 0.6467499999999973
+        },
+        "receive": {
+          "samples": 30,
+          "p50Ms": 0.6512079999999969,
+          "p95Ms": 0.7989170000000172,
+          "maxMs": 0.9041250000000218
+        }
+      },
+      {
+        "scenario": "medium",
+        "audience": "gm",
+        "drawings": 300,
+        "points": 6800,
+        "tokens": 60,
+        "visibleNotes": 100,
+        "visibleRolls": 100,
+        "bytes": 473727,
+        "projection": {
+          "samples": 30,
+          "p50Ms": 3.934082999999987,
+          "p95Ms": 7.639957999999979,
+          "maxMs": 8.965249999999969
+        },
+        "serialization": {
+          "samples": 30,
+          "p50Ms": 0.8676659999999856,
+          "p95Ms": 1.167583000000036,
+          "maxMs": 1.1717919999999822
+        },
+        "jsonParse": {
+          "samples": 30,
+          "p50Ms": 1.0926249999999982,
+          "p95Ms": 1.5612089999999625,
+          "maxMs": 1.6347079999999323
+        },
+        "validation": {
+          "samples": 30,
+          "p50Ms": 2.278291999999965,
+          "p95Ms": 4.423666000000026,
+          "maxMs": 4.473416999999927
+        },
+        "receive": {
+          "samples": 30,
+          "p50Ms": 3.432333000000085,
+          "p95Ms": 4.802291999999966,
+          "maxMs": 5.495667000000026
+        }
+      },
+      {
+        "scenario": "medium",
+        "audience": "player",
+        "drawings": 300,
+        "points": 6800,
+        "tokens": 60,
+        "visibleNotes": 50,
+        "visibleRolls": 50,
+        "bytes": 334540,
+        "projection": {
+          "samples": 30,
+          "p50Ms": 3.3156669999998485,
+          "p95Ms": 4.982083000000102,
+          "maxMs": 5.016958000000045
+        },
+        "serialization": {
+          "samples": 30,
+          "p50Ms": 0.9057499999998981,
+          "p95Ms": 1.2607080000000224,
+          "maxMs": 1.352666999999883
+        },
+        "jsonParse": {
+          "samples": 30,
+          "p50Ms": 1.0438329999999496,
+          "p95Ms": 1.2692090000000462,
+          "maxMs": 1.3771249999999782
+        },
+        "validation": {
+          "samples": 30,
+          "p50Ms": 2.372624999999971,
+          "p95Ms": 3.7388330000001133,
+          "maxMs": 4.110541000000012
+        },
+        "receive": {
+          "samples": 30,
+          "p50Ms": 3.798957999999857,
+          "p95Ms": 5.641040999999859,
+          "maxMs": 6.4945829999999205
+        }
+      },
+      {
+        "scenario": "large",
+        "audience": "gm",
+        "drawings": 2000,
+        "points": 45354,
+        "tokens": 200,
+        "visibleNotes": 100,
+        "visibleRolls": 100,
+        "bytes": 1604899,
+        "projection": {
+          "samples": 30,
+          "p50Ms": 22.857208999999784,
+          "p95Ms": 26.041334000000006,
+          "maxMs": 26.55712500000027
+        },
+        "serialization": {
+          "samples": 30,
+          "p50Ms": 4.436999999999898,
+          "p95Ms": 6.141500000000178,
+          "maxMs": 6.251208000000133
+        },
+        "jsonParse": {
+          "samples": 30,
+          "p50Ms": 6.892084000000068,
+          "p95Ms": 8.32970800000021,
+          "maxMs": 8.82354099999975
+        },
+        "validation": {
+          "samples": 30,
+          "p50Ms": 16.54608300000018,
+          "p95Ms": 20.13491699999986,
+          "maxMs": 20.856416999999965
+        },
+        "receive": {
+          "samples": 30,
+          "p50Ms": 24.06316599999991,
+          "p95Ms": 78.11708400000043,
+          "maxMs": 139.3691249999997
+        }
+      },
+      {
+        "scenario": "large",
+        "audience": "player",
+        "drawings": 2000,
+        "points": 45354,
+        "tokens": 200,
+        "visibleNotes": 50,
+        "visibleRolls": 50,
+        "bytes": 1465712,
+        "projection": {
+          "samples": 30,
+          "p50Ms": 21.676666999999725,
+          "p95Ms": 24.154250000000502,
+          "maxMs": 26.216332999999395
+        },
+        "serialization": {
+          "samples": 30,
+          "p50Ms": 4.4615410000005795,
+          "p95Ms": 5.4650000000001455,
+          "maxMs": 5.805207999999766
+        },
+        "jsonParse": {
+          "samples": 30,
+          "p50Ms": 6.490499999999884,
+          "p95Ms": 8.371125000000575,
+          "maxMs": 8.804250000000138
+        },
+        "validation": {
+          "samples": 30,
+          "p50Ms": 16.00037499999962,
+          "p95Ms": 19.44933300000048,
+          "maxMs": 19.90770799999973
+        },
+        "receive": {
+          "samples": 30,
+          "p50Ms": 23.63500000000022,
+          "p95Ms": 26.07941699999992,
+          "maxMs": 26.292583000000377
+        }
+      }
+    ]
+  },
+  "canvas": {
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "devicePixelRatio": 2,
+      "rendererResolution": 2
+    },
+    "warmup": 5,
+    "results": [
+      {
+        "scenario": "small",
+        "drawings": 20,
+        "tokens": 10,
+        "points": 474,
+        "viewport": {
+          "width": 1200,
+          "height": 600
+        },
+        "rebuild": {
+          "samples": 30,
+          "p50Ms": 0.4000000059604645,
+          "p95Ms": 0.699999988079071,
+          "maxMs": 0.800000011920929
+        },
+        "updateToTwoFrames": {
+          "samples": 30,
+          "p50Ms": 33.400000005960464,
+          "p95Ms": 35.19999998807907,
+          "maxMs": 35.39999997615814
+        }
+      },
+      {
+        "scenario": "medium",
+        "drawings": 300,
+        "tokens": 60,
+        "points": 6800,
+        "viewport": {
+          "width": 1200,
+          "height": 600
+        },
+        "rebuild": {
+          "samples": 30,
+          "p50Ms": 3,
+          "p95Ms": 104.69999998807907,
+          "maxMs": 533.9000000059605
+        },
+        "updateToTwoFrames": {
+          "samples": 30,
+          "p50Ms": 67.80000001192093,
+          "p95Ms": 277.5,
+          "maxMs": 578.5999999940395
+        }
+      },
+      {
+        "scenario": "large",
+        "drawings": 2000,
+        "tokens": 200,
+        "points": 45354,
+        "viewport": {
+          "width": 1200,
+          "height": 600
+        },
+        "rebuild": {
+          "samples": 30,
+          "p50Ms": 17,
+          "p95Ms": 22.400000005960464,
+          "maxMs": 27.200000017881393
+        },
+        "updateToTwoFrames": {
+          "samples": 30,
+          "p50Ms": 763.5,
+          "p95Ms": 926,
+          "maxMs": 1224.7000000178814
+        }
+      }
+    ]
+  }
+}

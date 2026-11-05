@@ -1,0 +1,19 @@
+body {
+  display: block;
+  overflow: auto;
+  padding: 24px;
+}
+main {
+  max-width: 1200px;
+  margin: auto;
+}
+#table {
+  position: relative;
+  height: 600px;
+  min-height: 600px;
+  width: 100%;
+}
+#results {
+  overflow: auto;
+  white-space: pre-wrap;
+}

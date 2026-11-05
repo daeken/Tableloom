@@ -49,7 +49,27 @@ Measured production JavaScript on 2026-11-05:
 | Total raw bytes | 1,078,590 | 1,079,245 |
 | Total gzip estimate | 319,963 | 320,250 |
 
-Initial raw JavaScript fell **45.7%**; total code remains about the same and backend-specific renderer chunks still load as needed. Local server request logs verified that only the entry script was requested before authentication, with renderer/backend files fetched afterward. The browser tool did not expose resource timing; no network-latency, redraw or snapshot-speed claim is inferred from these byte measurements. Canvas redraw/snapshot profiling remains in README.
+Initial raw JavaScript fell **45.7%**; total code remains about the same and backend-specific renderer chunks still load as needed. Local server request logs verified that only the entry script was requested before authentication, with renderer/backend files fetched afterward. The browser tool did not expose resource timing; no network-latency, redraw or snapshot-speed claim is inferred from these byte measurements. Snapshot and redraw measurements are recorded below.
+
+## Snapshot and renderer benchmarks
+
+Run `npm run bench:snapshot` for JSON timings on the current Node runtime. It uses actual `projectTable` filtering, audience hashing and view validation, full snapshot JSON serialization, JSON parsing, schema validation, and combined parsing/validation. GM and player rows use the same deterministic scenes, with 100 mixed-public/private notes and 100 mixed-public/private rolls; the player sees 50 of each. Fixture construction is outside timing. Database reads, history/map projection, sockets, network transfer, fan-out and React are excluded. `receive` is a **Node** measurement of the browser's parsing/validation path, not a browser latency measurement.
+
+Run `npm run bench:canvas`, open the printed loopback URL (port 4346), and choose **Run benchmark**. This builds a separate production-mode harness into ignored `node_modules/.cache/tableloom-performance` and previews it on `127.0.0.1`; it neither changes the normal app build nor opens any campaign/API connection. Keep the tab visible and untouched. Hidden-tab runs reject rather than reporting throttled timings. The fixed-height canvas uses the available page width; JSON reports its actual dimensions, browser user agent, device pixel ratio and capped renderer resolution. Re-run on the same viewport/device for comparisons.
+
+The harness mounts the actual `Tabletop`, alternating a one-pixel token change in each synthetic full snapshot. Its optional `onSceneRebuild` hook times child destruction/reconstruction inside the real Pixi effect; normal application mounts do not request measurements or read the clock. The second metric measures from React update submission through rebuild and two animation-frame callbacks. It includes scheduling and rendering-related work but **does not establish GPU completion, paint latency or interactive FPS**. It excludes snapshot decoding, map images, selection/drag previews, network and persistence. Controls are inert and command/cursor callbacks do nothing. No authenticated/user data is involved.
+
+Both benchmarks discard five warm-up iterations and report 30 samples with nearest-rank p50/p95 and maximum. These are exploratory measurements without timing assertions or an enforced budget. Scenes mix strokes (64 points), rectangles, text and labeled tokens across both drawing layers. Large reaches the object-count limits, but its 45,354 points are far below the theoretical maximum; many objects lie outside the viewport and are still reconstructed. Empty history, no map, one online member and bounded note bodies do not represent worst-case payloads or multiplayer load.
+
+Baseline on 2026-11-05: Apple M4, Node 24.22.1, Chromium 156, 1200 × 600 canvas at resolution 2. [Raw environment, payload and percentile results](benchmarks/2026-11-05.json) preserve the measured runs. Timing varies with runtime, device load, garbage collection and browser/GPU configuration.
+
+| Scene | Drawings / tokens | GM bytes | Node projection p50 | Node receive p50 | Rebuild p50 / p95 | Update → two frames p50 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Small | 20 / 10 | 288,307 | 1.08 ms | 0.75 ms | 0.40 / 0.70 ms | 33.40 ms |
+| Medium | 300 / 60 | 473,727 | 3.93 ms | 3.43 ms | 3.00 / 104.70 ms | 67.80 ms |
+| Large | 2,000 / 200 | 1,604,899 | 22.86 ms | 24.06 ms | 17.00 / 22.40 ms | 763.50 ms |
+
+The medium run included a 533.9 ms rebuild outlier (preserved in the raw maximum); no cause is assigned without profiling. The large scene shows a substantial update/frame-delivery cost beyond CPU display-object construction. This supports investigating reuse of unchanged graphics/text before choosing snapshot deltas or removing validation; it does not isolate a GPU/driver cause. README tracks that improvement. Real-device interaction, memory, worst-case points, fan-out and slow-network profiling remain unmeasured.
 
 ## Canvas decision — 2026-11-04
 

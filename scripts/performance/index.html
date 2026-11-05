@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tableloom renderer benchmark</title>
+  </head>
+  <body>
+    <main>
+      <h1>Tableloom renderer benchmark</h1>
+      <p>
+        Synthetic local data; no server or account. Keep this tab visible and
+        untouched during the run. Measures full scene rebuilds after snapshots;
+        not GPU completion or interactive FPS.
+      </p>
+      <button id="run">Run benchmark</button>
+      <p id="status" role="status">Ready</p>
+      <div id="table" class="canvas-frame" inert></div>
+      <pre id="results" aria-label="Benchmark results"></pre>
+    </main>
+    <script type="module" src="./canvas.tsx"></script>
+  </body>
+</html>
