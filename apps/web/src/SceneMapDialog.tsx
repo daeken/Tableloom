@@ -31,6 +31,11 @@ export function SceneMapDialog({
     [width, setWidth] = useState("600"),
     [ack, setAck] = useState(false),
     [remove, setRemove] = useState(false),
+    [draftEdited, setDraftEdited] = useState(false),
+    [review, setReview] = useState<"undo" | "redo" | "clear-history" | null>(
+      null,
+    ),
+    [historyAck, setHistoryAck] = useState(false),
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
@@ -65,6 +70,9 @@ export function SceneMapDialog({
         setWidth(String(current.map?.width ?? 600));
         setAck(false);
         setRemove(false);
+        setDraftEdited(false);
+        setReview(null);
+        setHistoryAck(false);
       }
     } catch (err) {
       if (alive.current && generation === sequence.current)
@@ -104,9 +112,12 @@ export function SceneMapDialog({
       state.map.position.x !== Number(x) ||
       state.map.position.y !== Number(y) ||
       state.map.width !== Number(width),
+    unsaved = state?.map ? changed : draftEdited,
+    edge =
+      review === "undo" || review === "redo" ? state?.history[review] : null,
     disabled = !enabled || busy || loading || !state || Boolean(stale);
   async function save(
-    action: "set" | "visibility" | "remove",
+    action: "set" | "visibility" | "remove" | "undo" | "redo" | "clear-history",
     fields: Record<string, unknown> = {},
   ) {
     if (disabled || !state) return;
@@ -144,7 +155,8 @@ export function SceneMapDialog({
       <h1 id="scene-map-title">Set the scene</h1>
       <p>
         One map sits below drawings and tokens. A new image starts GM-only;
-        reveal it when your group is ready. Map changes have no Undo yet.
+        reveal it when your group is ready. Map undo/redo is separate from token
+        and drawing history and shared by campaign GMs.
       </p>
       {state && (
         <p role="status">
@@ -160,7 +172,11 @@ export function SceneMapDialog({
         id="scene-map-asset"
         value={assetId}
         disabled={disabled}
-        onChange={(e) => setAssetId(e.target.value)}
+        onChange={(e) => {
+          setAssetId(e.target.value);
+          setDraftEdited(true);
+          setReview(null);
+        }}
       >
         <option value="">Choose an image</option>
         {assets.map((a) => (
@@ -178,7 +194,11 @@ export function SceneMapDialog({
             step="any"
             value={x}
             disabled={disabled}
-            onChange={(e) => setX(e.target.value)}
+            onChange={(e) => {
+              setX(e.target.value);
+              setDraftEdited(true);
+              setReview(null);
+            }}
           />
         </label>
         <label>
@@ -188,7 +208,11 @@ export function SceneMapDialog({
             step="any"
             value={y}
             disabled={disabled}
-            onChange={(e) => setY(e.target.value)}
+            onChange={(e) => {
+              setY(e.target.value);
+              setDraftEdited(true);
+              setReview(null);
+            }}
           />
         </label>
         <label>
@@ -200,7 +224,11 @@ export function SceneMapDialog({
             max="20000"
             value={width}
             disabled={disabled}
-            onChange={(e) => setWidth(e.target.value)}
+            onChange={(e) => {
+              setWidth(e.target.value);
+              setDraftEdited(true);
+              setReview(null);
+            }}
           />
         </label>
       </div>
@@ -312,6 +340,120 @@ export function SceneMapDialog({
             </p>
           )}
         </>
+      )}
+      {state && (
+        <details className="map-history">
+          <summary>
+            Map undo / redo ({state.history.count} retained edits)
+          </summary>
+          <p>
+            Any campaign GM can undo the latest map edit. New edits discard
+            redo; only the latest 100 map edits per scene are retained. Map
+            history stays available after reloading.
+          </p>
+          {unsaved && (
+            <p>Save or reload your draft before using map history.</p>
+          )}
+          <div className="selection-delete-actions">
+            {(["undo", "redo"] as const).map((direction) => (
+              <button
+                key={direction}
+                disabled={disabled || unsaved || !state.history[direction]}
+                onClick={() => {
+                  setReview(direction);
+                  setHistoryAck(false);
+                  setRemove(false);
+                }}
+              >
+                {direction === "undo" ? "Undo map edit…" : "Redo map edit…"}
+              </button>
+            ))}
+          </div>
+          {edge && (review === "undo" || review === "redo") && (
+            <div className="map-history-review">
+              <p>
+                {review === "undo" ? "Undo" : "Redo"} map{" "}
+                {edge.action === "set"
+                  ? "placement / transform"
+                  : edge.action === "visibility"
+                    ? "visibility change"
+                    : "removal"}
+                ? This restores{" "}
+                {edge.restores === "none"
+                  ? "no background"
+                  : edge.restores === "gm"
+                    ? "a GM-only background"
+                    : "a background revealed to every campaign member"}
+                .
+              </p>
+              {edge.restores === "public" && (
+                <label className="map-reveal-check">
+                  <input
+                    type="checkbox"
+                    checked={historyAck}
+                    disabled={disabled || unsaved}
+                    onChange={(e) => setHistoryAck(e.target.checked)}
+                  />
+                  Reveal the restored map to everyone in the campaign
+                </label>
+              )}
+              <button
+                className="map-action"
+                disabled={
+                  disabled ||
+                  unsaved ||
+                  (edge.restores === "public" && !historyAck)
+                }
+                onClick={() =>
+                  void save(review, {
+                    entryId: edge.id,
+                    ...(historyAck ? { acknowledgeReveal: true } : {}),
+                  })
+                }
+              >
+                {review === "undo" ? "Confirm map undo" : "Confirm map redo"}
+              </button>
+            </div>
+          )}
+          <button
+            className="map-action"
+            disabled={disabled || unsaved || !state.history.count}
+            onClick={() => {
+              setReview("clear-history");
+              setHistoryAck(false);
+              setRemove(false);
+            }}
+          >
+            Clear map history…
+          </button>
+          {review === "clear-history" && (
+            <div className="map-history-review">
+              <p>
+                Permanently discard this scene’s map undo and redo entries? The
+                current map stays in place. Historical assets can then be
+                deleted if no other scene or retained history needs them.
+              </p>
+              <button
+                className="map-action"
+                disabled={disabled || unsaved}
+                onClick={() =>
+                  void save("clear-history", { acknowledgeClear: true })
+                }
+              >
+                Discard map history
+              </button>
+            </div>
+          )}
+          {review && (
+            <button
+              className="map-action"
+              disabled={busy}
+              onClick={() => setReview(null)}
+            >
+              Cancel history action
+            </button>
+          )}
+        </details>
       )}
       <div className="selection-delete-actions">
         <button autoFocus disabled={busy} onClick={close}>

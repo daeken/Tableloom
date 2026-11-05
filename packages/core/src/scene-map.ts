@@ -30,11 +30,31 @@ export const backgroundViewSchema = backgroundBase
   .omit({ assetId: true })
   .refine(withinWorld);
 export type BackgroundView = z.infer<typeof backgroundViewSchema>;
+export const backgroundHistoryActionSchema = z.enum([
+  "set",
+  "visibility",
+  "remove",
+]);
+export const backgroundHistoryEdgeSchema = z
+  .object({
+    id: z.uuid(),
+    action: backgroundHistoryActionSchema,
+    restores: z.enum(["none", "gm", "public"]),
+  })
+  .strict();
+export const backgroundHistorySchema = z
+  .object({
+    undo: backgroundHistoryEdgeSchema.nullable(),
+    redo: backgroundHistoryEdgeSchema.nullable(),
+    count: z.number().int().min(0).max(100),
+  })
+  .strict();
 export const backgroundStateSchema = z
   .object({
     context: commandContextSchema,
     version: z.number().int().nonnegative(),
     map: backgroundMapSchema.nullable(),
+    history: backgroundHistorySchema,
   })
   .strict();
 export type BackgroundState = z.infer<typeof backgroundStateSchema>;
@@ -58,3 +78,17 @@ export const backgroundVisibilitySchema = z
   })
   .strict();
 export const backgroundRemoveSchema = z.object(version).strict();
+
+export const backgroundTravelSchema = z
+  .object({
+    ...version,
+    entryId: z.uuid(),
+    acknowledgeReveal: z.literal(true).optional(),
+  })
+  .strict();
+export const backgroundClearHistorySchema = z
+  .object({
+    ...version,
+    acknowledgeClear: z.literal(true),
+  })
+  .strict();

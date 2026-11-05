@@ -1036,8 +1036,50 @@ try {
       body: JSON.stringify({ context: mapState.context, expectedVersion: 2 }),
     });
     assert.equal(removeMap.status, 200);
-    await removeMap.json();
+    const removedMapState = backgroundStateSchema.parse(await removeMap.json());
     await removedMapView;
+    const undoMap = await fetch(`${mapRoot}/undo`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        context: mapState.context,
+        expectedVersion: 3,
+        entryId: removedMapState.history.undo!.id,
+        acknowledgeReveal: true,
+      }),
+    });
+    assert.equal(undoMap.status, 200);
+    const undoneMapState = backgroundStateSchema.parse(await undoMap.json());
+    assert.equal(undoneMapState.map!.visibility, "public");
+    const redoMap = await fetch(`${mapRoot}/redo`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        context: mapState.context,
+        expectedVersion: 4,
+        entryId: undoneMapState.history.redo!.id,
+      }),
+    });
+    assert.equal(redoMap.status, 200);
+    await redoMap.json();
+    const historyProtected = await fetch(`${assetRoot}/${asset.id}/delete`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: "{}",
+    });
+    assert.equal(historyProtected.status, 409);
+    await historyProtected.json();
+    const clearMaps = await fetch(`${mapRoot}/clear-history`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        context: mapState.context,
+        expectedVersion: 5,
+        acknowledgeClear: true,
+      }),
+    });
+    assert.equal(clearMaps.status, 200);
+    await clearMaps.json();
     const removedAsset = await fetch(`${assetRoot}/${asset.id}/delete`, {
       method: "POST",
       headers: documentHeaders,
@@ -1085,5 +1127,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG asset upload/list/download/removal and private/revealed scene backgrounds, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

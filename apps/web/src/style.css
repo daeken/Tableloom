@@ -1857,3 +1857,25 @@ p {
 .tabletop {
   isolation: isolate;
 }
+
+.map-history {
+  margin-top: 1rem;
+  border-top: 1px solid #b6bcb6;
+  padding-top: 0.8rem;
+}
+.map-history summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.map-history-review {
+  border-left: 3px solid #386354;
+  padding-left: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.scene-map-dialog .map-history p {
+  color: #687565;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  margin: 0.75rem 0;
+}

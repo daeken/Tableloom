@@ -224,6 +224,22 @@ export class AssetStore {
           "Remove this asset from every scene map before deleting it.",
           409,
         );
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scene_background_history_refs'",
+          )
+          .get() &&
+        this.db
+          .prepare(
+            "SELECT 1 FROM scene_background_history_refs WHERE campaign_id=? AND asset_id=? LIMIT 1",
+          )
+          .get(member.tableId, id)
+      )
+        throw new StoreError(
+          "This asset is needed by retained map history. Clear that scene’s map history before deleting it.",
+          409,
+        );
       const removed = this.db
         .prepare("DELETE FROM campaign_assets WHERE campaign_id=? AND id=?")
         .run(member.tableId, id);

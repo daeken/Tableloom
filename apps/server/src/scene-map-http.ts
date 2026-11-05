@@ -35,6 +35,19 @@ export function registerSceneMapRoutes(
       refresh(member.tableId);
       return result;
     });
+  for (const direction of ["undo", "redo"] as const)
+    app.post(`${root}/${direction}`, async (request) => {
+      const member = actor(request),
+        result = maps.travel(member, request.body, direction);
+      refresh(member.tableId);
+      return result;
+    });
+  app.post(`${root}/clear-history`, async (request) => {
+    const member = actor(request),
+      result = maps.clearHistory(member, request.body);
+    refresh(member.tableId);
+    return result;
+  });
   app.get(`${root}/:sceneId/:imageId/content`, async (request, reply) => {
     const member = actor(request),
       p = params.parse(request.params),

@@ -274,6 +274,16 @@ test("active and offstage references prevent asset deletion, foreign assets cann
     );
     const fresh = f.maps.controls(f.gm.member);
     f.maps.remove(f.gm.member, { context: fresh.context, expectedVersion: 1 });
+    assert.throws(
+      () => f.assets.delete(f.gm.member, f.asset.id),
+      /retained map history/,
+    );
+    const removed = f.maps.controls(f.gm.member);
+    f.maps.clearHistory(f.gm.member, {
+      context: removed.context,
+      expectedVersion: removed.version,
+      acknowledgeClear: true,
+    });
     f.assets.delete(f.gm.member, f.asset.id);
     assert.equal(f.assets.list(f.gm.member).totalCount, 0);
   } finally {
