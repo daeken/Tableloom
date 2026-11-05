@@ -1,3 +1,4 @@
+import type { PresenceData } from "@tableloom/core";
 import type { SceneGrid } from "@tableloom/core/scene-grid";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -26,7 +27,10 @@ export function useTable(
     sceneName: string;
   } | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const [participants, setParticipants] = useState(0),
+  const [presence, setPresence] = useState<PresenceData>({
+      participants: 0,
+      onlineMembers: [],
+    }),
     [error, setError] = useState("");
   const [deliveries, setDeliveries] = useState<CommandDelivery[]>([]);
   const connection = useRef<{
@@ -35,7 +39,7 @@ export function useTable(
   } | null>(null);
   useEffect(() => {
     setSnapshot(null);
-    setParticipants(0);
+    setPresence({ participants: 0, onlineMembers: [] });
     setError("");
     setDeliveries([]);
     setStatus("connecting");
@@ -83,8 +87,19 @@ export function useTable(
       },
       random: Math.random,
       refreshAccess: onUnauthorized,
-      snapshot: (message) => setSnapshot({ viewerKey, ...message }),
-      participants: setParticipants,
+      snapshot: (message) =>
+        setSnapshot({
+          viewerKey,
+          state: message.state,
+          history: message.history,
+          background: message.background,
+          backgroundVersion: message.backgroundVersion,
+          grid: message.grid,
+          context: message.context,
+          campaignName: message.campaignName,
+          sceneName: message.sceneName,
+        }),
+      presence: setPresence,
       clear: () => setSnapshot(null),
       status: setStatus,
       error: setError,
@@ -118,7 +133,8 @@ export function useTable(
     campaignName: current ? snapshot.campaignName : "",
     sceneName: current ? snapshot.sceneName : "",
     status: connection.current?.viewerKey === viewerKey ? status : "connecting",
-    participants: current ? participants : 0,
+    participants: current ? presence.participants : 0,
+    onlineMembers: current ? presence.onlineMembers : [],
     error,
     deliveries: connection.current?.viewerKey === viewerKey ? deliveries : [],
     clearError: () => setError(""),

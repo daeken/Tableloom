@@ -300,6 +300,25 @@ try {
     await once(live, "open");
     const current = await opened;
     assert.equal(current.sceneName, scene.name);
+    assert.equal(current.participants, 1);
+    assert.equal(current.onlineMembers.length, 1);
+    assert.equal(current.onlineMembers[0]!.name, "Smoke host");
+    assert.equal(current.onlineMembers[0]!.role, "gm");
+    const duplicate = new WebSocket(
+      `${url.replace("http", "ws")}/api/live?campaignId=${campaign.id}&protocolVersion=${PROTOCOL_VERSION}`,
+      { headers: { Cookie: nextCookie, Origin: url } },
+    );
+    const duplicateSnapshot = snapshot(duplicate, () => true);
+    try {
+      await once(duplicate, "open");
+      const duplicateView = await duplicateSnapshot;
+      assert.equal(duplicateView.participants, 2);
+      assert.deepEqual(duplicateView.onlineMembers, current.onlineMembers);
+    } finally {
+      duplicate.close();
+      await once(duplicate, "close");
+    }
+
     assert.deepEqual(current.grid, { version: 0, settings: DEFAULT_GRID });
     const gridRoot = `${url}/api/campaigns/${campaign.id}/scene-grid`,
       gridSettings = {
@@ -1883,5 +1902,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

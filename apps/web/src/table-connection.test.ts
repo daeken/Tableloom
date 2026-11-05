@@ -43,6 +43,7 @@ const snapshot = (next = context) => ({
   campaignName: "Campaign",
   sceneName: "Scene",
   participants: 1,
+  onlineMembers: [{ id: member.id, name: member.name, role: member.role }],
 });
 const flush = async () => {
   await Promise.resolve();
@@ -75,7 +76,8 @@ function fixture(
     statuses: ConnectionStatus[] = [],
     errors: string[] = [],
     snapshots: ServerMessage[] = [],
-    presence: number[] = [];
+    presence: number[] = [],
+    rosters: import("@tableloom/core").OnlineMember[][] = [];
   const timers = new Set<{ at: number; action: () => void }>();
   const client = new TableConnection(
     "ws://fixture.invalid/api/live",
@@ -100,7 +102,10 @@ function fixture(
         refreshes++;
       },
       snapshot: (message) => snapshots.push(message),
-      participants: (count) => presence.push(count),
+      presence: (data) => {
+        presence.push(data.participants);
+        rosters.push(data.onlineMembers);
+      },
       clear: () => {
         clears++;
       },
@@ -131,6 +136,7 @@ function fixture(
     errors,
     snapshots,
     presence,
+    rosters,
     timers,
     advance,
     get refreshes() {
@@ -400,4 +406,86 @@ test("pending requests have bounded count and deadlines; disconnects report unce
   assert.equal(f.sockets[1]!.sent.length, 0);
   f.client.stop();
   assert.equal(f.timers.size, 0);
+});
+
+test("named presence waits for a fresh snapshot, follows current campaign frames, clears on disconnect/stop and ignores retired callbacks", async () => {
+  const f = fixture();
+  f.client.start();
+  await flush();
+  const first = f.sockets[0]!,
+    online = snapshot().onlineMembers;
+  first.emit({
+    type: "presence",
+    campaignId: DEFAULT_CAMPAIGN_ID,
+    participants: 2,
+    onlineMembers: online,
+  });
+  assert.deepEqual(f.rosters.at(-1), []);
+  first.emit(snapshot());
+  assert.deepEqual(f.rosters.at(-1), online);
+  const other = {
+    id: crypto.randomUUID(),
+    name: "Player",
+    role: "player" as const,
+  };
+  first.emit({
+    type: "presence",
+    campaignId: DEFAULT_CAMPAIGN_ID,
+    participants: 3,
+    onlineMembers: [...online, other],
+  });
+  assert.equal(f.presence.at(-1), 3);
+  assert.deepEqual(f.rosters.at(-1), [...online, other]);
+  first.handlers.close(1006);
+  assert.deepEqual(f.rosters.at(-1), []);
+  assert.equal(f.presence.at(-1), 0);
+  first.emit(snapshot());
+  assert.deepEqual(f.rosters.at(-1), []);
+  await f.advance(1000);
+  const second = f.sockets[1]!;
+  second.emit(snapshot());
+  assert.deepEqual(f.rosters.at(-1), online);
+  f.client.stop();
+  assert.deepEqual(f.rosters.at(-1), []);
+  second.emit(snapshot());
+  assert.deepEqual(f.rosters.at(-1), []);
+});
+test("foreign, duplicate, over-bound and missing presence data block the live view and clear names", async () => {
+  const online = snapshot().onlineMembers;
+  for (const frame of [
+    {
+      type: "presence",
+      campaignId: crypto.randomUUID(),
+      participants: 1,
+      onlineMembers: online,
+    },
+    {
+      type: "presence",
+      campaignId: DEFAULT_CAMPAIGN_ID,
+      participants: 2,
+      onlineMembers: [...online, ...online],
+    },
+    { type: "presence", campaignId: DEFAULT_CAMPAIGN_ID, participants: 1 },
+    { ...snapshot(), onlineMembers: undefined },
+    {
+      ...snapshot(),
+      onlineMembers: Array.from({ length: 1001 }, () => ({
+        ...online[0]!,
+        id: crypto.randomUUID(),
+      })),
+      participants: 1001,
+    },
+  ]) {
+    const f = fixture();
+    f.client.start();
+    await flush();
+    f.sockets[0]!.emit(snapshot());
+    f.sockets[0]!.emit(frame);
+    assert.equal(f.statuses.at(-1), "blocked");
+    assert.deepEqual(f.rosters.at(-1), []);
+    assert.equal(f.presence.at(-1), 0);
+    if (frame.type === "presence" && frame.campaignId !== DEFAULT_CAMPAIGN_ID)
+      assert.equal(f.clears, 1);
+    f.client.stop();
+  }
 });

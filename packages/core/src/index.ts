@@ -1,10 +1,13 @@
+import { presenceDataSchema } from "./presence.js";
+export { presenceDataSchema, onlineMemberSchema } from "./presence.js";
+export type { PresenceData, OnlineMember } from "./presence.js";
 import { sceneGridSchema } from "./scene-grid.js";
 import { backgroundViewSchema } from "./scene-map.js";
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 26;
+export const PROTOCOL_VERSION = 27;
 import {
   tokenLayerSchema,
   tokenLayersSchema,
@@ -757,7 +760,7 @@ export type CommandInput = Command extends infer C
   : never;
 
 export const serverMessageSchema = z.discriminatedUnion("type", [
-  z.object({
+  presenceDataSchema.safeExtend({
     type: z.literal("snapshot"),
     protocolVersion: z.literal(PROTOCOL_VERSION),
     history: sceneHistorySchema,
@@ -768,11 +771,10 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     context: commandContextSchema,
     campaignName: z.string().min(1).max(120),
     sceneName: z.string().min(1).max(120),
-    participants: z.number().int().nonnegative(),
   }),
-  z.object({
+  presenceDataSchema.safeExtend({
     type: z.literal("presence"),
-    participants: z.number().int().nonnegative(),
+    campaignId: z.uuid(),
   }),
   z.object({ type: z.literal("ack"), commandId: z.uuid() }).strict(),
   z

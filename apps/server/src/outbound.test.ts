@@ -14,6 +14,11 @@ import {
   OUTBOUND_WRITE_TIMEOUT,
 } from "./outbound.js";
 
+const connectedFixture = {
+  id: "00000000-0000-4000-8000-000000000099",
+  name: "Fixture",
+  role: "gm" as const,
+};
 function fixture() {
   let time = 0,
     authorized = true,
@@ -69,9 +74,15 @@ function fixture() {
           campaignName: `Generation ${generation}`,
           sceneName: "Scene",
           participants: count,
+          onlineMembers: count ? [connectedFixture] : [],
         };
       },
-      presence: () => ({ type: "presence", participants: count }),
+      presence: () => ({
+        type: "presence",
+        campaignId: DEFAULT_CAMPAIGN_ID,
+        participants: count,
+        onlineMembers: count ? [connectedFixture] : [],
+      }),
       schedule: (action, delay) => {
         const timer = { at: time + delay, action };
         timers.add(timer);
@@ -146,7 +157,12 @@ test("outbound serializes writes, keeps FIFO command results, and coalesces lazy
   assert.ok(latest?.type === "snapshot" && latest.context.generation === 1001);
   assert.deepEqual(f.forces, [false, true]);
   f.finish();
-  assert.deepEqual(f.sent[4], { type: "presence", participants: 1001 });
+  assert.deepEqual(f.sent[4], {
+    type: "presence",
+    campaignId: DEFAULT_CAMPAIGN_ID,
+    participants: 1001,
+    onlineMembers: [connectedFixture],
+  });
   f.finish();
   assert.equal(f.timers.size, 0);
   f.channel.dispose();
@@ -285,9 +301,15 @@ test("large single snapshots remain supported without accumulating another seria
           campaignName: "Large fixture",
           sceneName: "Scene",
           participants: 1,
+          onlineMembers: [connectedFixture],
         };
       },
-      presence: () => ({ type: "presence", participants: 1 }),
+      presence: () => ({
+        type: "presence",
+        campaignId: DEFAULT_CAMPAIGN_ID,
+        participants: 1,
+        onlineMembers: [connectedFixture],
+      }),
       schedule: (action) => {
         timers.add(action);
         return () => {
@@ -332,7 +354,12 @@ test("explicit access closure drops queued work immediately and preparation/tran
         snapshot: () => {
           throw new Error("Prepare failed");
         },
-        presence: () => ({ type: "presence", participants: 1 }),
+        presence: () => ({
+          type: "presence",
+          campaignId: DEFAULT_CAMPAIGN_ID,
+          participants: 1,
+          onlineMembers: [connectedFixture],
+        }),
         schedule: (action) => {
           timers.add(action);
           return () => {

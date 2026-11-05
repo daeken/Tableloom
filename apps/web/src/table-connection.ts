@@ -3,7 +3,11 @@ import {
   PROTOCOL_VERSION,
   serverMessageSchema,
 } from "@tableloom/core";
-import type { CommandInput, ServerMessage } from "@tableloom/core";
+import type {
+  CommandInput,
+  ServerMessage,
+  PresenceData,
+} from "@tableloom/core";
 import { contextKey } from "@tableloom/core/campaigns";
 import type { CommandContext } from "@tableloom/core/campaigns";
 
@@ -36,7 +40,7 @@ export interface ConnectionDependencies {
   random(): number;
   refreshAccess(): Promise<void>;
   snapshot(message: Snapshot): void;
-  participants(count: number): void;
+  presence(presence: PresenceData): void;
   clear(): void;
   status(status: ConnectionStatus): void;
   error(message: string): void;
@@ -89,6 +93,7 @@ export class TableConnection {
     ++this.generation;
     this.ready = false;
     this.context = null;
+    this.deps.presence({ participants: 0, onlineMembers: [] });
     this.cancelTimer?.();
     this.cancelDeadline?.();
     this.probe?.abort();
@@ -101,7 +106,6 @@ export class TableConnection {
   private block(message: string, clear = false) {
     this.retire();
     if (clear) this.deps.clear();
-    this.deps.participants(0);
     this.deps.error(message);
     this.deps.status("blocked");
   }
@@ -112,7 +116,6 @@ export class TableConnection {
       this.deps.error(
         "Connection lost. A change sent just before the interruption may have saved. Review the table after reconnecting before trying it again.",
       );
-    this.deps.participants(0);
     this.deps.status("offline");
     if (code === 4001 || code === 4002) this.deps.clear();
     void this.deps.refreshAccess().catch(() => {});
@@ -181,7 +184,10 @@ export class TableConnection {
             this.ready = true;
             this.attempts = 0;
             this.deps.snapshot(message);
-            this.deps.participants(message.participants);
+            this.deps.presence({
+              participants: message.participants,
+              onlineMembers: message.onlineMembers,
+            });
             this.deps.status("connected");
           } else if (
             message.type === "ack" ||
@@ -203,7 +209,19 @@ export class TableConnection {
               if (message.type === "error") this.deps.error(message.message);
             }
           } else if (message.type === "presence") {
-            if (this.ready) this.deps.participants(message.participants);
+            if (this.ready) {
+              if (message.campaignId !== this.campaignId) {
+                this.block(
+                  "The presence update belongs to another campaign. Reload the page.",
+                  true,
+                );
+                return;
+              }
+              this.deps.presence({
+                participants: message.participants,
+                onlineMembers: message.onlineMembers,
+              });
+            }
           } else this.deps.error(message.message);
         },
         close: (code) => {

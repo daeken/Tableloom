@@ -1,3 +1,4 @@
+import { projectPresence } from "./presence.js";
 import { SceneGridStore } from "./scene-grid.js";
 import { registerSceneGridRoutes } from "./scene-grid-http.js";
 import { SceneMapStore } from "./scene-map.js";
@@ -103,13 +104,16 @@ export async function createApp(options: {
     if (channel) channel.close(code, reason);
     else socket.close(code, reason);
   };
-  const participants = (campaignId: string) =>
-    [...clients].filter(
-      ([socket, context]) =>
-        context.campaignId === campaignId &&
-        socket.readyState === 1 &&
-        authenticate(socket),
-    ).length;
+  const presence = (campaignId: string) => {
+    const members: Member[] = [];
+    for (const [socket, context] of clients) {
+      if (context.campaignId !== campaignId || socket.readyState !== 1)
+        continue;
+      const member = authenticate(socket);
+      if (member) members.push(member);
+    }
+    return projectPresence(members);
+  };
   const send = (
     socket: WebSocket,
     message: Extract<ServerMessage, { type: "ack" | "error" }>,
@@ -153,7 +157,7 @@ export async function createApp(options: {
       context,
       campaignName: campaign.name,
       sceneName: scene.name,
-      participants: participants(member.tableId),
+      ...presence(member.tableId),
     };
   };
   const sendSnapshot = (socket: WebSocket, force = false) =>
@@ -270,7 +274,8 @@ export async function createApp(options: {
           snapshot: (force) => buildSnapshot(socket, force),
           presence: () => ({
             type: "presence",
-            participants: participants(initial.tableId),
+            campaignId: initial.tableId,
+            ...presence(initial.tableId),
           }),
           schedule: (action, delay) => {
             const timer = setTimeout(action, delay);

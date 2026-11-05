@@ -1,3 +1,4 @@
+import { TablePresence } from "./TablePresence.js";
 import { toolKeys } from "./tabletop-shortcuts.js";
 import { GridSettingsDialog } from "./GridSettingsDialog.js";
 import { SceneMapDialog } from "./SceneMapDialog.js";
@@ -101,7 +102,7 @@ export function App() {
   const [tab, setTab] = useState<"rolls" | "game" | "notes">("rolls");
   const [copied, setCopied] = useState(false);
   const table = useTable(viewerKey, refresh, member?.tableId ?? null);
-  const { status, participants, error, clearError, send } = table;
+  const { status, error, clearError, send } = table;
   const state = member ? table.state : null;
   const connected = status === "connected";
   const sceneEditPending = table.deliveries.some(
@@ -408,10 +409,13 @@ export function App() {
                 <span>.</span>
               </h1>
             </div>
-            <div className="table-presence">
-              <Users size={15} />
-              <span>{participants} at the table</span>
-            </div>
+            <TablePresence
+              key={viewerKey}
+              members={table.onlineMembers}
+              connections={table.participants}
+              connected={connected}
+              viewerId={member?.id ?? null}
+            />
           </div>
           <SceneHistoryControls
             history={table.history}
