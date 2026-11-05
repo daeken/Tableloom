@@ -32,6 +32,10 @@ const snapshot = (next = context) => ({
   type: "snapshot" as const,
   background: null,
   backgroundVersion: null,
+  grid: {
+    version: 0,
+    settings: { spacing: 60, origin: { x: 0, y: 0 }, visible: true },
+  },
   protocolVersion: PROTOCOL_VERSION,
   history: { undo: null, redo: null },
   state: projectTable(createTable(), member),
@@ -250,8 +254,25 @@ test("protocol mismatch, malformed snapshots, foreign campaigns, and policy clos
   assert.equal(mismatch.timers.size, 0);
   for (const message of [
     { ...snapshot(), protocolVersion: PROTOCOL_VERSION - 1 },
+    { ...snapshot(), grid: undefined },
+    {
+      ...snapshot(),
+      grid: {
+        version: 1,
+        settings: { spacing: 0, origin: { x: 0, y: 0 }, visible: true },
+      },
+    },
     { ...snapshot(), context: { ...context, campaignId: crypto.randomUUID() } },
-    { type: "snapshot", background: null, backgroundVersion: null, state: {} },
+    {
+      type: "snapshot",
+      background: null,
+      backgroundVersion: null,
+      grid: {
+        version: 0,
+        settings: { spacing: 60, origin: { x: 0, y: 0 }, visible: true },
+      },
+      state: {},
+    },
     "invalid",
   ]) {
     const f = fixture();

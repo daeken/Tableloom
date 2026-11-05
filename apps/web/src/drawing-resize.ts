@@ -1,6 +1,7 @@
 import type { Drawing, Point, ResizeBounds } from "@tableloom/core";
 import { drawingBounds } from "@tableloom/core/geometry";
-import { GRID_SIZE } from "./grid.js";
+import { gridCoordinate } from "./grid.js";
+import { DEFAULT_GRID, type GridSettings } from "@tableloom/core/scene-grid";
 
 export type Corner = "nw" | "ne" | "se" | "sw";
 export const corners: Corner[] = ["nw", "ne", "se", "sw"];
@@ -22,6 +23,7 @@ export function resizeDrag(
   pointer: Point,
   scale: number,
   snap: boolean,
+  grid: GridSettings = DEFAULT_GRID,
 ): ResizeBounds | null {
   const dx = pointer.x - start.x,
     dy = pointer.y - start.y;
@@ -32,12 +34,9 @@ export function resizeDrag(
     value: number,
     min: number,
     max: number,
+    origin: number,
   ): number | null => {
-    if (snap) {
-      min = Math.ceil(min / GRID_SIZE) * GRID_SIZE;
-      max = Math.floor(max / GRID_SIZE) * GRID_SIZE;
-      value = Math.round(value / GRID_SIZE) * GRID_SIZE;
-    }
+    if (snap) return gridCoordinate(value, origin, min, max, grid.spacing);
     return min > max ? null : Math.max(min, Math.min(max, value));
   };
   const west = corner.endsWith("w"),
@@ -46,11 +45,13 @@ export function resizeDrag(
       origin.x + dx,
       west ? -10000 : box.left + 1,
       west ? box.right - 1 : 10000,
+      grid.origin.x,
     ),
     y = coordinate(
       origin.y + dy,
       north ? -10000 : box.top + 1,
       north ? box.bottom - 1 : 10000,
+      grid.origin.y,
     );
   if (x === null || y === null) return null;
   const next = { ...box };

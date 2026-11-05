@@ -1,3 +1,4 @@
+import { GridSettingsDialog } from "./GridSettingsDialog.js";
 import { SceneMapDialog } from "./SceneMapDialog.js";
 import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
 import { useEffect, useState } from "react";
@@ -73,6 +74,7 @@ export function App() {
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sceneOpen, setSceneOpen] = useState(false);
+  const [gridOpen, setGridOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
@@ -285,6 +287,15 @@ export function App() {
               Scene map
             </button>
           )}
+          {member?.role === "gm" && table.context && (
+            <button
+              className="add-cast manage-scenes"
+              disabled={!connected || !table.grid}
+              onClick={() => setGridOpen(true)}
+            >
+              Grid settings
+            </button>
+          )}
           <div className="rail-section">
             <span className="eyebrow">GAME SYSTEM</span>
             <div className="system-select">
@@ -407,7 +418,7 @@ export function App() {
           />
           <CommandStatus deliveries={table.deliveries} />
           <div className="canvas-frame">
-            {state ? (
+            {state && table.grid ? (
               <Tabletop
                 key={
                   table.context
@@ -417,6 +428,7 @@ export function App() {
                 member={member}
                 state={state}
                 background={table.background}
+                grid={table.grid}
                 campaignId={member?.tableId ?? ""}
                 sceneId={table.context?.sceneId ?? ""}
                 tool={tool}
@@ -676,6 +688,16 @@ export function App() {
           modules={modules}
           accept={accept}
           close={() => setCampaignOpen(false)}
+        />
+      )}
+      {gridOpen && member?.role === "gm" && table.context && table.grid && (
+        <GridSettingsDialog
+          key={viewerKey}
+          context={table.context}
+          grid={table.grid}
+          member={member}
+          enabled={connected}
+          close={() => setGridOpen(false)}
         />
       )}
       {mapOpen && member?.role === "gm" && table.context && (

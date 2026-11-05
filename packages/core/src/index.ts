@@ -1,9 +1,10 @@
+import { sceneGridSchema } from "./scene-grid.js";
 import { backgroundViewSchema } from "./scene-map.js";
 import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 26;
 import {
   tokenLayerSchema,
   tokenLayersSchema,
@@ -762,6 +763,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     history: sceneHistorySchema,
     background: backgroundViewSchema.nullable(),
     backgroundVersion: z.number().int().nonnegative().nullable(),
+    grid: sceneGridSchema,
     state: tableViewSchema,
     context: commandContextSchema,
     campaignName: z.string().min(1).max(120),

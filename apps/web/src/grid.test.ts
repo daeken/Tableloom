@@ -149,3 +149,44 @@ test("visible grids follow the camera and viewport at the same zero origin witho
   assert.equal(visibleGrid({ x: NaN, y: 0, scale: 1 }, 600, 400), null);
   assert.equal(visibleGrid({ x: 0, y: 0, scale: 1 }, 0, 400), null);
 });
+
+test("saved spacing and independent origins drive visible lines, token centers, bounded group movement and hidden-grid snapping", () => {
+  const grid = { spacing: 80, origin: { x: 15, y: -25 }, visible: true };
+  const area = visibleGrid({ x: 0, y: 0, scale: 1 }, 250, 200, grid)!;
+  assert.deepEqual(area.vertical, [15, 95, 175]);
+  assert.deepEqual(area.horizontal, [55, 135]);
+  assert.deepEqual(snapPoint({ x: 100, y: 100 }, 0, grid), { x: 95, y: 135 });
+  assert.deepEqual(snapPoint({ x: 100, y: 100 }, 40, grid), { x: 135, y: 95 });
+  const scout = token(135, 95),
+    drawing = room(5, 5, 35, 45),
+    anchor = snapAnchor(scout, grid);
+  // Captured anchors are independent of later settings changes.
+  grid.spacing = 100;
+  assert.deepEqual(dragDelta([scout, drawing], { x: 70, y: 70 }, 1, anchor), {
+    x: 80,
+    y: 80,
+  });
+  assert.deepEqual(dragDelta([scout], { x: 0, y: 0 }, 1, anchor), {
+    x: 0,
+    y: 0,
+  });
+  grid.visible = false;
+  assert.equal(visibleGrid({ x: 0, y: 0, scale: 1 }, 250, 200, grid), null);
+  assert.deepEqual(snapPoint({ x: 100, y: 100 }, 50, grid), { x: 65, y: 125 });
+  for (const spacing of [10, 10.1, 60, 80.5, 500]) {
+    const g = { spacing, origin: { x: 9999.9, y: -9999.7 }, visible: true };
+    const p = snapPoint({ x: 10000, y: -10000 }, spacing / 2, g);
+    assert.ok(p.x <= 10000 && p.x >= -10000 && p.y <= 10000 && p.y >= -10000);
+    const all = visibleGrid({ x: 10000, y: 10000, scale: 1 }, 20000, 20000, g)!;
+    assert.ok(all.vertical.length <= 2001 && all.horizontal.length <= 2001);
+    for (const x of all.vertical) assert.ok(x >= -10000 && x <= 10000);
+  }
+  assert.equal(
+    visibleGrid({ x: 0, y: 0, scale: 1 }, 100, 100, {
+      ...grid,
+      visible: true,
+      spacing: 0,
+    }),
+    null,
+  );
+});

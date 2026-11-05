@@ -1,3 +1,5 @@
+import { SceneGridStore } from "./scene-grid.js";
+import { registerSceneGridRoutes } from "./scene-grid-http.js";
 import { SceneMapStore } from "./scene-map.js";
 import { registerSceneMapRoutes } from "./scene-map-http.js";
 import { AssetStore } from "./assets.js";
@@ -71,6 +73,7 @@ export async function createApp(options: {
   let sceneHistory: SceneHistoryStore;
   let assets: AssetStore;
   let sceneMaps: SceneMapStore;
+  let sceneGrids: SceneGridStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
@@ -81,6 +84,7 @@ export async function createApp(options: {
     sceneHistory = new SceneHistoryStore(database, store);
     assets = new AssetStore(database, now);
     sceneMaps = new SceneMapStore(database, store, assets);
+    sceneGrids = new SceneGridStore(database, store);
   } catch (error) {
     database.close();
     throw error;
@@ -135,12 +139,14 @@ export async function createApp(options: {
     const view = projectTable(store.load(member.tableId), member);
     const history = sceneHistory.status(member);
     const background = sceneMaps.project(member);
-    const fingerprint = `${contextKey(context)}:${view.version}:${JSON.stringify(history)}:${JSON.stringify(background)}`;
+    const grid = sceneGrids.project(member);
+    const fingerprint = `${contextKey(context)}:${view.version}:${JSON.stringify(history)}:${JSON.stringify(background)}:${JSON.stringify(grid)}`;
     if (!force && sentVersions.get(socket) === fingerprint) return null;
     sentVersions.set(socket, fingerprint);
     return {
       type: "snapshot",
       ...background,
+      grid,
       protocolVersion: PROTOCOL_VERSION,
       history,
       state: view,
@@ -205,6 +211,7 @@ export async function createApp(options: {
   registerDocumentRoutes(app, access, documents);
   await registerAssetRoutes(app, access, assets);
   registerSceneMapRoutes(app, access, sceneMaps, assets, refreshCampaign);
+  registerSceneGridRoutes(app, access, sceneGrids, refreshCampaign);
   registerRollHistoryRoutes(app, access, history, refreshCampaign);
   app.get("/api/health", async () => ({
     status: "ok",

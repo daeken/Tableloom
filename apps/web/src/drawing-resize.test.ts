@@ -107,3 +107,35 @@ test("resize intent threshold is screen-based, clicks never snap, and collapse/f
     null,
   );
 });
+
+test("resize uses shifted saved grid lines on each axis and rejects no-fit corners", () => {
+  const grid = { spacing: 80, origin: { x: 15, y: -25 }, visible: false },
+    start = { x: 120, y: 130 };
+  assert.deepEqual(
+    resizeDrag(drawing, "se", start, { x: 190, y: 190 }, 1, true, grid),
+    { left: 20, top: 30, right: 175, bottom: 215 },
+  );
+  assert.deepEqual(
+    resizeDrag(drawing, "se", start, { x: 190, y: 190 }, 1, false, grid),
+    { left: 20, top: 30, right: 190, bottom: 190 },
+  );
+  const tiny = {
+    ...drawing,
+    points: [
+      { x: -10000, y: -10000 },
+      { x: -9999, y: -9999 },
+    ],
+  };
+  assert.equal(
+    resizeDrag(
+      tiny,
+      "nw",
+      { x: -10000, y: -10000 },
+      { x: -9990, y: -9990 },
+      1,
+      true,
+      grid,
+    ),
+    null,
+  );
+});

@@ -86,7 +86,8 @@ export function ResizeTokenDialog({
         onChange={(event) => setDiameter(event.target.value)}
       />
       <p>
-        Choose 8–600. New tokens are 48 units across; one grid cell is 60 units.
+        Choose 8–600. New tokens are 48 units across. Grid spacing does not set
+        token size.
       </p>
       {!parsed.success && (
         <p role="alert" className="form-error">

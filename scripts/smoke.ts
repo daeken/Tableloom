@@ -1,3 +1,4 @@
+import { DEFAULT_GRID, gridStateSchema } from "@tableloom/core/scene-grid";
 import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
 import { backgroundStateSchema } from "@tableloom/core/scene-map";
 import { assetSchema, assetPageSchema } from "@tableloom/core/assets";
@@ -299,6 +300,40 @@ try {
     await once(live, "open");
     const current = await opened;
     assert.equal(current.sceneName, scene.name);
+    assert.deepEqual(current.grid, { version: 0, settings: DEFAULT_GRID });
+    const gridRoot = `${url}/api/campaigns/${campaign.id}/scene-grid`,
+      gridSettings = {
+        spacing: 80.5,
+        origin: { x: 15, y: -25 },
+        visible: false,
+      };
+    const gridSnapshot = snapshot(
+      live,
+      (message) => message.grid.version === 1,
+    );
+    const gridSaved = await fetch(gridRoot, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        context: current.context,
+        expectedVersion: 0,
+        settings: gridSettings,
+      }),
+    });
+    assert.equal(gridSaved.status, 200);
+    assert.deepEqual(
+      gridStateSchema.parse(await gridSaved.json()).settings,
+      gridSettings,
+    );
+    const gridView = await gridSnapshot;
+    assert.deepEqual(gridView.grid, { version: 1, settings: gridSettings });
+    assert.deepEqual(gridView.state, current.state);
+    const gridRead = await fetch(gridRoot, { headers: { Cookie: nextCookie } });
+    assert.deepEqual(
+      gridStateSchema.parse(await gridRead.json()).settings,
+      gridSettings,
+    );
+
     const rolled = snapshot(
       live,
       (message) => message.state.rolls.length === 1,
@@ -1848,5 +1883,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

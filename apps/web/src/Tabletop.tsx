@@ -1,3 +1,4 @@
+import type { SceneGrid } from "@tableloom/core/scene-grid";
 import { SceneOrderDialog } from "./SceneOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
 import { shapeStyleOf, drawingLayerOf, tokenLayerOf } from "@tableloom/core";
@@ -16,13 +17,7 @@ import {
 import type { Corner } from "./drawing-resize.js";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import {
-  GRID_SIZE,
-  dragDelta,
-  snapAnchor,
-  snapPoint,
-  visibleGrid,
-} from "./grid.js";
+import { dragDelta, snapAnchor, snapPoint, visibleGrid } from "./grid.js";
 import type { SnapAnchor } from "./grid.js";
 import { DeleteSelectionDialog } from "./DeleteSelectionDialog.js";
 import { captureDeletionReview } from "./scene-selection.js";
@@ -58,19 +53,22 @@ type Gesture =
       start: Point;
       pointer: Point;
       snap: boolean;
+      gridVersion: number;
     }
-  | { kind: "draw"; drawing: DrawingInput; snap: boolean }
+  | { kind: "draw"; drawing: DrawingInput; snap: boolean; gridVersion: number }
   | {
       kind: "move";
       objects: SceneObject[];
       start: Point;
       delta: Point;
       anchor: SnapAnchor | null;
+      gridVersion: number;
     }
   | { kind: "marquee"; start: Point; end: Point; base: string[] }
   | { kind: "pan"; start: Point; origin: Point };
 interface Props {
   state: TableView;
+  grid: SceneGrid;
   background: BackgroundView | null;
   campaignId: string;
   sceneId: string;
@@ -86,6 +84,7 @@ interface Props {
 const clamp = (v: number) => Math.max(-10000, Math.min(10000, v));
 export function Tabletop({
   state,
+  grid,
   background,
   campaignId,
   sceneId,
@@ -203,7 +202,7 @@ export function Tabletop({
 
   useEffect(() => {
     setGesture(null);
-  }, [tool, enabled]);
+  }, [tool, enabled, grid.version]);
 
   useEffect(() => {
     const world = worldRef.current;
@@ -212,16 +211,16 @@ export function Tabletop({
       child.destroy({ children: true });
     world.position.set(view.x, view.y);
     world.scale.set(view.scale);
-    const grid = new Graphics(),
-      area = visibleGrid(view, viewport.width, viewport.height);
+    const gridLines = new Graphics(),
+      area = visibleGrid(view, viewport.width, viewport.height, grid.settings);
     if (area) {
       for (const x of area.vertical)
-        grid.moveTo(x, area.top).lineTo(x, area.bottom);
+        gridLines.moveTo(x, area.top).lineTo(x, area.bottom);
       for (const y of area.horizontal)
-        grid.moveTo(area.left, y).lineTo(area.right, y);
+        gridLines.moveTo(area.left, y).lineTo(area.right, y);
     }
-    grid.stroke({ color: "#c7c6b9", width: 1, alpha: 0.5 });
-    world.addChild(grid);
+    gridLines.stroke({ color: "#c7c6b9", width: 1, alpha: 0.5 });
+    world.addChild(gridLines);
     const drawingLayer = new Container({ label: "Drawings" }),
       tokenLayer = new Container({ label: "Tokens" }),
       upperDrawingLayer = new Container({ label: "Drawings above tokens" }),
@@ -253,6 +252,7 @@ export function Tabletop({
         gesture.pointer,
         view.scale,
         gesture.snap,
+        grid.settings,
       );
       if (bounds)
         previews.set(gesture.drawing.id, {
@@ -414,6 +414,7 @@ export function Tabletop({
   }, [
     ready,
     state,
+    grid,
     gesture,
     selected,
     view,
@@ -445,7 +446,7 @@ export function Tabletop({
     }
     if (tool === "text") {
       event.preventDefault();
-      if (!pending) setTextAnchor(snap ? snapPoint(p) : p);
+      if (!pending) setTextAnchor(snap ? snapPoint(p, 0, grid.settings) : p);
       return;
     }
     if (tool === "token") {
@@ -454,7 +455,9 @@ export function Tabletop({
         token: {
           id: crypto.randomUUID(),
           name: tokenName.trim() || "Token",
-          position: snap ? snapPoint(p, GRID_SIZE / 2) : p,
+          position: snap
+            ? snapPoint(p, grid.settings.spacing / 2, grid.settings)
+            : p,
           color,
         },
       });
@@ -483,6 +486,7 @@ export function Tabletop({
             start: p,
             pointer: p,
             snap,
+            gridVersion: grid.version,
           });
           return;
         }
@@ -532,7 +536,8 @@ export function Tabletop({
           objects,
           start: p,
           delta: { x: 0, y: 0 },
-          anchor: snap ? snapAnchor(editable) : null,
+          gridVersion: grid.version,
+          anchor: snap ? snapAnchor(editable, grid.settings) : null,
         });
       } else if (!target) {
         setGesture({
@@ -544,9 +549,11 @@ export function Tabletop({
       } else setSelected([]);
     } else {
       setSelected([]);
-      const start = tool === "rectangle" && snap ? snapPoint(p) : p;
+      const start =
+        tool === "rectangle" && snap ? snapPoint(p, 0, grid.settings) : p;
       setGesture({
         kind: "draw",
+        gridVersion: grid.version,
         snap: tool === "rectangle" && snap,
         drawing: {
           id: crypto.randomUUID(),
@@ -580,7 +587,7 @@ export function Tabletop({
       setGesture({ ...gesture, end: point(event) });
     else {
       const raw = point(event),
-        p = gesture.snap ? snapPoint(raw) : raw;
+        p = gesture.snap ? snapPoint(raw, 0, grid.settings) : raw;
       const points = gesture.drawing.points;
       if (Math.hypot(p.x - points.at(-1)!.x, p.y - points.at(-1)!.y) < 2)
         return;
@@ -597,6 +604,14 @@ export function Tabletop({
     }
   }
   function up(event: ReactPointerEvent) {
+    if (
+      gesture &&
+      "gridVersion" in gesture &&
+      gesture.gridVersion !== grid.version
+    ) {
+      setGesture(null);
+      return;
+    }
     if (gesture?.kind === "resize") {
       const bounds = resizeDrag(
         gesture.drawing,
@@ -605,6 +620,7 @@ export function Tabletop({
         point(event),
         view.scale,
         gesture.snap,
+        grid.settings,
       );
       if (bounds)
         send({
@@ -617,7 +633,7 @@ export function Tabletop({
     if (gesture?.kind === "draw") {
       if (gesture.drawing.kind === "rectangle") {
         const raw = point(event),
-          last = gesture.snap ? snapPoint(raw) : raw,
+          last = gesture.snap ? snapPoint(raw, 0, grid.settings) : raw,
           first = gesture.drawing.points[0]!;
         if (first.x !== last.x && first.y !== last.y)
           send({

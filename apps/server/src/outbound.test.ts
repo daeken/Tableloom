@@ -49,6 +49,10 @@ function fixture() {
           type: "snapshot",
           background: null,
           backgroundVersion: null,
+          grid: {
+            version: 0,
+            settings: { spacing: 60, origin: { x: 0, y: 0 }, visible: true },
+          },
           protocolVersion: PROTOCOL_VERSION,
           history: { undo: null, redo: null },
           state: projectTable(createTable(), {
@@ -253,6 +257,10 @@ test("large single snapshots remain supported without accumulating another seria
           type: "snapshot",
           background: null,
           backgroundVersion: null,
+          grid: {
+            version: 0,
+            settings: { spacing: 60, origin: { x: 0, y: 0 }, visible: true },
+          },
           protocolVersion: PROTOCOL_VERSION,
           history: { undo: null, redo: null },
           state: {

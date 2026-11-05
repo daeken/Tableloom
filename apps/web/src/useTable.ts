@@ -1,3 +1,4 @@
+import type { SceneGrid } from "@tableloom/core/scene-grid";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PROTOCOL_VERSION } from "@tableloom/core";
@@ -18,6 +19,7 @@ export function useTable(
     state: TableView;
     history: SceneHistory;
     background: BackgroundView | null;
+    grid: SceneGrid;
     backgroundVersion: number | null;
     context: CommandContext;
     campaignName: string;
@@ -111,6 +113,7 @@ export function useTable(
     context,
     history: current ? snapshot.history : null,
     background: current ? snapshot.background : null,
+    grid: current ? snapshot.grid : null,
     backgroundVersion: current ? snapshot.backgroundVersion : null,
     campaignName: current ? snapshot.campaignName : "",
     sceneName: current ? snapshot.sceneName : "",
