@@ -155,6 +155,52 @@ async function verifyCampaignExport(
       (subject) => subject.sourceId === document.ownerId,
     ),
   );
+  const ownershipPlan = {
+    version: 1,
+    archiveSha256: report.archiveSha256,
+    acknowledge: "reviewed-private-content-and-access",
+    acknowledgeMerges: false,
+    assignments: report.ownership.subjects.map((subject) => ({
+      sourceId: subject.sourceId,
+      target: { kind: "existing", userId: document.ownerId, role: "gm" },
+    })),
+  };
+  const ownership = await request(
+    url,
+    "/api/campaign-imports/ownership-review",
+    cookie,
+    { file: serialized, plan: ownershipPlan },
+  );
+  assert.equal(ownership.status, 200);
+  assert.equal(ownership.headers.get("cache-control"), "no-store");
+  const reviewed = z
+    .object({
+      status: z.literal("ownership-review-only"),
+      importReady: z.literal(false),
+      blockers: z.array(z.string()).max(0),
+      pendingValidation: z.array(z.string()),
+      ownershipReview: z.object({
+        complete: z.literal(true),
+        planSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        counts: z.object({ memberships: z.literal(1), newUsers: z.literal(0) }),
+      }),
+    })
+    .parse(await ownership.json());
+  assert.ok(!reviewed.pendingValidation.includes("ownership-plan"));
+  assert.ok(reviewed.pendingValidation.includes("resource-id-plan"));
+  assert.ok(reviewed.pendingValidation.includes("atomic-import"));
+  const stalePlan = await request(
+    url,
+    "/api/campaign-imports/ownership-review",
+    cookie,
+    { file: serialized + "\n", plan: ownershipPlan },
+  );
+  assert.equal(
+    stalePlan.status,
+    409,
+    "Ownership review must bind the exact source bytes",
+  );
+  await stalePlan.arrayBuffer();
   const modified = z
     .record(z.string(), z.unknown())
     .parse(JSON.parse(serialized));

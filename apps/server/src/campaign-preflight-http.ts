@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { ServerSystemDefinition } from "@tableloom/module-sdk/server";
@@ -10,6 +10,11 @@ import { sessionToken } from "./access-http.js";
 import { MAX_CAMPAIGN_EXPORT_BYTES } from "./campaign-export.js";
 import { inspectCampaignTransferWithImages } from "./campaign-preflight.js";
 import { CampaignImageInspector } from "./campaign-image-inspection.js";
+import {
+  MAX_OWNERSHIP_REVIEW_BYTES,
+  parseOwnershipReviewEnvelope,
+  reviewCampaignOwnership,
+} from "./campaign-ownership-plan.js";
 
 export async function registerCampaignPreflightRoutes(
   app: FastifyInstance,
@@ -32,46 +37,75 @@ export async function registerCampaignPreflightRoutes(
     api.removeContentTypeParser("application/json");
     api.addContentTypeParser(
       "application/json",
-      { parseAs: "buffer", bodyLimit: MAX_CAMPAIGN_EXPORT_BYTES },
+      { parseAs: "buffer", bodyLimit: MAX_OWNERSHIP_REVIEW_BYTES },
       (_request, body, done) => done(null, body),
     );
     const host = (request: FastifyRequest) =>
       options.access.requireServerHost(sessionToken(request.headers.cookie));
+    const guard = async (request: FastifyRequest) => {
+      host(request);
+      imageInspector.assertAvailable();
+    };
+    const body = (request: FastifyRequest) => {
+      z.object({}).strict().parse(request.query);
+      if (!Buffer.isBuffer(request.body))
+        throw new StoreError("Send campaign JSON.", 400);
+      const serialized = request.body.toString("utf8");
+      if (!Buffer.from(serialized).equals(request.body))
+        throw new StoreError("Campaign requests must use valid UTF-8.", 400);
+      return serialized;
+    };
+    const inspect = async (
+      request: FastifyRequest,
+      reply: FastifyReply,
+      serialized: string,
+    ) => {
+      const abort = new AbortController(),
+        cancel = () => abort.abort();
+      reply.raw.once("close", cancel);
+      try {
+        const report = await inspectCampaignTransferWithImages(
+          serialized,
+          options.catalog,
+          options.contentCatalog,
+          options.systems,
+          options.database,
+          imageInspector,
+          abort.signal,
+        );
+        host(request); // Sessions/memberships can be revoked during worker execution.
+        return report;
+      } finally {
+        reply.raw.removeListener("close", cancel);
+      }
+    };
     api.post(
       "/api/campaign-imports/preflight",
       {
         bodyLimit: MAX_CAMPAIGN_EXPORT_BYTES,
-        onRequest: async (request) => {
-          host(request);
-          imageInspector.assertAvailable();
-        },
+        onRequest: guard,
       },
       async (request, reply) => {
         host(request);
-        z.object({}).strict().parse(request.query);
-        if (!Buffer.isBuffer(request.body))
-          throw new StoreError("Send a campaign JSON file.", 400);
-        const serialized = request.body.toString("utf8");
-        if (!Buffer.from(serialized).equals(request.body))
-          throw new StoreError("Campaign files must use valid UTF-8.", 400);
-        const abort = new AbortController(),
-          cancel = () => abort.abort();
-        reply.raw.once("close", cancel);
-        try {
-          const report = await inspectCampaignTransferWithImages(
-            serialized,
-            options.catalog,
-            options.contentCatalog,
-            options.systems,
-            options.database,
-            imageInspector,
-            abort.signal,
-          );
-          host(request); // A session/membership can be revoked during worker execution.
-          return report;
-        } finally {
-          reply.raw.removeListener("close", cancel);
-        }
+        return inspect(request, reply, body(request));
+      },
+    );
+    api.post(
+      "/api/campaign-imports/ownership-review",
+      {
+        bodyLimit: MAX_OWNERSHIP_REVIEW_BYTES,
+        onRequest: guard,
+      },
+      async (request, reply) => {
+        host(request);
+        const input = parseOwnershipReviewEnvelope(body(request)),
+          report = await inspect(request, reply, input.file);
+        return reviewCampaignOwnership(
+          report,
+          input.plan,
+          options.database,
+          host(request).id,
+        );
       },
     );
   });

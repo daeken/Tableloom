@@ -10,7 +10,7 @@ The goal is support for **any game system** through independently versioned code
 
 The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** saves module-provided character records with private/shared access. The content-pack backend supports pinned definitions, campaign homebrew overrides and owned instances, with module-provided catalog/copy controls and synthetic previews. GMs can select installed packs and edit/reset campaign homebrew with module-provided fields.
 
-**Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility and performance still need work. Campaign transfer supports export and read-only preflight, including declared module references and file/image work limits; importing is unfinished.
+**Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility and performance still need work. Campaign transfer supports export, read-only preflight and explicit ownership review; importing is unfinished.
 
 ## Run locally
 
@@ -98,7 +98,7 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add consistent database/asset backup and restore, with tested recovery into new directories.
 - [x] Add CI for clean install, strict checks, tests, builds, backup recovery and container persistence.
 - [x] Document reverse proxy/HTTPS, upgrades, trusted-module installation and current transfer limits.
-- [ ] **Next:** finish portable campaign export/import with explicit privacy, ownership and package-pin validation. GM-only export and host-only preflight are ready, with source quotas, history/image checks and explicit module reference contracts; reviewed ownership/ID mapping, mapped validation, atomic writes and transfer UI remain.
+- [ ] **Next:** finish portable campaign export/import with explicit privacy, ownership and package-pin validation. GM-only export, host preflight and explicit ownership review are ready; resource-ID mapping, mapped quota/reference/history validation, atomic writes and transfer UI remain.
 - [ ] **Needs a playtest group:** run a complete campaign session and fix workflow friction.
 - [ ] **After playtest feedback:** add note history/trash and richer document content.
 

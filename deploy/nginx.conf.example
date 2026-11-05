@@ -18,8 +18,9 @@ server {
     ssl_certificate /etc/letsencrypt/live/table.example/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/table.example/privkey.pem;
 
-    # Preflight files allow 32 MiB. The app still caps images at 5 MiB and normal JSON at 256 KiB.
-    client_max_body_size 32m;
+    # Ownership review wraps a <=32-MiB file plus its plan in JSON (up to 65 MiB).
+    # The app still caps raw preflight at 32 MiB, images at 5 MiB and normal JSON at 256 KiB.
+    client_max_body_size 65m;
 
     location / {
         proxy_pass http://127.0.0.1:3001;

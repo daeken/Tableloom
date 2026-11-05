@@ -162,7 +162,7 @@ Use that same configuration on later recreations. The default Compose file does 
 
 A proxy must forward the complete site to the Node backend, preserving paths, query strings, cookies and the browser's **Origin**. Forward the external Host header and WebSocket Upgrade/Connection headers, using HTTP/1.1 upstream. Do **not** replace Origin with a fixed trusted value or strip it: mutations and `/api/live` require the real matching origin. `PUBLIC_ORIGIN=https://table.example` makes the HTTP backend accept that external HTTPS origin and issue Secure cookies. Forwarded scheme/host/client-IP headers are not trusted by the app and do not replace this setting.
 
-Allow the app's 5-MiB raw image uploads and 32-MiB campaign preflight files at the proxy (the example allows 32 MiB). The app still limits images to 5 MiB and ordinary JSON to 256 KiB; only the host-only preflight route accepts 32 MiB. Preserve API `Cache-Control: no-store` and disable proxy caching of authenticated responses. Forward the WebSocket protocol query unchanged. The app sends 30-second pings, so allow idle time beyond that rather than using a short proxy timeout. Sign-in rate limiting currently sees the proxy's socket IP, so users behind one proxy share its built-in sign-in attempt bucket; adding forwarded IP headers does not change this behavior.
+The proxy example allows 65 MiB for host-only ownership review, which wraps a source file and plan in JSON. The source file and raw preflight still allow 32 MiB, images 5 MiB and ordinary JSON 256 KiB; their app limits are unchanged. Preserve API `Cache-Control: no-store` and disable proxy caching of authenticated responses. Forward the WebSocket protocol query unchanged. The app sends 30-second pings, so allow idle time beyond that rather than using a short proxy timeout. Sign-in rate limiting currently sees the proxy's socket IP, so users behind one proxy share its built-in sign-in attempt bucket; adding forwarded IP headers does not change this behavior.
 
 If you already use nginx, [deploy/nginx.conf.example](../deploy/nginx.conf.example) is an optional include for its `http {}` context. Replace every example hostname and certificate path, then validate with `nginx -t` in your installation before loading it. It assumes a proxy on the Docker/Node host with backend `127.0.0.1:3001`. For a proxy in another container, use a deliberately configured private container network/upstream instead; that container's loopback is not the Tableloom container. No proxy service or certificate is installed by this repository. The forwarding directives follow nginx's [WebSocket](https://nginx.org/en/docs/http/websocket.html) and [proxy-header](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header) documentation.
 
@@ -198,7 +198,7 @@ Campaigns pin exact system and pack versions. The server installs **one version 
 
 ## Campaign transfer: current limits
 
-**Campaign export and read-only preflight have administrator APIs; import and transfer UI/CLI are not implemented.** The export is an initial versioned private snapshot, not a tested recovery/round-trip format. Keep using [whole-instance backups](#backup-and-recovery) for recovery until import and destination validation are available.
+**Campaign export, read-only preflight and ownership review have administrator APIs; import and transfer UI/CLI are not implemented.** The export is an initial versioned private snapshot, not a tested recovery/round-trip format. Keep using [whole-instance backups](#backup-and-recovery) for recovery until import and destination validation are available.
 
 An authenticated GM with the campaign active can request `POST /api/campaigns/<campaign-id>/export` from the same origin, with JSON:
 
@@ -213,20 +213,20 @@ Use the campaign's current version from its settings response, not a fixed versi
 
 **Treat the file as private administrator data.** It includes all scenes (including inactive ones), maps and library images, notes, current/archived rolls, private chat, module records, homebrew, owned content and durable edit history for that campaign. It includes source ownership identifiers and the current member names/roles as descriptors, but no login sessions, invitation/recovery codes, private host key or other campaigns' records. User-entered secrets in notes/module fields remain content and are included. This is not a player-safe share file. Files are plaintext, unsigned and unencrypted.
 
-Exports are limited to 32 MiB of JSON and 100,000 data rows; embedded images use base64. Large campaigns should use whole-instance backup. Export runs in one consistent read snapshot without changing the source. It retains exact system/pack versions and content-pack fingerprints, including historical reset-only pack references. Source identities are preserved **without access grants**: departed owners may have no current member descriptor. The future importer must explicitly resolve owners and validate installed code, references and module data; matching names or IDs must never grant access automatically. No module code or installed base catalog is bundled, and no destination compatibility is claimed yet.
+Exports are limited to 32 MiB of JSON and 100,000 data rows; embedded images use base64. Large campaigns should use whole-instance backup. Export runs in one consistent read snapshot without changing the source. It retains exact system/pack versions and content-pack fingerprints, including historical reset-only pack references. Source identities are preserved **without access grants**: departed owners may have no current member descriptor. The future importer must apply a reviewed ownership plan and validate installed code, references and module data; matching names or IDs must never grant access automatically. No module code or installed base catalog is bundled, and no destination compatibility is claimed yet.
 
 The supported end-to-end server transfer today remains a **whole-instance** backup, verify and restore into a new data directory on a matching installation. It brings every campaign and saved access state/recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. The README keeps selective portable transfer unfinished.
 
 
 ### Read-only destination preflight
 
-The signed-in **server host** can send the downloaded file directly as the JSON body of `POST /api/campaign-imports/preflight`, from the same origin. Do not wrap it in another object or use multipart upload. The endpoint requires valid UTF-8 and accepts at most 32 MiB; authorization runs before the body is parsed. If a reverse proxy returns 413, its request limit may need updating from the earlier 6-MiB example to 32 MiB. The app's other JSON/image limits are unchanged.
+The signed-in **server host** can send the downloaded file directly as the JSON body of `POST /api/campaign-imports/preflight`, from the same origin. Do not wrap it in another object or use multipart upload. The endpoint requires valid UTF-8 and accepts at most 32 MiB; authorization runs before the body is parsed. If a reverse proxy returns 413, update its limit for the chosen endpoint; the current example allows 65 MiB for wrapped ownership reviews. The app's other JSON/image limits are unchanged.
 
-Preflight returns `status: "preflight-only"` and **always** `importReady: false`. It checks the current file/storage format, table row limits, neutral current state and resource references, canonical base64/length/image hashes, decoded canonical PNG data, exact installed package fingerprints and available document/content/instance schemas. Missing or changed packages and schema versions are reported as blockers. A current source member's name/role is labelled as a source descriptor; departed owners discovered in saved records appear without a name/role. Every source identity requires an explicit future mapping, even if a destination account has the same name or UUID. No identity matches or access grants are proposed.
+Preflight returns `status: "preflight-only"` and **always** `importReady: false`. It checks the current file/storage format, table row limits, neutral current state and resource references, canonical base64/length/image hashes, decoded canonical PNG data, exact installed package fingerprints and available document/content/instance schemas. Missing or changed packages and schema versions are reported as blockers. A current source member's name/role is labelled as a source descriptor; departed owners discovered in saved records appear without a name/role. Every source identity requires an explicit review choice, even if a destination account has the same name or UUID. Raw preflight proposes no matches or access grants; the separate ownership-review endpoint accepts your choices.
 
 The response contains resource counts, package statuses, source identities, source-ID collision counts, blockers, pending checks and a SHA-256 of the exact file bytes. It omits private document/map/chat bodies and makes no persistent changes, consumes no invitations and runs no module actions, migrations or instance factories. The fingerprint identifies the inspected bytes; it is not an import token or a compatibility guarantee. File content is still untrusted and private.
 
-**An empty blocker list is not permission to import.** Reviewed owner/resource-ID plans, post-mapping module/history/quota checks and an atomic import are still pending. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
+**An empty blocker list is not permission to import.** Ownership review is a separate step; resource-ID plans, post-mapping module/history/quota checks and an atomic import are still pending. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
 
 
 Preflight now applies the live stores' source-data limits as well as file limits: 100 chat messages per public/private audience and 1,100 per campaign; 100 object-history entries per person per scene, 10,000 per campaign and 32 MiB of stored payload/target JSON; 100 map-history entries per scene, 10,000 per campaign, 4 KiB per entry and 8 MiB in total. Image-library totals and the existing scene/document/content/instance/roll/object-ID limits are checked too. Raw JSON byte budgets use UTF-8, including whitespace; oversized files are rejected without silently pruning data.
@@ -239,6 +239,43 @@ Map undo/redo history is checked against the saved map for every scene, includin
 Object edit history is checked for correctly scoped, backward-only causal links, consistent object types/scenes and undo/redo stack order. Saved layer and restoration-order references must use reserved IDs of the right type. Missing predecessors from retention are allowed, as are stale edits that another person’s later changes have made unavailable. The response includes `objectHistoryValidation` counts for entries, retained links and expired links. History is never resolved against destination records or replayed during preflight.
 
 These checks establish consistency within the supplied file, not the authenticity of its past edits or whether each edit can still be undone. Combining source authors can change stack order, so `mapped-history-graph` remains pending alongside mapped quotas. `importReady` remains false; any eventual import still needs reviewed identity/resource mapping and fresh destination image capabilities.
+
+
+### Read-only ownership review
+
+The signed-in server host can send `POST /api/campaign-imports/ownership-review` with `{ file, plan }`. `file` is the **exact export text as a JSON string**, preserving whitespace and its preflight SHA-256. The plan requires a choice for every `ownership.subjects[].sourceId`, including departed owners and module-declared member references. Get existing local UUIDs from an authorized campaign member listing; names and matching source UUIDs never select people automatically.
+
+```json
+{
+  "file": "<exact export file text>",
+  "plan": {
+    "version": 1,
+    "archiveSha256": "<preflight archiveSha256>",
+    "acknowledge": "reviewed-private-content-and-access",
+    "acknowledgeMerges": false,
+    "assignments": [
+      {
+        "sourceId": "<source identity UUID>",
+        "target": { "kind": "existing", "userId": "<local host UUID>", "role": "gm" }
+      }
+    ]
+  }
+}
+```
+
+Repeat assignments until every source identity appears exactly once. Three target choices are supported:
+
+| Kind | Required fields | Intended result of a future import |
+| --- | --- | --- |
+| `existing` | Local `userId`, explicit `role` (`gm` or `player`) | Membership for that person in the new campaign |
+| `new` | Explicit `name` (1–32 characters) and `role` | A distinct new person; equal names do not merge identities |
+| `unclaimed` | No other fields | Preserve distinct attribution without a user account or membership; the GM controls the content |
+
+The server host is always planned as a GM independently of source roles and counts toward the 1,000-member limit. Choosing a player role for the local host or conflicting roles for one local person is rejected. Source GM roles never become grants. Mapping several source identities to one existing person is shown in `mergedTargets` and adds `identity_merge_acknowledgement_required` until you explicitly set `acknowledgeMerges: true`; their combined private content and editing stacks still need mapped validation. New/unclaimed choices remain distinct per source identity.
+
+The result is `status: "ownership-review-only"`, **always** `importReady: false`, with normalized plan/assignment previews, current local names, merge/capacity summaries and `planSha256`. Completion removes only `ownership-plan` from pending checks; incomplete module identity inventory, unacknowledged merges or too many planned members keep it pending. Image/source/package checks run again. Local targets and host authorization are checked after image work. A missing local person or changed file fingerprint returns 409. The plan hash fingerprints normalized choices; it is not a reservation, permission token or guarantee that a later write will succeed.
+
+This endpoint allocates no IDs, creates no people/memberships/invitations/sessions, copies no source credentials and saves nothing. There is no import writer or review UI yet. It accepts a 65-MiB JSON envelope to accommodate escaping a file of at most 32 MiB, plus a bounded plan (at most 1,000 assignments and 512 KiB of normalized JSON). Existing proxies capped at 32 MiB may reject larger wrapped reviews; use the current 65-MiB example. Raw preflight/image/ordinary JSON limits remain unchanged.
 
 
 ### Module references during preflight
