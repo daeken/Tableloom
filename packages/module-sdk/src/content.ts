@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CampaignDataTransfer } from "./transfer-references.js";
 import {
   systemIdSchema,
   moduleVersionSchema,
@@ -79,6 +80,7 @@ export const contentPackSchema = z
 export interface ContentInstanceFactory {
   schemaVersion: number;
   dataSchema: z.ZodType<unknown>;
+  transfer?: CampaignDataTransfer;
   /** Server-only executor. The authoring helper validates the typed definition input. */
   create(data: unknown): unknown;
 }
@@ -88,6 +90,7 @@ export interface ContentPackDefinition<T> {
   systemId: string;
   systemVersion: string;
   dataSchema: z.ZodType<T>;
+  transfer?: CampaignDataTransfer;
   definitions: (ContentDefinition<T> & { visibility: "public" | "gm" })[];
   instances?: ContentInstanceFactory;
 }
@@ -98,6 +101,7 @@ export function defineContentPack<T>(
     id: string;
     version: string;
     dataSchema: z.ZodType<T>;
+    transfer?: CampaignDataTransfer;
     definitions: (ContentDefinition<T> & { visibility?: "public" | "gm" })[];
     instances?: ContentInstanceFactory;
   },
@@ -120,6 +124,7 @@ export function defineContentPack<T>(
     ...pack,
     definitions,
     dataSchema: input.dataSchema,
+    ...(input.transfer ? { transfer: input.transfer } : {}),
     ...(input.instances ? { instances: input.instances } : {}),
   };
 }

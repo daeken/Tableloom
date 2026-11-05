@@ -226,7 +226,7 @@ Preflight returns `status: "preflight-only"` and **always** `importReady: false`
 
 The response contains resource counts, package statuses, source identities, source-ID collision counts, blockers, pending checks and a SHA-256 of the exact file bytes. It omits private document/map/chat bodies and makes no persistent changes, consumes no invitations and runs no module actions, migrations or instance factories. The fingerprint identifies the inspected bytes; it is not an import token or a compatibility guarantee. File content is still untrusted and private.
 
-**An empty blocker list is not permission to import.** Module-specific external references, reviewed owner/resource-ID plans, post-mapping history/quota checks and an atomic import are still pending. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
+**An empty blocker list is not permission to import.** Reviewed owner/resource-ID plans, post-mapping module/history/quota checks and an atomic import are still pending. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
 
 
 Preflight now applies the live stores' source-data limits as well as file limits: 100 chat messages per public/private audience and 1,100 per campaign; 100 object-history entries per person per scene, 10,000 per campaign and 32 MiB of stored payload/target JSON; 100 map-history entries per scene, 10,000 per campaign, 4 KiB per entry and 8 MiB in total. Image-library totals and the existing scene/document/content/instance/roll/object-ID limits are checked too. Raw JSON byte budgets use UTF-8, including whitespace; oversized files are rejected without silently pruning data.
@@ -239,6 +239,13 @@ Map undo/redo history is checked against the saved map for every scene, includin
 Object edit history is checked for correctly scoped, backward-only causal links, consistent object types/scenes and undo/redo stack order. Saved layer and restoration-order references must use reserved IDs of the right type. Missing predecessors from retention are allowed, as are stale edits that another person’s later changes have made unavailable. The response includes `objectHistoryValidation` counts for entries, retained links and expired links. History is never resolved against destination records or replayed during preflight.
 
 These checks establish consistency within the supplied file, not the authenticity of its past edits or whether each edit can still be undone. Combining source authors can change stack order, so `mapped-history-graph` remains pending alongside mapped quotas. `importReady` remains false; any eventual import still needs reviewed identity/resource mapping and fresh destination image capabilities.
+
+
+### Module references during preflight
+
+Saved module documents, homebrew definition data, owned instance state and saved definition snapshots need explicit transfer declarations from their installed server packages. A declaration lists resource-reference fields or explicitly states there are none. Missing declarations add `module_transfer_unavailable` and retain the `module-external-references` pending check; ordinary play and existing records are unaffected. The bundled name/notes scaffolds declare plain text only. No published game rules or content are added.
+
+Declared links must refer to the correct kind of resource inside the source file. Existing destination IDs and deleted object reservations do not satisfy missing links. Module-declared member IDs join the source ownership review, including departed people without names/roles, and never become access grants. UUID-looking ordinary text is left alone. Reports add `moduleReferenceValidation: { records, references, complete }`, without field paths or private data. Successful inspection removes the source reference placeholder, while `mapped-module-references` remains pending: a future importer must rewrite and validate declared links after the reviewed mapping. No data is rewritten by preflight.
 
 
 ### PNG decoding during preflight

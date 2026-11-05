@@ -2,6 +2,15 @@ import { z } from "zod";
 import { defineSystem, documentActionIdSchema } from "./index.js";
 import type { SystemDefinition } from "./index.js";
 import { documentData } from "./document-data.js";
+import type { CampaignDataTransfer } from "./transfer-references.js";
+export {
+  defineCampaignDataTransfer,
+  inspectCampaignDataReferences,
+} from "./transfer-references.js";
+export type {
+  CampaignDataTransfer,
+  CampaignDataReference,
+} from "./transfer-references.js";
 import type {
   ContentPackDefinition,
   ContentInstanceFactory,
@@ -14,12 +23,14 @@ export function defineContentInstances<Definition, Instance>(
     schemaVersion: number;
     dataSchema: z.ZodType<Instance>;
     create: (definition: Definition) => Instance;
+    transfer?: CampaignDataTransfer;
   },
 ): ContentInstanceFactory {
   z.number().int().positive().parse(options.schemaVersion);
   return {
     schemaVersion: options.schemaVersion,
     dataSchema: options.dataSchema,
+    ...(options.transfer ? { transfer: options.transfer } : {}),
     create(raw) {
       return options.create(definitionSchema.parse(documentData(raw)));
     },
@@ -69,6 +80,7 @@ export interface DocumentMigration {
   migrate: (data: unknown) => unknown;
 }
 export interface ServerSystemDefinition<T> extends SystemDefinition<T> {
+  documentTransfer?: CampaignDataTransfer;
   documentMigrations?: readonly DocumentMigration[];
   documentActions?: readonly DocumentAction<T>[];
   contentPacks?: readonly ContentPackDefinition<unknown>[];
@@ -77,6 +89,11 @@ export function defineServerSystem<T>(
   definition: ServerSystemDefinition<T>,
 ): ServerSystemDefinition<T> {
   defineSystem(definition);
+  if (
+    definition.documentTransfer &&
+    typeof definition.documentTransfer.inspect !== "function"
+  )
+    throw new Error("Invalid document transfer registration.");
   for (const pack of definition.contentPacks ?? []) {
     if (
       pack.systemId !== definition.manifest.id ||

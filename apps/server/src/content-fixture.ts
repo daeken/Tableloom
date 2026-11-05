@@ -1,6 +1,7 @@
 // Synthetic test data only; this registry is never imported by normal startup.
 import { z } from "zod";
 import { defineContentPack } from "@tableloom/module-sdk/content";
+import { defineCampaignDataTransfer } from "@tableloom/module-sdk/server";
 import { system } from "@tableloom/cyberpunk-red";
 export const fixtureData = z
   .object({
@@ -13,6 +14,7 @@ export const fixturePack = (version = "1.0.0") =>
     id: "fixture-paper",
     version,
     dataSchema: fixtureData,
+    transfer: defineCampaignDataTransfer(fixtureData, () => []),
     definitions: [
       {
         id: "a-public",

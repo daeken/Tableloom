@@ -2041,6 +2041,7 @@ try {
         objectHistoryValidation: z.object({
           entries: z.number().int().positive(),
         }),
+        moduleReferenceValidation: z.object({ complete: z.literal(true) }),
         pendingValidation: z.array(z.string()),
       })
       .parse(await preflight.json());
@@ -2048,6 +2049,10 @@ try {
       !inspected.pendingValidation.includes("object-history-causal-graph"),
     );
     assert.ok(inspected.pendingValidation.includes("mapped-history-graph"));
+    assert.ok(
+      !inspected.pendingValidation.includes("module-external-references"),
+    );
+    assert.ok(inspected.pendingValidation.includes("mapped-module-references"));
   } finally {
     live.terminate();
   }

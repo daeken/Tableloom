@@ -51,6 +51,7 @@ export class ContentCatalog {
   readonly packs: readonly {
     pack: ReturnType<typeof contentPackSchema.parse>;
     dataSchema: ContentPackDefinition<unknown>["dataSchema"];
+    transfer?: ContentPackDefinition<unknown>["transfer"];
     digest: string;
     instances?: ContentInstanceFactory;
   }[];
@@ -66,7 +67,13 @@ export class ContentCatalog {
       throw new Error("Install at most 100 content pack versions.");
     const seen = new Set<string>();
     this.packs = providers.map((provider) => {
-      const { dataSchema, instances, ...raw } = provider;
+      const { dataSchema, instances, transfer, ...raw } = provider;
+      if (
+        (transfer && typeof transfer.inspect !== "function") ||
+        (instances?.transfer &&
+          typeof instances.transfer.inspect !== "function")
+      )
+        throw new Error("Invalid content transfer registration.");
       const pack = contentPackSchema.parse(structuredClone(raw)),
         key = `${pack.id}@${pack.version}`;
       if (seen.has(key))
@@ -96,6 +103,7 @@ export class ContentCatalog {
       return Object.freeze({
         pack,
         dataSchema,
+        ...(transfer ? { transfer: Object.freeze({ ...transfer }) } : {}),
         digest,
         ...(instances ? { instances: Object.freeze({ ...instances }) } : {}),
       });

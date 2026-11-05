@@ -114,6 +114,11 @@ async function verifyCampaignExport(
         retainedLinks: z.literal(1),
         expiredLinks: z.literal(0),
       }),
+      moduleReferenceValidation: z.object({
+        records: z.literal(1),
+        references: z.literal(0),
+        complete: z.literal(true),
+      }),
       destination: z.object({
         campaignCapacity: z.object({
           used: z.number().int().positive(),
@@ -132,6 +137,8 @@ async function verifyCampaignExport(
   assert.ok(!report.pendingValidation.includes("full-storage-quotas"));
   assert.ok(!report.pendingValidation.includes("object-history-causal-graph"));
   assert.ok(report.pendingValidation.includes("mapped-history-graph"));
+  assert.ok(!report.pendingValidation.includes("module-external-references"));
+  assert.ok(report.pendingValidation.includes("mapped-module-references"));
   assert.ok(!report.pendingValidation.includes("history-causal-graph"));
   assert.ok(!report.pendingValidation.includes("image-decoding"));
   const originalPng = Buffer.from(image.bytes, "base64");

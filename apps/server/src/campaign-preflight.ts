@@ -34,6 +34,7 @@ import {
 } from "./scene-map-history-model.js";
 import { validateCampaignStorageQuotas } from "./campaign-storage-quotas.js";
 import type { CampaignImageInspector } from "./campaign-image-inspection.js";
+import { campaignModuleReferences } from "./campaign-module-references.js";
 
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -484,6 +485,43 @@ function inspect(
       return null;
     }
   };
+  const moduleReferences = campaignModuleReferences(
+    new Map([
+      ["campaign", new Set([campaign.id])],
+      ["scene", scenes],
+      [
+        "token",
+        new Set(
+          [...historyObjects]
+            .filter(([, object]) => object.kind === "token")
+            .map(([id]) => id),
+        ),
+      ],
+      [
+        "drawing",
+        new Set(
+          [...historyObjects]
+            .filter(([, object]) => object.kind === "drawing")
+            .map(([id]) => id),
+        ),
+      ],
+      ["note", new Set(data.notes.map((note) => note.id))],
+      ["document", new Set(records.module_documents.map((row) => row.id))],
+      ["instance", new Set(records.content_instances.map((row) => row.id))],
+      ["asset", assets],
+      ["roll", rolls],
+    ]),
+    subject,
+    (reference) =>
+      Boolean(
+        usablePack(
+          reference.packId,
+          reference.packVersion,
+          reference.definitionId,
+          true,
+        ),
+      ),
+  );
   for (const row of records.module_documents) {
     const document = documentSchema.parse({
       id: row.id,
@@ -497,9 +535,13 @@ function inspect(
       data: JSON.parse(row.data_json),
     });
     if (!same(document.system, campaign.system)) invalid();
-    if (!system || row.schema_version !== system.documentVersion)
+    if (!system || row.schema_version !== system.documentVersion) {
       blockers.add("document_schema_unavailable");
-    else if (!system.documentSchema.safeParse(document.data).success) invalid();
+      moduleReferences.unavailable();
+    } else {
+      if (!system.documentSchema.safeParse(document.data).success) invalid();
+      moduleReferences.inspect(system.documentTransfer, document.data);
+    }
   }
   for (const row of records.content_overrides) {
     const entry = usablePack(
@@ -517,7 +559,10 @@ function inspect(
       .parse(JSON.parse(row.data_json));
     if (saved.name !== row.name || saved.visibility !== row.visibility)
       invalid();
-    if (entry) validatedContentData(entry.dataSchema, saved.data);
+    if (entry) {
+      validatedContentData(entry.dataSchema, saved.data);
+      moduleReferences.inspect(entry.transfer, saved.data);
+    } else moduleReferences.unavailable();
   }
   for (const row of records.content_instances) {
     const instance = instanceSchema.parse({
@@ -554,19 +599,25 @@ function inspect(
       if (
         !entry.instances ||
         entry.instances.schemaVersion !== row.schema_version
-      )
+      ) {
         blockers.add("instance_schema_unavailable");
-      else {
+        moduleReferences.unavailable();
+      } else {
         validatedContentData(entry.instances.dataSchema, instance.data);
         validatedContentData(entry.dataSchema, instance.source.data);
+        moduleReferences.inspect(entry.instances.transfer, instance.data);
+        moduleReferences.inspect(entry.transfer, instance.source.data);
       }
-    }
+    } else moduleReferences.unavailable();
   }
   if (
     referenced.size !== packs.size ||
     [...referenced].some((key) => !packs.has(key))
   )
     invalid();
+  const moduleReferenceValidation = moduleReferences.summary();
+  if (!moduleReferenceValidation.complete)
+    blockers.add("module_transfer_unavailable");
   return {
     status: "preflight-only" as const,
     importReady: false as const,
@@ -576,6 +627,7 @@ function inspect(
       Object.entries(records).map(([key, rows]) => [key, rows.length]),
     ),
     objectHistoryValidation,
+    moduleReferenceValidation,
     packages: {
       system: { ...campaign.system, status: systemStatus },
       contentPacks: packageChecks,
@@ -589,7 +641,10 @@ function inspect(
     },
     pendingValidation: [
       "image-decoding",
-      "module-external-references",
+      ...(!moduleReferenceValidation.complete
+        ? ["module-external-references"]
+        : []),
+      "mapped-module-references",
       "ownership-plan",
       "resource-id-plan",
       "mapped-storage-quotas",
