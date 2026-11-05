@@ -26,6 +26,7 @@ import { applyCommand, projectTable } from "@tableloom/core/server";
 import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { registerCampaignPreflightRoutes } from "./campaign-preflight-http.js";
+import { CampaignImportStore } from "./campaign-import.js";
 import type { CampaignImageInspector } from "./campaign-image-inspection.js";
 import { installedModules } from "./modules.js";
 import { OutboundChannel } from "./outbound.js";
@@ -146,6 +147,7 @@ export async function createApp(options: {
   let sceneMaps: SceneMapStore;
   let sceneGrids: SceneGridStore;
   let chat: ChatStore;
+  let imports: CampaignImportStore;
   try {
     store = new TableStore(database, catalog);
     access = new AccessStore(database, options.hostKey, now);
@@ -165,6 +167,15 @@ export async function createApp(options: {
     sceneMaps = new SceneMapStore(database, store, assets);
     sceneGrids = new SceneGridStore(database, store);
     chat = new ChatStore(database, store, now);
+    imports = new CampaignImportStore(
+      database,
+      access,
+      store,
+      catalog,
+      contentCatalog,
+      systems,
+      now,
+    );
   } catch (error) {
     database.close();
     throw error;
@@ -326,6 +337,7 @@ export async function createApp(options: {
     catalog,
     contentCatalog,
     systems,
+    imports,
     ...(options.imageInspector
       ? { imageInspector: options.imageInspector }
       : {}),

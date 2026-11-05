@@ -10,6 +10,7 @@ import { backgroundHistoryEntrySchema } from "./scene-map-history-model.js";
 import { backgroundMapSchema } from "@tableloom/core/scene-map";
 import { memberSchema } from "@tableloom/core/access";
 import { StoreError } from "./store.js";
+import { destinationSnapshot, type DestinationReadMode } from "./database.js";
 
 export type OwnershipReview = CampaignOwnershipReview;
 const kinds = [
@@ -142,66 +143,68 @@ export function inspectCandidateIdentifiers(
   db: DatabaseSync,
   ids: ResourceIds,
   review: OwnershipReview,
+  readMode: DestinationReadMode = "independent",
 ) {
-  if (db.isTransaction)
-    throw new Error(
-      "Candidate identifier checks need their own read snapshot.",
-    );
-  db.exec("BEGIN");
-  try {
-    const existing = new Set([
-        review.ownershipReview.host.userId,
-        ...review.ownershipReview.plan.assignments.flatMap((a) =>
-          a.target.kind === "existing" ? [a.target.userId] : [],
-        ),
-      ]),
-      person = db.prepare("SELECT id,name FROM access_users WHERE id=?"),
-      people = new Map<string, string>();
-    for (const id of existing) {
-      const row = person.get(id);
-      if (!row)
-        throw new StoreError("A reviewed local identity is unavailable.", 409);
-      people.set(id, memberSchema.shape.name.parse(row.name));
-    }
-    const values = [...ids.freshIds],
-      batchSize = 500;
-    for (const table of [
-      "campaign_records",
-      "access_campaigns",
-      "access_users",
-      "module_documents",
-      "content_instances",
-      "campaign_assets",
-      "scene_history_entries",
-    ] as const) {
-      const query = db.prepare(
-        `SELECT 1 FROM ${table} WHERE id IN (${Array(batchSize).fill("?").join(",")}) LIMIT 1`,
-      );
-      for (let start = 0; start < values.length; start += batchSize) {
-        const batch: (string | null)[] = values.slice(start, start + batchSize);
-        while (batch.length < batchSize) batch.push(null);
-        if (query.get(...batch))
+  return destinationSnapshot(
+    db,
+    () => {
+      const existing = new Set([
+          review.ownershipReview.host.userId,
+          ...review.ownershipReview.plan.assignments.flatMap((a) =>
+            a.target.kind === "existing" ? [a.target.userId] : [],
+          ),
+        ]),
+        person = db.prepare("SELECT id,name FROM access_users WHERE id=?"),
+        people = new Map<string, string>();
+      for (const id of existing) {
+        const row = person.get(id);
+        if (!row)
           throw new StoreError(
-            "A candidate identifier is no longer available.",
+            "A reviewed local identity is unavailable.",
             409,
           );
+        people.set(id, memberSchema.shape.name.parse(row.name));
       }
-    }
-    // Active image capabilities have no ID index; their count is bounded by campaigns/scenes.
-    for (const row of db
-      .prepare(
-        "SELECT image_id FROM scene_backgrounds WHERE image_id IS NOT NULL",
-      )
-      .iterate())
-      if (typeof row.image_id === "string" && ids.freshIds.has(row.image_id))
-        throw new StoreError(
-          "A candidate image capability is no longer available.",
-          409,
+      const values = [...ids.freshIds],
+        batchSize = 500;
+      for (const table of [
+        "campaign_records",
+        "access_campaigns",
+        "access_users",
+        "module_documents",
+        "content_instances",
+        "campaign_assets",
+        "scene_history_entries",
+      ] as const) {
+        const query = db.prepare(
+          `SELECT 1 FROM ${table} WHERE id IN (${Array(batchSize).fill("?").join(",")}) LIMIT 1`,
         );
-    db.exec("COMMIT");
-    return people;
-  } catch (error) {
-    if (db.isTransaction) db.exec("ROLLBACK");
-    throw error;
-  }
+        for (let start = 0; start < values.length; start += batchSize) {
+          const batch: (string | null)[] = values.slice(
+            start,
+            start + batchSize,
+          );
+          while (batch.length < batchSize) batch.push(null);
+          if (query.get(...batch))
+            throw new StoreError(
+              "A candidate identifier is no longer available.",
+              409,
+            );
+        }
+      }
+      // Active image capabilities have no ID index; their count is bounded by campaigns/scenes.
+      for (const row of db
+        .prepare(
+          "SELECT image_id FROM scene_backgrounds WHERE image_id IS NOT NULL",
+        )
+        .iterate())
+        if (typeof row.image_id === "string" && ids.freshIds.has(row.image_id))
+          throw new StoreError(
+            "A candidate image capability is no longer available.",
+            409,
+          );
+      return people;
+    },
+    readMode,
+  );
 }

@@ -154,7 +154,7 @@ try {
   await verifyRuntimePersistence(second, saved);
   await stop();
   console.log(
-    "Source-free production runtime passed: generated private host key, built assets, auth, WebSocket, document/JPEG storage, online backup, verified new-directory recovery and graceful restart persistence. Container UID/mount behavior still requires Docker.",
+    "Source-free production runtime passed: generated private host key, built assets, auth, WebSocket, document/JPEG storage, private campaign import/export and durable retry receipts, online backup, verified new-directory recovery and graceful restart persistence. Container UID/mount behavior still requires Docker.",
   );
 } finally {
   try {

@@ -5,6 +5,7 @@ import { memberSchema } from "@tableloom/core/access";
 import { StoreError } from "./store.js";
 import type { inspectCampaignTransfer } from "./campaign-preflight.js";
 import { MAX_CAMPAIGN_EXPORT_BYTES } from "./campaign-export.js";
+import { destinationSnapshot, type DestinationReadMode } from "./database.js";
 
 export const MAX_OWNERSHIP_REVIEW_BYTES = 65 * 1024 * 1024;
 export const FRESH_RESOURCE_POLICY =
@@ -63,41 +64,63 @@ export function parseOwnershipPlan(raw: unknown): OwnershipPlan {
   return plan;
 }
 
-/** Preserve the exact source file, rather than reserializing an embedded object. */
-export function parseOwnershipReviewEnvelope(serialized: string) {
-  return parseEnvelope(serialized, false);
-}
-export function parsePreparationEnvelope(serialized: string) {
-  return parseEnvelope(serialized, true);
-}
-function parseEnvelope(serialized: string, preparation: boolean) {
+const envelopeSchema = z
+  .object({
+    file: z.string().max(MAX_CAMPAIGN_EXPORT_BYTES),
+    plan: z.unknown(),
+  })
+  .strict();
+const preparationSchema = envelopeSchema.extend({
+  resourcePolicy: z.literal(FRESH_RESOURCE_POLICY),
+});
+const importSchema = preparationSchema.extend({
+  requestId: z.uuid(),
+  expectedPlanSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  confirm: z.literal("create-new-campaign"),
+});
+function decodeEnvelope<T>(serialized: string, parse: (raw: unknown) => T): T {
   try {
     if (Buffer.byteLength(serialized) > MAX_OWNERSHIP_REVIEW_BYTES)
-      throw new Error("Ownership review envelope is too large.");
-    const schema = z
-      .object({
-        file: z.string().max(MAX_CAMPAIGN_EXPORT_BYTES),
-        plan: z.unknown(),
-      })
-      .strict();
-    const raw = (
-      preparation
-        ? schema.extend({ resourcePolicy: z.literal(FRESH_RESOURCE_POLICY) })
-        : schema
-    ).parse(JSON.parse(serialized));
-    if (
-      Buffer.byteLength(raw.file) > MAX_CAMPAIGN_EXPORT_BYTES ||
-      Buffer.from(raw.file).toString("utf8") !== raw.file
-    )
-      throw new Error("Invalid source file encoding/size.");
-    return { file: raw.file, plan: parseOwnershipPlan(raw.plan) };
+      throw new Error("Envelope too large.");
+    return parse(JSON.parse(serialized));
   } catch {
     throw new StoreError(
-      "Send a bounded campaign file and ownership plan.",
+      "Send a bounded campaign file and review request.",
       400,
     );
   }
 }
+function filePlan(raw: { file: string; plan: unknown }) {
+  if (
+    Buffer.byteLength(raw.file) > MAX_CAMPAIGN_EXPORT_BYTES ||
+    Buffer.from(raw.file).toString("utf8") !== raw.file
+  )
+    throw new Error("Invalid source encoding/size.");
+  return { file: raw.file, plan: parseOwnershipPlan(raw.plan) };
+}
+/** Preserve the exact source file, rather than reserializing an embedded object. */
+export function parseOwnershipReviewEnvelope(serialized: string) {
+  return decodeEnvelope(serialized, (raw) =>
+    filePlan(envelopeSchema.parse(raw)),
+  );
+}
+export function parsePreparationEnvelope(serialized: string) {
+  return decodeEnvelope(serialized, (raw) =>
+    filePlan(preparationSchema.parse(raw)),
+  );
+}
+export function parseImportEnvelope(serialized: string) {
+  return decodeEnvelope(serialized, (raw) => {
+    const input = importSchema.parse(raw);
+    return {
+      ...filePlan(input),
+      requestId: input.requestId,
+      expectedPlanSha256: input.expectedPlanSha256,
+      confirm: input.confirm,
+    };
+  });
+}
+export type CampaignImportRequest = ReturnType<typeof parseImportEnvelope>;
 
 type SourceReport = ReturnType<typeof inspectCampaignTransfer>;
 /** Read-only candidate review. No identifier allocation, membership grants or import token. */
@@ -106,6 +129,7 @@ export function reviewCampaignOwnership<T extends SourceReport>(
   rawPlan: unknown,
   db: DatabaseSync,
   hostId: string,
+  readMode: DestinationReadMode = "independent",
 ) {
   const plan = parseOwnershipPlan(rawPlan);
   if (plan.archiveSha256 !== report.archiveSha256)
@@ -121,97 +145,96 @@ export function reviewCampaignOwnership<T extends SourceReport>(
       throw new StoreError("Review every source identity exactly once.", 400);
   if (expected.size)
     throw new StoreError("Review every source identity exactly once.", 400);
-  if (db.isTransaction)
-    throw new Error(
-      "Ownership review needs its own destination read snapshot.",
-    );
-  db.exec("BEGIN");
-  try {
-    const owner = db
-      .prepare("SELECT user_id FROM access_host WHERE id=1")
-      .get();
-    if (owner?.user_id !== hostId)
-      throw new StoreError("Only the server host can review ownership.", 403);
-    const local = db.prepare("SELECT id,name FROM access_users WHERE id=?"),
-      selected = new Map<string, { role: "gm" | "player"; sources: string[] }>([
-        [hostId, { role: "gm", sources: [] }],
-      ]);
-    let newUsers = 0,
-      unclaimed = 0;
-    const assignments = plan.assignments.map((assignment) => {
-      const target = assignment.target;
-      if (target.kind === "unclaimed") {
-        unclaimed++;
-        return { sourceId: assignment.sourceId, target };
-      }
-      if (target.kind === "new") {
-        newUsers++;
-        return { sourceId: assignment.sourceId, target };
-      }
-      const person = z
-        .object({ id: z.uuid(), name: memberSchema.shape.name })
-        .optional()
-        .parse(local.get(target.userId));
-      if (!person)
-        throw new StoreError("A reviewed local identity is unavailable.", 409);
-      const previous = selected.get(person.id);
-      if (previous && previous.role !== target.role)
-        throw new StoreError(
-          "Choose one consistent role per local identity; the server host must remain a GM.",
-          400,
-        );
-      const choice = previous ?? { role: target.role, sources: [] };
-      choice.sources.push(assignment.sourceId);
-      selected.set(person.id, choice);
+  return destinationSnapshot(
+    db,
+    () => {
+      const owner = db
+        .prepare("SELECT user_id FROM access_host WHERE id=1")
+        .get();
+      if (owner?.user_id !== hostId)
+        throw new StoreError("Only the server host can review ownership.", 403);
+      const local = db.prepare("SELECT id,name FROM access_users WHERE id=?"),
+        selected = new Map<
+          string,
+          { role: "gm" | "player"; sources: string[] }
+        >([[hostId, { role: "gm", sources: [] }]]);
+      let newUsers = 0,
+        unclaimed = 0;
+      const assignments = plan.assignments.map((assignment) => {
+        const target = assignment.target;
+        if (target.kind === "unclaimed") {
+          unclaimed++;
+          return { sourceId: assignment.sourceId, target };
+        }
+        if (target.kind === "new") {
+          newUsers++;
+          return { sourceId: assignment.sourceId, target };
+        }
+        const person = z
+          .object({ id: z.uuid(), name: memberSchema.shape.name })
+          .optional()
+          .parse(local.get(target.userId));
+        if (!person)
+          throw new StoreError(
+            "A reviewed local identity is unavailable.",
+            409,
+          );
+        const previous = selected.get(person.id);
+        if (previous && previous.role !== target.role)
+          throw new StoreError(
+            "Choose one consistent role per local identity; the server host must remain a GM.",
+            400,
+          );
+        const choice = previous ?? { role: target.role, sources: [] };
+        choice.sources.push(assignment.sourceId);
+        selected.set(person.id, choice);
+        return {
+          sourceId: assignment.sourceId,
+          target: { ...target, name: person.name },
+        };
+      });
+      const mergedTargets = [...selected]
+          .filter(([, target]) => target.sources.length > 1)
+          .map(([userId, target]) => ({ userId, sourceIds: target.sources })),
+        memberCount = selected.size + newUsers,
+        blockers = [...report.blockers];
+      if (mergedTargets.length && !plan.acknowledgeMerges)
+        blockers.push("identity_merge_acknowledgement_required");
+      if (memberCount > 1000) blockers.push("import_member_capacity_reached");
+      const complete =
+        report.moduleReferenceValidation.complete &&
+        (!mergedTargets.length || plan.acknowledgeMerges) &&
+        memberCount <= 1000;
+      const { status: _sourceStatus, ...source } = report;
       return {
-        sourceId: assignment.sourceId,
-        target: { ...target, name: person.name },
-      };
-    });
-    const mergedTargets = [...selected]
-        .filter(([, target]) => target.sources.length > 1)
-        .map(([userId, target]) => ({ userId, sourceIds: target.sources })),
-      memberCount = selected.size + newUsers,
-      blockers = [...report.blockers];
-    if (mergedTargets.length && !plan.acknowledgeMerges)
-      blockers.push("identity_merge_acknowledgement_required");
-    if (memberCount > 1000) blockers.push("import_member_capacity_reached");
-    const complete =
-      report.moduleReferenceValidation.complete &&
-      (!mergedTargets.length || plan.acknowledgeMerges) &&
-      memberCount <= 1000;
-    const { status: _sourceStatus, ...source } = report;
-    db.exec("COMMIT");
-    return {
-      ...source,
-      status: "ownership-review-only" as const,
-      importReady: false as const,
-      blockers: blockers.sort(),
-      pendingValidation: report.pendingValidation.filter(
-        (item) => item !== "ownership-plan" || !complete,
-      ),
-      ownershipReview: {
-        complete,
-        planSha256: createHash("sha256")
-          .update(JSON.stringify(plan))
-          .digest("hex"),
-        plan,
-        assignments,
-        mergedTargets,
-        counts: {
-          existingUsers: selected.size,
-          newUsers,
-          unclaimed,
-          memberships: memberCount,
-          membershipLimit: 1000,
+        ...source,
+        status: "ownership-review-only" as const,
+        importReady: false as const,
+        blockers: blockers.sort(),
+        pendingValidation: report.pendingValidation.filter(
+          (item) => item !== "ownership-plan" || !complete,
+        ),
+        ownershipReview: {
+          complete,
+          planSha256: createHash("sha256")
+            .update(JSON.stringify(plan))
+            .digest("hex"),
+          plan,
+          assignments,
+          mergedTargets,
+          counts: {
+            existingUsers: selected.size,
+            newUsers,
+            unclaimed,
+            memberships: memberCount,
+            membershipLimit: 1000,
+          },
+          host: { userId: hostId, role: "gm" as const },
         },
-        host: { userId: hostId, role: "gm" as const },
-      },
-    };
-  } catch (error) {
-    if (db.isTransaction) db.exec("ROLLBACK");
-    throw error;
-  }
+      };
+    },
+    readMode,
+  );
 }
 export type CampaignOwnershipReview = ReturnType<
   typeof reviewCampaignOwnership<SourceReport>

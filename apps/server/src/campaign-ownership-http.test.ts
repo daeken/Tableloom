@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,7 +16,26 @@ import { MAX_CAMPAIGN_EXPORT_BYTES } from "./campaign-export.js";
 import {
   MAX_OWNERSHIP_REVIEW_BYTES,
   type OwnershipPlan,
+  parseOwnershipPlan,
 } from "./campaign-ownership-plan.js";
+
+function importPayload(
+  file: string,
+  rawPlan: OwnershipPlan,
+  requestId = randomUUID(),
+) {
+  const plan = parseOwnershipPlan(rawPlan);
+  return JSON.stringify({
+    file,
+    plan,
+    requestId,
+    resourcePolicy: "fresh-campaign-and-resource-identifiers",
+    confirm: "create-new-campaign",
+    expectedPlanSha256: createHash("sha256")
+      .update(JSON.stringify(plan))
+      .digest("hex"),
+  });
+}
 
 const root = "/api/campaign-imports/ownership-review";
 const cookieOf = (r: { headers: Record<string, unknown> }) =>
@@ -435,6 +454,231 @@ test("review preserves exact source bytes through a larger escaped envelope whil
       413,
     );
     assert.equal(contents(f.db), before);
+  } finally {
+    await f.close();
+  }
+});
+
+test("import writes are host-only and explicitly confirmed, create one durable campaign on retries, preserve privacy and never switch the active session", async () => {
+  const f = await setup();
+  try {
+    const path = "/api/campaign-imports/import",
+      payload = importPayload(f.file, f.plan),
+      player = await f.player(),
+      oversized = { "content-length": String(MAX_OWNERSHIP_REVIEW_BYTES + 1) };
+    assert.equal((await f.post(path, "{}", "", oversized)).statusCode, 401);
+    assert.equal(
+      (await f.post(path, "{}", player.cookie, oversized)).statusCode,
+      403,
+    );
+    f.db
+      .prepare("UPDATE access_memberships SET role='gm' WHERE user_id=?")
+      .run(player.id);
+    assert.equal((await f.post(path, payload, player.cookie)).statusCode, 403);
+    f.db
+      .prepare("UPDATE access_memberships SET role='player' WHERE user_id=?")
+      .run(player.id);
+    assert.equal(
+      (await f.post(path, "{}", f.cookie, oversized)).statusCode,
+      413,
+    );
+    assert.equal(
+      (
+        await f.post(path, payload, f.cookie, {
+          origin: "https://foreign.invalid",
+        })
+      ).statusCode,
+      403,
+    );
+    const missing = JSON.parse(payload);
+    delete missing.confirm;
+    assert.equal(
+      (await f.post(path, JSON.stringify(missing), f.cookie)).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await f.post(
+          path,
+          JSON.stringify({ ...JSON.parse(payload), overwrite: true }),
+          f.cookie,
+        )
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await f.post(
+          path,
+          JSON.stringify({
+            ...JSON.parse(payload),
+            expectedPlanSha256: "0".repeat(64),
+          }),
+          f.cookie,
+        )
+      ).statusCode,
+      409,
+    );
+    const sourceBefore = contents(f.source.db),
+      destinationBefore = f.db
+        .prepare("SELECT COUNT(*) AS n FROM campaign_records")
+        .get()!.n;
+    const response = await f.post(path, payload, f.cookie);
+    assert.equal(response.statusCode, 201, response.body);
+    assert.equal(response.headers["cache-control"], "no-store");
+    assert.equal(response.headers["set-cookie"], undefined);
+    const result = response.json();
+    assert.equal(result.status, "imported");
+    assert.equal(result.replayed, false);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) AS n FROM campaign_records").get()!.n,
+      Number(destinationBefore) + 1,
+    );
+    assert.equal(
+      (
+        await f.app.inject({
+          url: "/api/access",
+          headers: { cookie: f.cookie },
+        })
+      ).json().member.tableId,
+      f.source.gm.member.tableId,
+    );
+    for (const secret of ["PRIVATE FIELD", "PRIVATE CHAT", key, f.file])
+      assert.ok(!response.body.includes(secret));
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM access_memberships WHERE user_id=? AND table_id=?",
+        )
+        .get(player.id, result.campaign.id)!.n,
+      0,
+    );
+    const beforeReplay = contents(f.db),
+      replay = await f.post(path, payload, f.cookie);
+    assert.equal(replay.statusCode, 200, replay.body);
+    assert.equal(replay.json().replayed, true);
+    assert.equal(replay.json().campaign.id, result.campaign.id);
+    assert.equal(contents(f.db), beforeReplay);
+    assert.equal(contents(f.source.db), sourceBefore);
+    // Claim the explicitly created member through the existing GM recovery workflow.
+    const selected = await f.post(
+      `/api/campaigns/${result.campaign.id}/select`,
+      "{}",
+      f.cookie,
+    );
+    assert.equal(selected.statusCode, 200, selected.body);
+    const hostCookie = cookieOf(selected),
+      member = f.db
+        .prepare(
+          "SELECT user_id FROM access_memberships WHERE table_id=? AND role='player'",
+        )
+        .get(result.campaign.id)!;
+    const recovery = await f.post(
+      `/api/access/members/${String(member.user_id)}/recovery`,
+      "{}",
+      hostCookie,
+    );
+    assert.equal(recovery.statusCode, 200, recovery.body);
+    const joined = await f.post(
+      "/api/access/join",
+      JSON.stringify({ code: recovery.json().token, name: "Ignored name" }),
+    );
+    assert.equal(joined.statusCode, 200, joined.body);
+    const importedPlayer = cookieOf(joined);
+    const scene = f.db
+      .prepare("SELECT id,state_json FROM scene_records WHERE campaign_id=?")
+      .all(result.campaign.id)
+      .find((row) => JSON.parse(String(row.state_json)).tokens.length)!;
+    const active = await f.post(
+      `/api/campaigns/${result.campaign.id}/activate`,
+      JSON.stringify({
+        sceneId: scene.id,
+        expectedVersion: result.campaign.version,
+      }),
+      hostCookie,
+    );
+    assert.equal(active.statusCode, 200, active.body);
+    const table = await f.app.inject({
+      url: "/api/table",
+      headers: { cookie: importedPlayer },
+    });
+    assert.equal(table.statusCode, 200);
+    assert.equal(table.json().tokens[0].ownerId, joined.json().member.id);
+    assert.equal(joined.json().member.role, "player");
+    const background = await f.app.inject({
+      url: `/api/campaigns/${result.campaign.id}/scene-map`,
+      headers: { cookie: importedPlayer },
+    });
+    assert.equal(background.statusCode, 403);
+    const map = f.db
+      .prepare(
+        "SELECT image_id FROM scene_backgrounds WHERE campaign_id=? AND scene_id=?",
+      )
+      .get(result.campaign.id, String(scene.id))!;
+    const image = `/api/campaigns/${result.campaign.id}/scene-map/${String(scene.id)}/${String(map.image_id)}/content`;
+    assert.equal(
+      (await f.app.inject({ url: image, headers: { cookie: importedPlayer } }))
+        .statusCode,
+      404,
+    );
+    assert.equal(
+      (await f.app.inject({ url: image, headers: { cookie: hostCookie } }))
+        .statusCode,
+      200,
+    );
+    assert.ok(!table.body.includes(String(map.image_id)));
+    assert.equal(
+      f.db.prepare("SELECT 1 FROM pragma_foreign_key_check LIMIT 1").get(),
+      undefined,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("import rejects changed package bindings and revoked host sessions after asynchronous image checks without writing anything", async () => {
+  const control = controlled(),
+    f = await setup(control.inspector);
+  try {
+    const path = "/api/campaign-imports/import",
+      payload = importPayload(f.file, f.plan),
+      pending = f.post(path, payload, f.cookie);
+    await until(() => control.inspector.busy);
+    const binding = f.db
+      .prepare(
+        "SELECT digest FROM content_pack_bindings WHERE pack_id=? AND pack_version=?",
+      )
+      .get(f.source.pack.id, f.source.pack.version)!;
+    f.db
+      .prepare(
+        "UPDATE content_pack_bindings SET digest=? WHERE pack_id=? AND pack_version=?",
+      )
+      .run("0".repeat(64), f.source.pack.id, f.source.pack.version);
+    const changed = contents(f.db);
+    control.finish();
+    const rejected = await pending;
+    assert.equal(rejected.statusCode, 409, rejected.body);
+    assert.equal(contents(f.db), changed);
+    f.db
+      .prepare(
+        "UPDATE content_pack_bindings SET digest=? WHERE pack_id=? AND pack_version=?",
+      )
+      .run(String(binding.digest), f.source.pack.id, f.source.pack.version);
+    const again = f.post(path, payload, f.cookie);
+    await until(() => control.inspector.busy);
+    assert.equal(
+      (await f.post("/api/access/logout", "{}", f.cookie)).statusCode,
+      200,
+    );
+    const revoked = contents(f.db);
+    control.finish();
+    assert.equal((await again).statusCode, 401);
+    assert.equal(contents(f.db), revoked);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) AS n FROM campaign_import_requests").get()!
+        .n,
+      0,
+    );
   } finally {
     await f.close();
   }

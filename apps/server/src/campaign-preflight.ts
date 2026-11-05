@@ -35,6 +35,7 @@ import {
 import { validateCampaignStorageQuotas } from "./campaign-storage-quotas.js";
 import type { CampaignImageInspector } from "./campaign-image-inspection.js";
 import { campaignModuleReferences } from "./campaign-module-references.js";
+import { destinationSnapshot, type DestinationReadMode } from "./database.js";
 
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -77,6 +78,7 @@ export function inspectCampaignTransfer(
   content: ContentCatalog,
   systems: readonly ServerSystemDefinition<unknown>[],
   db: DatabaseSync,
+  readMode: DestinationReadMode = "independent",
 ) {
   const archive = parseCampaignTransfer(serialized);
   return inspectParsedCampaignTransfer(
@@ -86,6 +88,7 @@ export function inspectCampaignTransfer(
     content,
     systems,
     db,
+    readMode,
   );
 }
 
@@ -129,6 +132,7 @@ function inspectParsedCampaignTransfer(
   content: ContentCatalog,
   systems: readonly ServerSystemDefinition<unknown>[],
   db: DatabaseSync,
+  readMode: DestinationReadMode = "independent",
 ) {
   validateCampaignStorageQuotas(archive.records);
   let report: ReturnType<typeof inspect>;
@@ -142,35 +146,30 @@ function inspectParsedCampaignTransfer(
       400,
     );
   }
-  if (db.isTransaction)
-    throw new Error(
-      "Campaign preflight needs its own destination read snapshot.",
-    );
-  db.exec("BEGIN");
-  try {
-    const destination = campaignTransferCollisions(db, archive);
-    if (
-      destination.campaignCapacity.used >= MAX_CAMPAIGNS ||
-      destination.campaignCapacity.accessUsed >= MAX_CAMPAIGNS
-    )
-      report.blockers.push("campaign_capacity_reached");
-    const stored = db.prepare(
-      "SELECT digest FROM content_pack_bindings WHERE pack_id=? AND pack_version=?",
-    );
-    if (
-      archive.packages.contentPacks.some((pin) => {
-        const binding = stored.get(pin.id, pin.version);
-        return binding && binding.digest !== pin.sha256;
-      })
-    )
-      report.blockers.push("stored_pack_binding_changed");
-    db.exec("COMMIT");
-    report.blockers.sort();
-    return { ...report, destination };
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  return destinationSnapshot(
+    db,
+    () => {
+      const destination = campaignTransferCollisions(db, archive);
+      if (
+        destination.campaignCapacity.used >= MAX_CAMPAIGNS ||
+        destination.campaignCapacity.accessUsed >= MAX_CAMPAIGNS
+      )
+        report.blockers.push("campaign_capacity_reached");
+      const stored = db.prepare(
+        "SELECT digest FROM content_pack_bindings WHERE pack_id=? AND pack_version=?",
+      );
+      if (
+        archive.packages.contentPacks.some((pin) => {
+          const binding = stored.get(pin.id, pin.version);
+          return binding && binding.digest !== pin.sha256;
+        })
+      )
+        report.blockers.push("stored_pack_binding_changed");
+      report.blockers.sort();
+      return { ...report, destination };
+    },
+    readMode,
+  );
 }
 
 function inspect(

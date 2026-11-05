@@ -315,6 +315,7 @@ async function verifyCampaignExport(
     "A cyclic history link must fail compiled preflight",
   );
   await invalidHistory.arrayBuffer();
+  return { file: serialized, plan: ownershipPlan };
 }
 async function runtimeCommand(
   socket: WebSocket,
@@ -474,14 +475,124 @@ export async function seedRuntime(url: string, hostKey: string) {
   } finally {
     socket.terminate();
   }
-  await verifyCampaignExport(
+  const transfer = await verifyCampaignExport(
     url,
     cookie,
     document,
     campaign.version,
     hash(bytes),
   );
+  const plan = {
+    ...transfer.plan,
+    assignments: transfer.plan.assignments.map(({ sourceId }) => ({
+      sourceId,
+      target: { kind: "unclaimed" },
+    })),
+  };
+  const review = await request(
+    url,
+    "/api/campaign-imports/ownership-review",
+    cookie,
+    {
+      file: transfer.file,
+      plan,
+    },
+  );
+  assert.equal(review.status, 200);
+  const { ownershipReview } = z
+    .object({ ownershipReview: z.object({ planSha256: z.string() }) })
+    .parse(await review.json());
+  const importRequest = {
+    file: transfer.file,
+    plan,
+    expectedPlanSha256: ownershipReview.planSha256,
+    resourcePolicy: "fresh-campaign-and-resource-identifiers",
+    requestId: randomUUID(),
+    confirm: "create-new-campaign",
+  };
+  const imported = await request(
+    url,
+    "/api/campaign-imports/import",
+    cookie,
+    importRequest,
+  );
+  assert.equal(imported.status, 201);
+  assert.equal(imported.headers.get("set-cookie"), null);
+  const result = z
+    .object({
+      status: z.literal("imported"),
+      replayed: z.literal(false),
+      campaign: campaignMembershipSchema,
+      summary: z.object({
+        createdPeople: z.literal(0),
+        attributionRecords: z.literal(1),
+        memberships: z.literal(1),
+      }),
+    })
+    .parse(await imported.json());
+  assert.notEqual(result.campaign.id, campaign.id);
+  // Use a separate recovered session to inspect the target without rotating the source session.
+  const recovered = await request(url, "/api/access/recover", "", {
+    key: hostKey,
+  });
+  assert.equal(recovered.status, 200);
+  const recoveredCookie = recovered.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(recoveredCookie);
+  const selected = await request(
+    url,
+    `/api/campaigns/${result.campaign.id}/select`,
+    recoveredCookie,
+    {},
+  );
+  assert.equal(selected.status, 200);
+  const targetCookie = selected.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(targetCookie);
+  try {
+    const exported = await request(
+      url,
+      `/api/campaigns/${result.campaign.id}/export`,
+      targetCookie,
+      {
+        expectedVersion: result.campaign.version,
+        include: "all-campaign-content-including-private",
+      },
+    );
+    assert.equal(exported.status, 200);
+    const target = z
+      .object({
+        members: z.array(z.object({ id: z.uuid() })),
+        records: z.object({
+          module_documents: z.array(
+            z.object({
+              id: z.uuid(),
+              owner_id: z.uuid(),
+              data_json: z.string(),
+            }),
+          ),
+          campaign_assets: z.array(z.object({ bytes: z.string() })),
+          scene_history_entries: z.array(z.unknown()),
+        }),
+      })
+      .parse(await exported.json());
+    assert.equal(target.members.length, 1);
+    assert.equal(target.members[0]!.id, document.ownerId);
+    assert.equal(target.records.module_documents.length, 1);
+    const copied = target.records.module_documents[0]!;
+    assert.notEqual(copied.id, document.id);
+    assert.notEqual(copied.owner_id, document.ownerId);
+    assert.deepEqual(JSON.parse(copied.data_json), document.data);
+    assert.equal(
+      hash(Buffer.from(target.records.campaign_assets[0]!.bytes, "base64")),
+      hash(bytes),
+    );
+    assert.equal(target.records.scene_history_entries.length, 2);
+  } finally {
+    const logout = await request(url, "/api/access/logout", targetCookie, {});
+    assert.equal(logout.status, 200);
+    await logout.arrayBuffer();
+  }
   return {
+    imported: { request: importRequest, campaignId: result.campaign.id },
     cookie,
     document,
     documentPath: `${documents}/${document.id}`,
@@ -508,4 +619,23 @@ export async function verifyRuntimePersistence(
     state.campaignVersion,
     state.assetHash,
   );
+  const replay = await request(
+    url,
+    "/api/campaign-imports/import",
+    state.cookie,
+    state.imported.request,
+  );
+  assert.equal(
+    replay.status,
+    200,
+    "A saved import retry must survive backup/restore and runtime replacement",
+  );
+  const result = z
+    .object({
+      status: z.literal("imported"),
+      replayed: z.literal(true),
+      campaign: campaignMembershipSchema,
+    })
+    .parse(await replay.json());
+  assert.equal(result.campaign.id, state.imported.campaignId);
 }

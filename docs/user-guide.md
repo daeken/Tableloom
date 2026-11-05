@@ -198,7 +198,7 @@ Campaigns pin exact system and pack versions. The server installs **one version 
 
 ## Campaign transfer: current limits
 
-**Campaign export, read-only preflight, ownership review and candidate preparation have administrator APIs; import writes and transfer UI/CLI are not implemented.** The export is an initial versioned private snapshot, not a tested recovery/round-trip format. Keep using [whole-instance backups](#backup-and-recovery) for recovery until import and destination validation are available.
+**Campaign export, preflight, ownership review, candidate preparation and atomic import have administrator APIs. The transfer UI/CLI is unfinished.** Import creates a separate campaign on a compatible installation; it does not replace [whole-instance backups](#backup-and-recovery), which also preserve credentials, recovery keys and server configuration.
 
 An authenticated GM with the campaign active can request `POST /api/campaigns/<campaign-id>/export` from the same origin, with JSON:
 
@@ -213,9 +213,9 @@ Use the campaign's current version from its settings response, not a fixed versi
 
 **Treat the file as private administrator data.** It includes all scenes (including inactive ones), maps and library images, notes, current/archived rolls, private chat, module records, homebrew, owned content and durable edit history for that campaign. It includes source ownership identifiers and the current member names/roles as descriptors, but no login sessions, invitation/recovery codes, private host key or other campaigns' records. User-entered secrets in notes/module fields remain content and are included. This is not a player-safe share file. Files are plaintext, unsigned and unencrypted.
 
-Exports are limited to 32 MiB of JSON and 100,000 data rows; embedded images use base64. Large campaigns should use whole-instance backup. Export runs in one consistent read snapshot without changing the source. It retains exact system/pack versions and content-pack fingerprints, including historical reset-only pack references. Source identities are preserved **without access grants**: departed owners may have no current member descriptor. The future importer must apply a reviewed ownership plan and validate installed code, references and module data; matching names or IDs must never grant access automatically. No module code or installed base catalog is bundled, and no destination compatibility is claimed yet.
+Exports are limited to 32 MiB of JSON and 100,000 data rows; embedded images use base64. Large campaigns should use whole-instance backup. Export runs in one consistent read snapshot without changing the source. It retains exact system/pack versions and content-pack fingerprints, including historical reset-only pack references. Source identities are preserved **without access grants**: departed owners may have no current member descriptor. Import applies a reviewed ownership plan and validates installed code, references and module data; matching names or IDs never grant access automatically. No module code or installed base catalog is bundled, and compatibility must be checked on the destination.
 
-The supported end-to-end server transfer today remains a **whole-instance** backup, verify and restore into a new data directory on a matching installation. It brings every campaign and saved access state/recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. The README keeps selective portable transfer unfinished.
+For **whole-instance** transfer, back up, verify and restore into a new data directory on a matching installation. It brings every campaign and saved access state/recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. Selective transfer is available through the APIs below; its UI remains in the README task list.
 
 
 ### Read-only destination preflight
@@ -226,12 +226,12 @@ Preflight returns `status: "preflight-only"` and **always** `importReady: false`
 
 The response contains resource counts, package statuses, source identities, source-ID collision counts, blockers, pending checks and a SHA-256 of the exact file bytes. It omits private document/map/chat bodies and makes no persistent changes, consumes no invitations and runs no module actions, migrations or instance factories. The fingerprint identifies the inspected bytes; it is not an import token or a compatibility guarantee. File content is still untrusted and private.
 
-**An empty blocker list is not permission to import.** Ownership review and fresh-ID candidate preparation are separate steps. They can check the mapped candidate in memory, but atomic import writes remain unfinished. There is no import-write endpoint. Collision results are a read snapshot, not a reservation; any future write must revalidate destination state and authorization. Whole-instance backup remains the recovery mechanism.
+**An empty blocker list is not an import authorization.** Ownership review and fresh-ID candidate preparation are separate read-only steps. The import endpoint below rebuilds and validates the candidate under its write transaction. Collision results and preview IDs reserve nothing. Whole-instance backup remains the recovery mechanism.
 
 
 Preflight now applies the live stores' source-data limits as well as file limits: 100 chat messages per public/private audience and 1,100 per campaign; 100 object-history entries per person per scene, 10,000 per campaign and 32 MiB of stored payload/target JSON; 100 map-history entries per scene, 10,000 per campaign, 4 KiB per entry and 8 MiB in total. Image-library totals and the existing scene/document/content/instance/roll/object-ID limits are checked too. Raw JSON byte budgets use UTF-8, including whitespace; oversized files are rejected without silently pruning data.
 
-The destination summary includes `campaignCapacity` with campaign/access-registry usage and the 100-campaign limit. Either registry being full adds `campaign_capacity_reached`, even when the source UUID already exists: the unfinished importer is intended to create a new campaign, not overwrite one. These reads reserve nothing. Source quotas being satisfied does not prove that a future ownership mapping fits: combining authors can merge private chat/history buckets, and remapping can change JSON sizes. `mapped-storage-quotas` therefore remains pending and execution must recheck both mapped limits and destination capacity.
+The destination summary includes `campaignCapacity` with campaign/access-registry usage and the 100-campaign limit. Either registry being full adds `campaign_capacity_reached`, even when the source UUID already exists: import creates a new campaign rather than overwriting one. These reads reserve nothing. Source quotas being satisfied does not prove that a future ownership mapping fits: combining authors can merge private chat/history buckets, and remapping can change JSON sizes. `mapped-storage-quotas` therefore remains pending and execution must recheck both mapped limits and destination capacity.
 
 
 Map undo/redo history is checked against the saved map for every scene, including inactive private scenes. Entries must form an ordered chain, point to retained asset references and agree with the saved cursor and the available undo/redo states. A nonzero cursor must name a retained entry. Cleared history with cursor zero, pruned prefixes, nonconsecutive sequences after branching and fresh image access keys after undo/redo remain valid. The comparison checks source image, position, dimensions and visibility; it does not restore old access keys.
@@ -265,17 +265,17 @@ The signed-in server host can send `POST /api/campaign-imports/ownership-review`
 
 Repeat assignments until every source identity appears exactly once. Three target choices are supported:
 
-| Kind | Required fields | Intended result of a future import |
+| Kind | Required fields | Result of import |
 | --- | --- | --- |
 | `existing` | Local `userId`, explicit `role` (`gm` or `player`) | Membership for that person in the new campaign |
 | `new` | Explicit `name` (1–32 characters) and `role` | A distinct new person; equal names do not merge identities |
-| `unclaimed` | No other fields | Preserve distinct attribution without a user account or membership; the GM controls the content |
+| `unclaimed` | No other fields | Create a distinct attribution-only profile without membership or login credentials; the GM controls the content |
 
 The server host is always planned as a GM independently of source roles and counts toward the 1,000-member limit. Choosing a player role for the local host or conflicting roles for one local person is rejected. Source GM roles never become grants. Mapping several source identities to one existing person is shown in `mergedTargets` and adds `identity_merge_acknowledgement_required` until you explicitly set `acknowledgeMerges: true`; their combined private content and editing stacks still need mapped validation. New/unclaimed choices remain distinct per source identity.
 
 The result is `status: "ownership-review-only"`, **always** `importReady: false`, with normalized plan/assignment previews, current local names, merge/capacity summaries and `planSha256`. Completion removes only `ownership-plan` from pending checks; incomplete module identity inventory, unacknowledged merges or too many planned members keep it pending. Image/source/package checks run again. Local targets and host authorization are checked after image work. A missing local person or changed file fingerprint returns 409. The plan hash fingerprints normalized choices; it is not a reservation, permission token or guarantee that a later write will succeed.
 
-This endpoint allocates no IDs, creates no people/memberships/invitations/sessions, copies no source credentials and saves nothing. There is no import writer or review UI yet. It accepts a 65-MiB JSON envelope to accommodate escaping a file of at most 32 MiB, plus a bounded plan (at most 1,000 assignments and 512 KiB of normalized JSON). Existing proxies capped at 32 MiB may reject larger wrapped reviews; use the current 65-MiB example. Raw preflight/image/ordinary JSON limits remain unchanged.
+This endpoint allocates no IDs, creates no people/memberships/invitations/sessions, copies no source credentials and saves nothing. There is no review UI yet. It accepts a 65-MiB JSON envelope to accommodate escaping a file of at most 32 MiB, plus a bounded plan (at most 1,000 assignments and 512 KiB of normalized JSON). Existing proxies capped at 32 MiB may reject larger wrapped reviews; use the current 65-MiB example. Raw preflight/image/ordinary JSON limits remain unchanged.
 
 
 ### Prepare a fresh campaign candidate
@@ -300,14 +300,44 @@ Old command retry receipts and digest bindings are omitted from the candidate: t
 
 The response is `status: "candidate-preflight-only"` and **always** `importReady: false`. `resourcePlan` gives completion, policy, a preview campaign UUID, candidate fingerprint, mapping counts and dropped retry counts. `candidateValidation` reports mapped history/module checks. A complete candidate has only `atomic-import` pending. Preparation rechecks mapped storage quotas, identity inventory, module schemas/references, history graphs and destination capacity/package bindings. Candidate IDs are checked against global destination keys; no existing campaign or resource is overwritten. Merges that exceed storage limits or break editing-stack order are blocked, without silently pruning data.
 
-Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **No import writer or transfer UI/CLI exists yet.** Eventual execution must repeat checks under its atomic write transaction.
+Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **Preparation saves nothing.** The import endpoint repeats checks under its atomic write transaction; the transfer UI/CLI remains unfinished.
+
+
+### Import a reviewed campaign
+
+The signed-in **server host** can send `POST /api/campaign-imports/import` from the same origin. Use the exact export text and reviewed plan, the review response's `ownershipReview.planSha256`, a new UUID `requestId`, and both explicit confirmations:
+
+```ts
+const body = {
+  file,
+  plan,
+  expectedPlanSha256: ownershipReview.planSha256,
+  resourcePolicy: "fresh-campaign-and-resource-identifiers",
+  requestId: crypto.randomUUID(),
+  confirm: "create-new-campaign",
+};
+// Retain this exact body until the result is known; reuse it after a lost response.
+await fetch("/api/campaign-imports/import", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+```
+
+The same 65-MiB envelope and 32-MiB file limits apply. The server checks image bytes, rechecks host access, then rebuilds and validates a fresh candidate under one write transaction. It saves campaign data, images, planned profiles/memberships and the retry result together. Any failure rolls back every write. The source and existing campaigns remain unchanged. A historical content-pack fingerprint must already be known locally or match installed trusted code; an unsigned file cannot establish an unknown global binding. Install/verify the historical pack if this check blocks import.
+
+A new import returns **201**, `status: "imported"`, `replayed: false`, the new `campaign` membership, request/file/plan fingerprints, timestamp and summary counts (`createdPeople`, `attributionRecords`, `memberships`, `rows`). It returns no private record bodies or image keys. It does not switch your active campaign or rotate your session. Select the returned campaign through the normal campaign selector. Only explicit existing/new choices and the independent host GM receive membership. New people have no sessions or invitations; use normal GM recovery-code controls to let them sign in. Unclaimed owners get fresh attribution-only profiles labelled **Unclaimed identity**, with no membership, credentials or recovery invitations. They preserve ownership/history foreign keys and give no person access.
+
+An exact retry with the **same request ID, file and normalized plan** returns **200**, `replayed: true`, and the original result, including after restart, backup/restore or container replacement. Reusing the ID with different choices/file returns 409; removing the target or host's GM membership also returns 409 without recreating it or restoring grants. Current host authorization is always required. Keep the original request body after a timeout; using a new ID can create another campaign. The server retains at most **1,000** import results (each at most 256 KiB); at capacity it rejects new requests while existing retries remain available. There is no receipt-pruning API yet. Results are server operational metadata, included in whole-instance backups but excluded from campaign exports.
+
+Preflight/review/prepare continue to return `importReady: false` because they authorize no writes. Import succeeds only through the confirmed endpoint. There is no campaign overwrite, automatic package download, migration, action replay or transfer UI yet. Existing live permissions/version checks still determine whether an imported undo edge is usable.
 
 
 ### Module references during preflight
 
 Saved module documents, homebrew definition data, owned instance state and saved definition snapshots need explicit transfer declarations from their installed server packages. A declaration lists resource-reference fields or explicitly states there are none. Missing declarations add `module_transfer_unavailable` and retain the `module-external-references` pending check; ordinary play and existing records are unaffected. The bundled name/notes scaffolds declare plain text only. No published game rules or content are added.
 
-Declared links must refer to the correct kind of resource inside the source file. Existing destination IDs and deleted object reservations do not satisfy missing links. Module-declared member IDs join the source ownership review, including departed people without names/roles, and never become access grants. UUID-looking ordinary text is left alone. Reports add `moduleReferenceValidation: { records, references, complete }`, without field paths or private data. Successful inspection removes the source reference placeholder; raw preflight still leaves `mapped-module-references` pending. Candidate preparation rewrites declared links and checks the mapped copy. A future writer must repeat validation atomically. No data is rewritten by preflight.
+Declared links must refer to the correct kind of resource inside the source file. Existing destination IDs and deleted object reservations do not satisfy missing links. Module-declared member IDs join the source ownership review, including departed people without names/roles, and never become access grants. UUID-looking ordinary text is left alone. Reports add `moduleReferenceValidation: { records, references, complete }`, without field paths or private data. Successful inspection removes the source reference placeholder; raw preflight still leaves `mapped-module-references` pending. Candidate preparation rewrites declared links and checks the mapped copy. The import writer repeats validation atomically. No data is rewritten by preflight.
 
 
 ### PNG decoding during preflight

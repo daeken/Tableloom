@@ -8,6 +8,7 @@ import { inspectCampaignTransfer } from "./campaign-preflight.js";
 import { validateCampaignStorageQuotas } from "./campaign-storage-quotas.js";
 import type { InstalledCatalog } from "./store.js";
 import type { ContentCatalog } from "./content-catalog.js";
+import type { DestinationReadMode } from "./database.js";
 
 const checked = new Set([
   "resource-id-plan",
@@ -25,9 +26,12 @@ export function prepareCampaignCandidate<T extends OwnershipReview>(
   systems: readonly ServerSystemDefinition<unknown>[],
   db: DatabaseSync,
   uuid: () => string = randomUUID,
+  readMode: DestinationReadMode = "independent",
 ) {
-  if (db.isTransaction)
+  if (readMode === "independent" && db.isTransaction)
     throw new Error("Candidate preparation needs independent read snapshots.");
+  if (readMode === "existing" && !db.isTransaction)
+    throw new Error("Candidate preparation requires an existing transaction.");
   const { status: _sourceStatus, ...base } = review;
   const result = (
     blocker: string | null,
@@ -81,6 +85,7 @@ export function prepareCampaignCandidate<T extends OwnershipReview>(
       systems,
       db,
       uuid,
+      readMode,
     );
     stage = "storage";
     validateCampaignStorageQuotas(prepared.candidate.records);
@@ -91,6 +96,7 @@ export function prepareCampaignCandidate<T extends OwnershipReview>(
       content,
       systems,
       db,
+      readMode,
     );
     if (mapped.blockers.length || !mapped.moduleReferenceValidation.complete)
       return result("mapped_campaign_unavailable", stage, undefined, mapped);

@@ -24,6 +24,7 @@ import {
   type OwnershipReview,
   type ResourceIds,
 } from "./campaign-resource-ids.js";
+import type { DestinationReadMode } from "./database.js";
 
 function remapPayload(payload: Payload, ids: ResourceIds): Payload {
   const object = (id: string) => ids.get("object", id),
@@ -84,6 +85,7 @@ export function buildCampaignCandidate(
   systems: readonly ServerSystemDefinition<unknown>[],
   db: DatabaseSync,
   uuid: () => string = randomUUID,
+  readMode: DestinationReadMode = "independent",
 ) {
   if (!review.ownershipReview.complete || review.blockers.length)
     throw new StoreError(
@@ -97,7 +99,7 @@ export function buildCampaignCandidate(
     );
   const candidate = parseCampaignTransfer(file),
     ids = allocateCampaignResourceIds(candidate, review, uuid),
-    people = inspectCandidateIdentifiers(db, ids, review),
+    people = inspectCandidateIdentifiers(db, ids, review, readMode),
     records = candidate.records,
     campaignId = ids.get("campaign", candidate.campaign.id),
     owner = (id: string | null) => (id === null ? null : ids.get("member", id)),
@@ -115,11 +117,15 @@ export function buildCampaignCandidate(
         },
       ],
     ]),
-    newUsers: { id: string; name: string }[] = [];
+    newUsers: { id: string; name: string }[] = [],
+    unclaimedUsers: { id: string; name: string }[] = [];
   for (const assignment of review.ownershipReview.plan.assignments) {
     const target = assignment.target,
       id = ids.get("member", assignment.sourceId);
-    if (target.kind === "unclaimed") continue;
+    if (target.kind === "unclaimed") {
+      unclaimedUsers.push({ id, name: "Unclaimed identity" });
+      continue;
+    }
     const name = target.kind === "existing" ? people.get(id)! : target.name;
     memberships.set(id, { id, name, role: target.role });
     if (target.kind === "new") newUsers.push({ id, name });
@@ -313,6 +319,7 @@ export function buildCampaignCandidate(
     candidate,
     ids,
     newUsers,
+    unclaimedUsers,
     memberships: [...memberships.values()],
     droppedRetries,
   };
