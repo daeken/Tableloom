@@ -27,3 +27,27 @@ export function reorderedObjects<T extends { id: string }>(
   const rest = objects.filter((d) => d.id !== id);
   return direction === "front" ? [...rest, object] : [object, ...rest];
 }
+
+export const drawingLayerSchema = z.enum(["below-tokens", "above-tokens"]);
+export type DrawingLayer = z.infer<typeof drawingLayerSchema>;
+export const drawingLayersSchema = z.array(drawingLayerSchema).max(2000);
+export function drawingLayerOf(drawing: {
+  id: string;
+  layer?: DrawingLayer | undefined;
+}): DrawingLayer {
+  return drawing.layer ?? "below-tokens";
+}
+export function drawingLayersOf(
+  drawings: readonly { id: string; layer?: DrawingLayer | undefined }[],
+): DrawingLayer[] {
+  return drawings.map(drawingLayerOf);
+}
+/** Visible back-to-front drawing order, with the token stratum between these groups. */
+export function layeredDrawings<
+  T extends { id: string; layer?: DrawingLayer | undefined },
+>(drawings: readonly T[]): T[] {
+  return [
+    ...drawings.filter((d) => drawingLayerOf(d) === "below-tokens"),
+    ...drawings.filter((d) => drawingLayerOf(d) === "above-tokens"),
+  ];
+}

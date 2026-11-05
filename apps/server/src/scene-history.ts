@@ -7,6 +7,8 @@ import {
   sceneTextSnapshot,
   shapeSnapshot,
   objectOrderMatches,
+  drawingLayerOf,
+  drawingLayersOf,
 } from "@tableloom/core";
 import type { Command, TableState, Token } from "@tableloom/core";
 import { applyCommand } from "@tableloom/core/server";
@@ -50,7 +52,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 15;
+          ?.version === 16;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -141,6 +143,31 @@ export class SceneHistoryStore {
       )
     )
       return false;
+    if (
+      payload.kind === "layer" ||
+      (payload.kind === "reorder" && payload.objectType === "drawing")
+    ) {
+      const order = payload.kind === "layer" ? payload.order : payload.before,
+        layers = payload.layers ?? order.map(() => "below-tokens" as const);
+      const byId = new Map(order.map((id, i) => [id, layers[i]!]));
+      if (payload.kind === "layer") {
+        if (
+          !objectOrderMatches(
+            state.drawings.map((d) => d.id),
+            order,
+          )
+        )
+          return false;
+        byId.set(
+          entry.targets[0]!.objectId,
+          entry.state === "done"
+            ? payload.after
+            : (payload.before ?? "below-tokens"),
+        );
+      }
+      if (state.drawings.some((d) => drawingLayerOf(d) !== byId.get(d.id)))
+        return false;
+    }
     if (expectsPresent(entry))
       return entry.targets.every((target) => {
         const object = objectOf(state, target.objectId);
@@ -183,6 +210,7 @@ export class SceneHistoryStore {
         );
       });
     if (
+      payload.kind === "layer" ||
       payload.kind === "reorder" ||
       payload.kind === "shape-update" ||
       payload.kind === "text-update" ||
@@ -316,6 +344,7 @@ export class SceneHistoryStore {
         "drawing.text.update",
         "drawing.style.update",
         "drawing.reorder",
+        "drawing.layer.update",
         "token.reorder",
         "token.resize",
         "objects.resize",
@@ -345,7 +374,28 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (
+      if (command.type === "drawing.layer.update") {
+        ids = [command.drawingId];
+        const from = before.drawings.find((d) => d.id === command.drawingId),
+          to = after.drawings.find((d) => d.id === command.drawingId);
+        if (
+          !from ||
+          !to ||
+          to.version !== from.version + 1 ||
+          to.layer !== command.layer ||
+          JSON.stringify({ ...from, layer: to.layer, version: to.version }) !==
+            JSON.stringify(to)
+        )
+          throw new Error("Invalid drawing layer transition.");
+        payload = {
+          kind: "layer",
+          objectType: "drawing",
+          before: from.layer ?? null,
+          after: to.layer,
+          order: before.drawings.map((d) => d.id),
+          layers: drawingLayersOf(before.drawings),
+        };
+      } else if (
         command.type === "drawing.reorder" ||
         command.type === "token.reorder"
       ) {
@@ -372,6 +422,9 @@ export class SceneHistoryStore {
           objectType: kind,
           before: original.map((object) => object.id),
           after: changed.map((object) => object.id),
+          ...(kind === "drawing"
+            ? { layers: drawingLayersOf(before.drawings) }
+            : {}),
         };
       } else if (command.type === "drawing.style.update") {
         ids = [command.drawingId];
@@ -706,7 +759,16 @@ export class SceneHistoryStore {
           payload.tokenOrder = state.tokens.map((object) => object.id);
       }
       let next: TableState;
-      if (payload.kind === "reorder") {
+      if (payload.kind === "layer") {
+        next = structuredClone(state);
+        const drawing = next.drawings.find((d) => d.id === target.objectId)!,
+          layer = undo ? payload.before : payload.after;
+        if (layer === null) delete drawing.layer;
+        else drawing.layer = layer;
+        drawing.version += 1;
+        next.revision += 1;
+        next = tableSchema.parse(next);
+      } else if (payload.kind === "reorder") {
         const order = undo ? payload.before : payload.after;
         next = structuredClone(state);
         if (payload.objectType === "drawing") {

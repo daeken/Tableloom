@@ -125,7 +125,7 @@ test("move-history 1 to scene-history 8 preserves IDs, cursors, links, active/of
     const history = new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      15,
+      16,
     );
     assert.equal(
       f.db
@@ -233,7 +233,7 @@ test("history migration SQL failure rolls back the table replacement, copied row
     new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      15,
+      16,
     );
   } finally {
     f.db.close();
@@ -341,7 +341,7 @@ test("scene history 2 to 8 preserves existing payloads, reservations and per-obj
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      15,
+      16,
     );
     assert.equal(
       f.db
@@ -469,7 +469,7 @@ test("scene history 3 to 8 preserves token groups, expired predecessor links, sa
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      15,
+      16,
     );
   } finally {
     f.db.close();
@@ -525,7 +525,7 @@ test("failed schema-3 marker writes and malformed causal links leave the old his
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          15,
+          16,
         );
       }
     } finally {
@@ -600,7 +600,7 @@ test("scene history 4 to 8 preserves exact mixed originals, cursors, state and r
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      15,
+      16,
     );
     transaction(f.db, () => {
       const edge = history.status(f.host.member).undo!,
@@ -666,7 +666,7 @@ test("failed schema-4 marker writes and invalid original geometry leave the old 
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          15,
+          16,
         );
       }
     } finally {
@@ -740,7 +740,7 @@ test("schema-5 group history upgrades intact to 8 and marker failure rolls back;
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          15,
+          16,
         );
       }
       assert.deepEqual(

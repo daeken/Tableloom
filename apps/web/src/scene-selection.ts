@@ -1,4 +1,4 @@
-import { shapeStyleOf } from "@tableloom/core";
+import { shapeStyleOf, drawingLayerOf } from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
 import type { TableView } from "@tableloom/core";
 import { canEditObject } from "@tableloom/core/permissions";
@@ -188,5 +188,36 @@ export function hitToken(
   return (
     Math.hypot(point.x - token.position.x, point.y - token.position.y) <=
     token.radius + 4
+  );
+}
+
+/** Picking follows the same public layer order as rendering; ownership is checked afterward. */
+export function pickSceneObject(
+  state: Pick<TableView, "drawings" | "tokens">,
+  point: Point,
+  tolerance: number,
+): SceneObject | undefined {
+  const drawings = [...state.drawings].reverse();
+  return (
+    drawings.find((drawing) => {
+      if (drawingLayerOf(drawing) !== "above-tokens") return false;
+      if (hitDrawing(drawing, point, tolerance)) return true;
+      if (drawing.kind !== "rectangle" || shapeStyleOf(drawing).fill === null)
+        return false;
+      // Rooms render from the first/last corners, even in older multi-point saves.
+      const first = drawing.points[0]!,
+        last = drawing.points.at(-1)!;
+      return (
+        point.x >= Math.min(first.x, last.x) &&
+        point.x <= Math.max(first.x, last.x) &&
+        point.y >= Math.min(first.y, last.y) &&
+        point.y <= Math.max(first.y, last.y)
+      );
+    }) ??
+    [...state.tokens].reverse().find((t) => hitToken(t, point)) ??
+    drawings.find(
+      (d) =>
+        drawingLayerOf(d) === "below-tokens" && hitDrawing(d, point, tolerance),
+    )
   );
 }

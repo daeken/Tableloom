@@ -8,6 +8,7 @@ const names: Record<CommandDelivery["type"], string> = {
   "objects.delete": "Delete objects",
   "objects.move": "Move objects",
   "token.reorder": "Arrange token",
+  "drawing.layer.update": "Change drawing layer",
   "drawing.reorder": "Arrange drawing",
   "drawing.style.update": "Style shape",
   "drawing.text.update": "Edit text label",

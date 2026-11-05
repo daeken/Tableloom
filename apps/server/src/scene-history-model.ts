@@ -11,6 +11,8 @@ import {
   drawingOrderSchema,
   tokenOrderSchema,
   objectOrderMatches,
+  drawingLayerSchema,
+  drawingLayersSchema,
 } from "@tableloom/core";
 const originalGeometrySchema = z.union([
   z
@@ -62,6 +64,22 @@ const resizeChangeSchema = z.union([
 const basePayloadSchema = z.union([
   z
     .object({
+      kind: z.literal("layer"),
+      objectType: z.literal("drawing"),
+      before: drawingLayerSchema.nullable(),
+      after: drawingLayerSchema,
+      order: drawingOrderSchema.min(1),
+      layers: drawingLayersSchema.min(1),
+    })
+    .strict()
+    .refine(
+      (p) =>
+        p.order.length === p.layers.length &&
+        (p.before ?? "below-tokens") !== p.after,
+      "Layer history must change layers and capture every drawing.",
+    ),
+  z
+    .object({
       kind: z.literal("reorder"),
       objectType: z.literal("token"),
       before: tokenOrderSchema,
@@ -82,11 +100,13 @@ const basePayloadSchema = z.union([
       objectType: z.literal("drawing"),
       before: drawingOrderSchema,
       after: drawingOrderSchema,
+      layers: drawingLayersSchema.optional(),
     })
     .strict()
     .refine((p) => {
       const after = new Set(p.after);
       return (
+        (p.layers === undefined || p.layers.length === p.before.length) &&
         p.before.length === p.after.length &&
         p.before.every((id) => after.has(id)) &&
         !objectOrderMatches(p.before, p.after)
@@ -286,7 +306,18 @@ export function entryOf(row: unknown): Entry {
   const entry = rowSchema.parse(row),
     payload = payloadSchema.parse(JSON.parse(entry.payload_json)),
     targets = targetsSchema.parse(JSON.parse(entry.targets_json));
-  if (payload.kind === "reorder") {
+  if (payload.kind === "layer") {
+    const id = targets[0]?.objectId,
+      index = payload.order.indexOf(id ?? "");
+    if (
+      targets.length !== 1 ||
+      index < 0 ||
+      payload.layers[index] !== (payload.before ?? "below-tokens")
+    )
+      throw new Error(
+        "Layer history must match its target and previous layer.",
+      );
+  } else if (payload.kind === "reorder") {
     const id = targets[0]?.objectId;
     if (
       targets.length !== 1 ||
@@ -375,6 +406,7 @@ export function entryOf(row: unknown): Entry {
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "layer" ||
   entry.payload.kind === "reorder" ||
   entry.payload.kind === "shape-update" ||
   entry.payload.kind === "text-update" ||

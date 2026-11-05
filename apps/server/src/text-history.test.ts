@@ -302,7 +302,7 @@ test("campaign 3/history 8 upgrade existing scenes/inverses exactly and roll bac
           assert.equal(
             f.db.prepare("SELECT version FROM scene_history_version").get()!
               .version,
-            15,
+            16,
           );
         }
       }
@@ -554,7 +554,7 @@ test("history 9 to 11 retains text snapshots/links while seeding only legacy sty
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        15,
+        16,
       );
       assert.deepEqual(
         f.db
@@ -832,7 +832,7 @@ test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse 
       assert.equal(
         f.db.prepare("SELECT version FROM campaign_storage_version").get()!
           .version,
-        6,
+        7,
       );
       assert.deepEqual(
         f.db
@@ -887,7 +887,7 @@ test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse 
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        15,
+        16,
       );
       assert.deepEqual(history.status(f.player.member), status);
       assert.deepEqual(

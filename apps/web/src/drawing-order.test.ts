@@ -97,6 +97,7 @@ test("drawing stack reviews freeze identity/version/order, survive unrelated edi
       ...command,
       id: randomUUID(),
       expectedOrder: max,
+      expectedLayers: max.map(() => "below-tokens"),
     }).success,
   );
   assert.ok(
@@ -108,6 +109,7 @@ test("drawing stack reviews freeze identity/version/order, survive unrelated edi
       ...command,
       id: randomUUID(),
       expectedOrder: [...max, randomUUID()],
+      expectedLayers: [...max, randomUUID()].map(() => "below-tokens"),
     }).success,
     false,
   );

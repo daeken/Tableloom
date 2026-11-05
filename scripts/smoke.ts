@@ -1150,6 +1150,9 @@ try {
       JSON.stringify({
         context: shapeState.context,
         command: {
+          expectedLayers: originalDrawingOrder.map(
+            () => "below-tokens" as const,
+          ),
           id: randomUUID(),
           type: "drawing.reorder",
           drawingId: shapeId,
@@ -1258,6 +1261,136 @@ try {
           fill: { color: "#627d9c", opacity: 0.35 },
         });
     }
+    const layerOrder = shapeState.state.drawings.map((drawing) => drawing.id);
+    const raised = snapshot(
+      live,
+      (message) =>
+        message.state.drawings.find((drawing) => drawing.id === shapeId)
+          ?.layer === "above-tokens",
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.layer.update",
+          drawingId: shapeId,
+          expectedVersion: shapeState.state.drawings.find(
+            (drawing) => drawing.id === shapeId,
+          )!.version,
+          expectedOrder: layerOrder,
+          expectedLayers: shapeState.state.drawings.map(
+            (drawing) => drawing.layer ?? "below-tokens",
+          ),
+          layer: "above-tokens",
+        },
+      }),
+    );
+    shapeState = await raised;
+    assert.equal(shapeState.history.undo!.action, "layer");
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+        type === "scene.undo"
+          ? shapeState.history.undo!
+          : shapeState.history.redo!;
+      const result = snapshot(
+        live,
+        (message) =>
+          message.state.drawings.find((drawing) => drawing.id === shapeId)
+            ?.layer === (type === "scene.undo" ? undefined : "above-tokens"),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      assert.deepEqual(
+        shapeState.state.drawings.map((drawing) => drawing.id),
+        layerOrder,
+      );
+    }
+    const removedUpper = snapshot(
+      live,
+      (message) =>
+        !message.state.drawings.some((drawing) => drawing.id === shapeId),
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "object.delete",
+          objectId: shapeId,
+          expectedVersion: shapeState.state.drawings.find(
+            (drawing) => drawing.id === shapeId,
+          )!.version,
+        },
+      }),
+    );
+    shapeState = await removedUpper;
+    for (const [type, expected] of [
+      ["scene.undo", "above-tokens"],
+      ["scene.undo", undefined],
+      ["scene.redo", "above-tokens"],
+    ] as const) {
+      const edge =
+        type === "scene.undo"
+          ? shapeState.history.undo!
+          : shapeState.history.redo!;
+      const result = snapshot(live, (message) =>
+        message.state.drawings.some(
+          (drawing) => drawing.id === shapeId && drawing.layer === expected,
+        ),
+      );
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      assert.deepEqual(
+        shapeState.state.drawings.map((drawing) => drawing.id),
+        layerOrder,
+      );
+    }
+    const lowered = snapshot(
+      live,
+      (message) =>
+        message.state.drawings.find((drawing) => drawing.id === shapeId)
+          ?.layer === "below-tokens",
+    );
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.layer.update",
+          drawingId: shapeId,
+          expectedVersion: shapeState.state.drawings.find(
+            (drawing) => drawing.id === shapeId,
+          )!.version,
+          expectedOrder: layerOrder,
+          expectedLayers: shapeState.state.drawings.map(
+            (drawing) => drawing.layer ?? "below-tokens",
+          ),
+          layer: "below-tokens",
+        },
+      }),
+    );
+    shapeState = await lowered;
     const orderTokenIds = [randomUUID(), randomUUID(), randomUUID()];
     for (const id of orderTokenIds) {
       const result = snapshot(live, (message) =>
@@ -1582,5 +1715,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public below/above-token drawing layers and exact default restoration, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

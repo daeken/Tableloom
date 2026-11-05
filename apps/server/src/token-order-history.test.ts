@@ -202,6 +202,7 @@ test("mixed restoration guards both stacks, retains survivor edits and original 
       else
         f.run(
           {
+            expectedLayers: order.map(() => "below-tokens" as const),
             type: "drawing.reorder",
             drawingId: survivor,
             expectedVersion: 1,
@@ -351,7 +352,7 @@ test("history 14 upgrades drawing slots byte-for-byte but rejects future token o
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        15,
+        16,
       );
       assert.deepEqual(rows(), original);
       assert.deepEqual(upgraded.status(f.player.member), status);

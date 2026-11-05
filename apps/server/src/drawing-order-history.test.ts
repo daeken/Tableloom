@@ -82,6 +82,7 @@ test("drawing arrangement changes only its target version/order, preserves geome
       ) =>
         f.run(
           {
+            expectedLayers: ids().map(() => "below-tokens" as const),
             type: "drawing.reorder",
             drawingId: id,
             expectedVersion: f.tables.load().drawings.find((d) => d.id === id)!
@@ -109,6 +110,7 @@ test("drawing arrangement changes only its target version/order, preserves geome
     assert.throws(() => arrange(a, "front", other));
     assert.throws(() =>
       f.run({
+        expectedLayers: [a, b, c].map(() => "below-tokens" as const),
         type: "drawing.reorder",
         drawingId: a,
         expectedVersion: 1,
@@ -164,6 +166,7 @@ test("deletion restoration preserves drawing slots and leaves earlier order inve
       b = f.add(),
       c = f.add();
     f.run({
+      expectedLayers: [a, b, c].map(() => "below-tokens" as const),
       type: "drawing.reorder",
       drawingId: a,
       expectedVersion: 1,
@@ -215,7 +218,7 @@ test("history 12 to 13 preserves shape payload bytes/cursors and rejects future 
       f.run({ type: "object.delete", objectId: a, expectedVersion: 2 });
       // Reconstruct legacy history: drawing slots were not recorded yet.
       f.db.exec(
-        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL",
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder','$.layers') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL OR json_type(payload_json,'$.layers') IS NOT NULL",
       );
       const state = f.tables.load(),
         status = f.history.status(f.player.member),
@@ -268,7 +271,7 @@ test("history 12 to 13 preserves shape payload bytes/cursors and rejects future 
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        15,
+        16,
       );
       assert.deepEqual(
         f.db
@@ -399,6 +402,7 @@ test("restoration rejects changed survivor order or membership without consuming
       if (change === "reorder")
         f.run(
           {
+            expectedLayers: [a, c].map(() => "below-tokens" as const),
             type: "drawing.reorder",
             drawingId: a,
             expectedVersion: 1,
@@ -445,6 +449,7 @@ test("restoration rejects changed survivor order or membership without consuming
       // Redo deletion preserves a newer stack and records the actual pre-removal order.
       f.run(
         {
+          expectedLayers: [a, b, c].map(() => "below-tokens" as const),
           type: "drawing.reorder",
           drawingId: a,
           expectedVersion: f.tables
@@ -499,6 +504,7 @@ test("undoing creation captures its current slot and guards redo without blockin
     );
     f.run(
       {
+        expectedLayers: [a, c].map(() => "below-tokens" as const),
         type: "drawing.reorder",
         drawingId: a,
         expectedVersion: 1,
@@ -529,6 +535,7 @@ test("history 13 upgrades reorder and legacy deletion inverses byte-for-byte wit
         b = f.add(),
         c = f.add();
       f.run({
+        expectedLayers: [a, b, c].map(() => "below-tokens" as const),
         type: "drawing.reorder",
         drawingId: a,
         expectedVersion: 1,
@@ -537,7 +544,7 @@ test("history 13 upgrades reorder and legacy deletion inverses byte-for-byte wit
       });
       f.run({ type: "object.delete", objectId: b, expectedVersion: 1 });
       f.db.exec(
-        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL",
+        "UPDATE scene_history_entries SET payload_json=json_remove(payload_json,'$.drawingOrder','$.tokenOrder','$.layers') WHERE json_type(payload_json,'$.drawingOrder') IS NOT NULL OR json_type(payload_json,'$.tokenOrder') IS NOT NULL OR json_type(payload_json,'$.layers') IS NOT NULL",
       );
       const cursor = f.history.status(f.player.member),
         state = f.tables.load();
@@ -579,7 +586,7 @@ test("history 13 upgrades reorder and legacy deletion inverses byte-for-byte wit
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        15,
+        16,
       );
       assert.deepEqual(rows(), original);
       assert.deepEqual(migrated.status(f.player.member), cursor);

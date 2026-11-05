@@ -118,6 +118,12 @@ export function applyCommand(
       next.tokens.find((d) => d.id === command.tokenId)!.version += 1;
       break;
     }
+    case "drawing.layer.update": {
+      const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
+      drawing.layer = command.layer;
+      drawing.version += 1;
+      break;
+    }
     case "drawing.reorder": {
       next.drawings = reorderedObjects(
         next.drawings,

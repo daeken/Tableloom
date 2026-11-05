@@ -3,19 +3,27 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 import {
+  drawingLayerSchema,
+  drawingLayersSchema,
   drawingOrderSchema,
   tokenOrderSchema,
   orderDirectionSchema,
 } from "./object-order.js";
 export {
+  drawingLayerSchema,
+  drawingLayersSchema,
   drawingOrderSchema,
   tokenOrderSchema,
   orderDirectionSchema,
+  drawingLayerOf,
+  drawingLayersOf,
+  layeredDrawings,
   objectOrderMatches,
   reorderedObjects,
 } from "./object-order.js";
+export type { DrawingLayer } from "./object-order.js";
 import { shapeStyleSchema, shapeContentSchema } from "./shape-style.js";
 import type { ShapeStyle } from "./shape-style.js";
 export {
@@ -79,6 +87,7 @@ const drawingDataSchema = z.object({
   text: sceneTextSchema.optional(),
   textStyle: sceneTextStyleSchema.optional(),
   shapeStyle: shapeStyleSchema.optional(),
+  layer: drawingLayerSchema.optional(),
   points: z.array(pointSchema).min(2).max(2000),
   color: colorSchema,
   ownerId: z.uuid().nullable(),
@@ -126,16 +135,20 @@ function validateTextDrawing(
 export const drawingSchema = drawingDataSchema
   .strict()
   .superRefine(validateTextDrawing);
+export const preLayerDrawingSchema = drawingDataSchema
+  .omit({ layer: true })
+  .strict()
+  .superRefine(validateTextDrawing);
 export const preShapeDrawingSchema = drawingDataSchema
-  .omit({ shapeStyle: true })
+  .omit({ shapeStyle: true, layer: true })
   .strict()
   .superRefine(validateTextDrawing);
 export const preStyleDrawingSchema = drawingDataSchema
-  .omit({ textStyle: true, shapeStyle: true })
+  .omit({ textStyle: true, shapeStyle: true, layer: true })
   .strict()
   .superRefine((d, c) => validateTextDrawing(d, c, false));
 export const preTextDrawingSchema = drawingDataSchema
-  .omit({ text: true, textStyle: true, shapeStyle: true })
+  .omit({ text: true, textStyle: true, shapeStyle: true, layer: true })
   .extend({ kind: z.enum(["stroke", "rectangle"]) })
   .strict();
 export type Drawing = z.infer<typeof drawingSchema>;
@@ -147,7 +160,7 @@ export function sceneTextSnapshot(drawing: Drawing) {
   });
 }
 export const drawingInputSchema = drawingDataSchema
-  .omit({ ownerId: true, version: true })
+  .omit({ ownerId: true, version: true, layer: true })
   .strict()
   .superRefine((d, c) => validateTextDrawing(d, c, false));
 export type DrawingInput = z.infer<typeof drawingInputSchema>;
@@ -208,7 +221,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(9),
+  schemaVersion: z.literal(10),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -254,7 +267,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 9,
+  schemaVersion: 10,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -268,6 +281,12 @@ const legacyDrawingSchema = preTextDrawingSchema
   .strict();
 const legacyTokenSchema = tokenSchema
   .omit({ version: true, radius: true })
+  .strict();
+const version9TableSchema = tableDataSchema
+  .extend({
+    schemaVersion: z.literal(9),
+    drawings: z.array(preLayerDrawingSchema).max(2000),
+  })
   .strict();
 const version8TableSchema = tableDataSchema
   .extend({
@@ -323,11 +342,17 @@ export function restoreTable(value: unknown): {
 } {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
+  const unlayered = version9TableSchema.safeParse(value);
+  if (unlayered.success)
+    return {
+      migrated: true,
+      state: tableSchema.parse({ ...unlayered.data, schemaVersion: 10 }),
+    };
   const unshaped = version8TableSchema.safeParse(value);
   if (unshaped.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...unshaped.data, schemaVersion: 9 }),
+      state: tableSchema.parse({ ...unshaped.data, schemaVersion: 10 }),
     };
   const unstyled = version7TableSchema.safeParse(value);
   if (unstyled.success)
@@ -335,7 +360,7 @@ export function restoreTable(value: unknown): {
       migrated: true,
       state: tableSchema.parse({
         ...unstyled.data,
-        schemaVersion: 9,
+        schemaVersion: 10,
         drawings: unstyled.data.drawings.map((d) =>
           d.kind === "text"
             ? { ...d, textStyle: { ...DEFAULT_TEXT_STYLE } }
@@ -347,7 +372,7 @@ export function restoreTable(value: unknown): {
   if (previous.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...previous.data, schemaVersion: 9 }),
+      state: tableSchema.parse({ ...previous.data, schemaVersion: 10 }),
     };
   const sized = version5TableSchema.safeParse(value);
   if (sized.success)
@@ -355,7 +380,7 @@ export function restoreTable(value: unknown): {
       migrated: true,
       state: tableSchema.parse({
         ...sized.data,
-        schemaVersion: 9,
+        schemaVersion: 10,
         tokens: sized.data.tokens.map((token) => ({
           ...token,
           radius: DEFAULT_TOKEN_RADIUS,
@@ -372,7 +397,7 @@ export function restoreTable(value: unknown): {
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 9,
+    schemaVersion: 10,
     notes: legacy.schemaVersion === 4 ? legacy.notes : [],
     drawings: legacy.drawings.map((drawing) => ({
       ...drawing,
@@ -466,6 +491,21 @@ export const commandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...envelope,
+      type: z.literal("drawing.layer.update"),
+      drawingId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      layer: drawingLayerSchema,
+      expectedOrder: drawingOrderSchema.min(1),
+      expectedLayers: drawingLayersSchema.min(1),
+    })
+    .strict()
+    .refine(
+      (c) => c.expectedOrder.length === c.expectedLayers.length,
+      "Drawing layers must match the captured order.",
+    ),
+  z
+    .object({
+      ...envelope,
       type: z.literal("token.reorder"),
       tokenId: z.uuid(),
       expectedVersion: z.number().int().positive(),
@@ -481,8 +521,13 @@ export const commandSchema = z.discriminatedUnion("type", [
       expectedVersion: z.number().int().positive(),
       expectedOrder: drawingOrderSchema.min(1),
       direction: orderDirectionSchema,
+      expectedLayers: drawingLayersSchema.min(1),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (c) => c.expectedOrder.length === c.expectedLayers.length,
+      "Drawing layers must match the captured order.",
+    ),
   z
     .object({
       ...envelope,

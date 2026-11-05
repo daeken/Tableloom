@@ -316,7 +316,7 @@ test("campaign 5/history 11 upgrades preserve active/offstage shapes, exact inve
       assert.equal(
         f.db.prepare("SELECT version FROM campaign_storage_version").get()!
           .version,
-        6,
+        7,
       );
       if (mode === "history")
         f.db.exec(
@@ -372,7 +372,7 @@ test("campaign 5/history 11 upgrades preserve active/offstage shapes, exact inve
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        15,
+        16,
       );
       assert.deepEqual(
         f.db

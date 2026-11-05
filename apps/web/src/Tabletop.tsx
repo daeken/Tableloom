@@ -1,6 +1,6 @@
 import { SceneOrderDialog } from "./SceneOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
-import { shapeStyleOf } from "@tableloom/core";
+import { shapeStyleOf, drawingLayerOf } from "@tableloom/core";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { EditTextDialog } from "./EditTextDialog.js";
 import { TextPlacementDialog } from "./TextPlacementDialog.js";
@@ -40,8 +40,7 @@ import type { Member } from "@tableloom/core/access";
 import { translateTokens } from "./token-selection.js";
 import {
   translateObject,
-  hitDrawing,
-  hitToken,
+  pickSceneObject,
   objectBounds,
   objectsInBox,
   selectObjects,
@@ -225,8 +224,9 @@ export function Tabletop({
     world.addChild(grid);
     const drawingLayer = new Container({ label: "Drawings" }),
       tokenLayer = new Container({ label: "Tokens" }),
+      upperDrawingLayer = new Container({ label: "Drawings above tokens" }),
       selectionLayer = new Container({ label: "Selection" });
-    world.addChild(drawingLayer, tokenLayer, selectionLayer);
+    world.addChild(drawingLayer, tokenLayer, upperDrawingLayer, selectionLayer);
     const previews = new Map<string, SceneObject>();
     if (gesture?.kind === "move") {
       const delta = dragDelta(
@@ -260,6 +260,10 @@ export function Tabletop({
     for (const original of drawings) {
       const preview = previews.get(original.id);
       const drawing = preview && "points" in preview ? preview : original;
+      const contentLayer =
+        drawingLayerOf(drawing) === "above-tokens"
+          ? upperDrawingLayer
+          : drawingLayer;
       const first = drawing.points[0];
       const last = drawing.points.at(-1);
       if (!first || !last) continue;
@@ -282,7 +286,7 @@ export function Tabletop({
           (box.right - box.left) / Math.max(1, label.width),
           (box.bottom - box.top) / Math.max(1, label.height),
         );
-        drawingLayer.addChild(label);
+        contentLayer.addChild(label);
       } else if (drawing.kind === "rectangle") {
         graphic.roundRect(
           Math.min(first.x, last.x),
@@ -305,7 +309,7 @@ export function Tabletop({
           cap: "round",
           join: "round",
         });
-      drawingLayer.addChild(graphic);
+      contentLayer.addChild(graphic);
       if (selected.includes(drawing.id)) {
         const box = objectBounds(drawing),
           padding = 6 / view.scale;
@@ -475,16 +479,12 @@ export function Tabletop({
         }
       }
     }
-    const token = [...state.tokens].reverse().find((t) => hitToken(t, p));
-    const drawing =
-      (tool === "select" || tool === "erase") && !token
-        ? [...state.drawings]
-            .reverse()
-            .find((drawing) =>
-              hitDrawing(drawing, p, Math.max(3, 8 / view.scale)),
-            )
+    const target =
+      tool === "select" || tool === "erase"
+        ? pickSceneObject(state, p, Math.max(3, 8 / view.scale))
         : undefined;
-    const target = token ?? drawing;
+    const token = target && "position" in target ? target : undefined;
+    const drawing = target && "points" in target ? target : undefined;
     if (tool === "erase") {
       if (token) {
         if (canEditObject(member, token))
@@ -913,7 +913,11 @@ export function Tabletop({
           close={() => setSceneOrder(null)}
           send={(command) => {
             const queued = send(command);
-            if (queued && command.type === "drawing.reorder")
+            if (
+              queued &&
+              (command.type === "drawing.reorder" ||
+                command.type === "drawing.layer.update")
+            )
               setSelected([command.drawingId]);
             if (queued && command.type === "token.reorder")
               setSelected([command.tokenId]);

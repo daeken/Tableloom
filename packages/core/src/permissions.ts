@@ -11,6 +11,8 @@ import {
   shapeStyleOf,
   sameShapeStyle,
   objectOrderMatches,
+  drawingLayerOf,
+  drawingLayersOf,
 } from "./index.js";
 import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -100,6 +102,7 @@ export function authorizeCommand(
         throw new Error("This token is already at that end of the layer.");
       return;
     }
+    case "drawing.layer.update":
     case "drawing.reorder": {
       const drawing = state.drawings.find((d) => d.id === command.drawingId);
       if (!drawing) throw new Error("That drawing is unavailable.");
@@ -119,10 +122,25 @@ export function authorizeCommand(
           "Drawing order changed. Review the current stack before arranging again.",
         );
       if (
-        (command.direction === "front"
-          ? state.drawings.at(-1)
-          : state.drawings[0]
-        )?.id === drawing.id
+        !objectOrderMatches(
+          drawingLayersOf(state.drawings),
+          command.expectedLayers,
+        )
+      )
+        throw new Error(
+          "Drawing layers changed. Review the current stack before arranging again.",
+        );
+      if (command.type === "drawing.layer.update") {
+        if (drawingLayerOf(drawing) === command.layer)
+          throw new Error("This drawing is already in that layer.");
+        return;
+      }
+      const layer = state.drawings.filter(
+        (d) => drawingLayerOf(d) === drawingLayerOf(drawing),
+      );
+      if (
+        (command.direction === "front" ? layer.at(-1) : layer[0])?.id ===
+        drawing.id
       )
         throw new Error("This drawing is already at that end of the layer.");
       return;

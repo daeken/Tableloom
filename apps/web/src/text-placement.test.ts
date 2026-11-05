@@ -75,7 +75,7 @@ test("plain text labels have bounded validated text/boxes and server-assigned ow
     }),
   );
   const old = { ...createTable(), schemaVersion: 6 };
-  assert.equal(restoreTable(old).state.schemaVersion, 9);
+  assert.equal(restoreTable(old).state.schemaVersion, 10);
   assert.ok(restoreTable(old).migrated);
   assert.throws(() => restoreTable({ ...old, drawings: state.drawings }));
   assert.ok(!tableSchema.safeParse({ ...state, schemaVersion: 6 }).success);
