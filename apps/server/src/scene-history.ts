@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 5;
+          ?.version === 6;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -140,6 +140,7 @@ export class SceneHistoryStore {
     if (
       payload.kind === "move" ||
       payload.kind === "move-many" ||
+      payload.kind === "resize" ||
       payload.kind === "translate"
     )
       return false;
@@ -252,6 +253,7 @@ export class SceneHistoryStore {
       ![
         "token.add",
         "drawing.add",
+        "drawing.resize",
         "token.move",
         "tokens.move",
         "objects.move",
@@ -278,7 +280,24 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "objects.delete") {
+      if (command.type === "drawing.resize") {
+        ids = [command.drawingId];
+        const from = before.drawings.find((d) => d.id === command.drawingId),
+          to = after.drawings.find((d) => d.id === command.drawingId);
+        if (
+          !from ||
+          !to ||
+          to.version !== from.version + 1 ||
+          to.ownerId !== from.ownerId
+        )
+          throw new Error("Invalid resize history transition.");
+        payload = {
+          kind: "resize",
+          objectType: "drawing",
+          before: from.points,
+          after: to.points,
+        };
+      } else if (command.type === "objects.delete") {
         ids = command.objects.map((target) => target.objectId);
         const objects = ids.map((id) => {
           const object = objectOf(before, id);
@@ -471,7 +490,14 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "delete-many") {
+      if (payload.kind === "resize") {
+        next = structuredClone(state);
+        const drawing = next.drawings.find((d) => d.id === target.objectId)!;
+        drawing.points = structuredClone(undo ? payload.before : payload.after);
+        drawing.version += 1;
+        next.revision += 1;
+        next = tableSchema.parse(next);
+      } else if (payload.kind === "delete-many") {
         if (expectsPresent(entry))
           next = applyCommand(
             state,

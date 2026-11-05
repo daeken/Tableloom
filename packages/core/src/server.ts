@@ -1,3 +1,4 @@
+import { resizedDrawingPoints } from "./geometry.js";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import {
   MAX_ROLL_HISTORY,
@@ -85,6 +86,12 @@ export function applyCommand(
   }
   const next = structuredClone(state);
   switch (command.type) {
+    case "drawing.resize": {
+      const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
+      drawing.points = resizedDrawingPoints(drawing, command.bounds);
+      drawing.version += 1;
+      break;
+    }
     case "objects.delete": {
       const ids = new Set(command.objects.map((object) => object.objectId));
       next.tokens = next.tokens.filter((object) => !ids.has(object.id));

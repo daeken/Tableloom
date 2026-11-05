@@ -857,3 +857,128 @@ test("live group deletion is atomic, exactly retryable, private in history, and 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("live drawing resize confirms once, rolls back failed bindings, survives restart and rejects stale drags and foreign history", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-live-resize-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, payload: Record<string, unknown>, cookie = "") =>
+    app.inject({
+      method: "POST",
+      url: `/api/access/${route}`,
+      headers: { origin: "http://localhost", cookie },
+      payload,
+    });
+  const cookieOf = (r: { headers: Record<string, unknown> }) =>
+    String(r.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" })),
+      player = cookieOf(
+        await post("join", {
+          name: "Player",
+          code: (await post("invitations", {}, gm)).json().token,
+        }),
+      );
+    let p = await connect(url, player);
+    const g = await connect(url, gm);
+    sockets.push(p.ws, g.ws);
+    const id = randomUUID(),
+      points = [
+        { x: 0.1, y: 0.2 },
+        { x: 10.3, y: 20.4 },
+        { x: 6.7, y: 8.9 },
+      ];
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: { id, kind: "stroke", points, color: "#405f4d" },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.drawings[0]?.version === 1);
+    const command = {
+        id: randomUUID(),
+        type: "drawing.resize",
+        drawingId: id,
+        expectedVersion: 1,
+        bounds: { left: -20.4, top: -10.1, right: 100, bottom: 70.3 },
+      },
+      before = store.load(),
+      rows = db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+    db.exec(
+      "CREATE TRIGGER reject_resize_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture resize binding'); END;",
+    );
+    assert.equal((await p.send(command)).type, "error");
+    assert.deepEqual(store.load(), before);
+    assert.equal(store.hasCommand(command.id), false);
+    assert.deepEqual(
+      db.prepare("SELECT * FROM scene_history_entries ORDER BY sequence").all(),
+      rows,
+    );
+    db.exec("DROP TRIGGER reject_resize_binding");
+    assert.equal((await p.send(command)).type, "ack");
+    await until(() => p.latest().state.drawings[0]?.version === 2);
+    const resized = store.load(),
+      cursor = p.latest().history.undo!;
+    assert.equal(cursor.action, "resize");
+    assert.ok(!JSON.stringify(cursor).includes("points"));
+    assert.ok(!JSON.stringify(g.messages).includes(cursor.id));
+    assert.equal((await p.send(command)).type, "ack");
+    assert.deepEqual(store.load(), resized);
+    const stale = { ...command, id: randomUUID() };
+    assert.equal((await p.send(stale)).type, "error");
+    assert.equal(store.hasCommand(stale.id), false);
+    assert.deepEqual(store.load(), resized);
+    const undo = {
+      id: randomUUID(),
+      type: "scene.undo",
+      historyId: cursor.id,
+      expectedVersion: cursor.version,
+    };
+    assert.equal((await g.send(undo)).type, "error");
+    assert.deepEqual(store.load(), resized);
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    sockets.push(p.ws);
+    assert.deepEqual(p.latest().history.undo, cursor);
+    assert.equal((await p.send(undo)).type, "ack");
+    await until(() => p.latest().state.drawings[0]?.version === 3);
+    assert.deepEqual(store.load().drawings[0]!.points, points);
+    assert.equal((await p.send(undo)).type, "ack");
+    assert.equal(store.load().drawings[0]!.version, 3);
+    const redo = p.latest().history.redo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.drawings[0]?.version === 4);
+    assert.deepEqual(
+      store.load().drawings[0]!.points,
+      resized.drawings[0]!.points,
+    );
+  } finally {
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

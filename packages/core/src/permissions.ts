@@ -4,6 +4,7 @@ import {
   translationSchema,
   pointSchema,
 } from "./index.js";
+import { resizedDrawingPoints } from "./geometry.js";
 import type { Member } from "./access.js";
 import type { Command, Roll, TableState } from "./index.js";
 
@@ -45,6 +46,18 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "drawing.resize": {
+      const drawing = state.drawings.find((d) => d.id === command.drawingId);
+      if (!drawing) throw new Error("That drawing no longer exists.");
+      if (!canEditObject(member, drawing))
+        throw new Error("Only the owner or GM can resize this drawing.");
+      if (drawing.version !== command.expectedVersion)
+        throw new Error(
+          "This drawing changed. Review it before resizing again.",
+        );
+      resizedDrawingPoints(drawing, command.bounds);
+      return;
+    }
     case "objects.delete": {
       for (const target of objectMoveTargetsSchema.parse(command.objects))
         authorizeCommand(

@@ -30,6 +30,18 @@ const deletedObjectSchema = z.union([
 export const payloadSchema = z.union([
   z
     .object({
+      kind: z.literal("resize"),
+      objectType: z.literal("drawing"),
+      before: drawingSchema.shape.points,
+      after: drawingSchema.shape.points,
+    })
+    .strict()
+    .refine(
+      (payload) => payload.before.length === payload.after.length,
+      "Resize history must preserve point count.",
+    ),
+  z
+    .object({
       kind: z.literal("delete-many"),
       objectType: z.enum(["token", "drawing", "mixed"]),
       objects: z.array(deletedObjectSchema).min(1).max(100),
@@ -172,12 +184,15 @@ export function entryOf(row: unknown): Entry {
       throw new Error("Scene history targets are inconsistent.");
   } else if (
     targets.length !== 1 ||
-    (payload.kind !== "move" && payload.object.id !== targets[0]!.objectId)
+    (payload.kind !== "move" &&
+      payload.kind !== "resize" &&
+      payload.object.id !== targets[0]!.objectId)
   )
     throw new Error("Scene history target is inconsistent.");
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "resize" ||
   entry.payload.kind === "translate" ||
   entry.payload.kind === "move" ||
   entry.payload.kind === "move-many" ||

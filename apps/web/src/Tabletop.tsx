@@ -1,3 +1,11 @@
+import { drawingBounds, resizedDrawingPoints } from "@tableloom/core/geometry";
+import {
+  canResize,
+  corners,
+  cornerPoint,
+  resizeDrag,
+} from "./drawing-resize.js";
+import type { Corner } from "./drawing-resize.js";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -15,6 +23,7 @@ import { Application, Container, Graphics, Text } from "pixi.js";
 import type {
   CommandInput,
   DrawingInput,
+  Drawing,
   Point,
   TableView,
 } from "@tableloom/core";
@@ -32,6 +41,14 @@ import { canEditObject } from "@tableloom/core/permissions";
 
 export type Tool = "select" | "hand" | "pen" | "rectangle" | "token" | "erase";
 type Gesture =
+  | {
+      kind: "resize";
+      drawing: Drawing;
+      corner: Corner;
+      start: Point;
+      pointer: Point;
+      snap: boolean;
+    }
   | { kind: "draw"; drawing: DrawingInput; snap: boolean }
   | {
       kind: "move";
@@ -186,6 +203,21 @@ export function Tabletop({
       for (const object of gesture.objects)
         previews.set(object.id, translateObject(object, delta));
     }
+    if (gesture?.kind === "resize") {
+      const bounds = resizeDrag(
+        gesture.drawing,
+        gesture.corner,
+        gesture.start,
+        gesture.pointer,
+        view.scale,
+        gesture.snap,
+      );
+      if (bounds)
+        previews.set(gesture.drawing.id, {
+          ...gesture.drawing,
+          points: resizedDrawingPoints(gesture.drawing, bounds),
+        });
+    }
     const drawings =
       gesture?.kind === "draw"
         ? [...state.drawings, gesture.drawing]
@@ -265,6 +297,28 @@ export function Tabletop({
       label.position.set(x, y + 32);
       world.addChild(label);
     }
+    const resizable =
+      tool === "select" && selected.length === 1 && !pending && enabled
+        ? state.drawings.find(
+            (d) =>
+              d.id === selected[0] && canEditObject(member, d) && canResize(d),
+          )
+        : undefined;
+    if (resizable) {
+      const preview = previews.get(resizable.id),
+        drawing = preview && "points" in preview ? preview : resizable;
+      const box = drawingBounds(drawing),
+        size = 9 / view.scale;
+      for (const corner of corners) {
+        const p = cornerPoint(box, corner);
+        world.addChild(
+          new Graphics()
+            .rect(p.x - size / 2, p.y - size / 2, size, size)
+            .fill("#fffaf0")
+            .stroke({ color: "#405f4d", width: 1.5 / view.scale }),
+        );
+      }
+    }
     if (gesture?.kind === "marquee") {
       const { start, end } = gesture;
       const rectangle = new Graphics().rect(
@@ -278,7 +332,18 @@ export function Tabletop({
         .stroke({ color: "#405f4d", width: 1 / view.scale });
       world.addChild(rectangle);
     }
-  }, [ready, state, gesture, selected, view, viewport]);
+  }, [
+    ready,
+    state,
+    gesture,
+    selected,
+    view,
+    viewport,
+    tool,
+    enabled,
+    pending,
+    member,
+  ]);
 
   function local(event: { clientX: number; clientY: number }): Point {
     const rect = host.current!.getBoundingClientRect();
@@ -310,6 +375,34 @@ export function Tabletop({
         },
       });
       return;
+    }
+    if (
+      tool === "select" &&
+      !event.shiftKey &&
+      !pending &&
+      selected.length === 1
+    ) {
+      const drawing = state.drawings.find(
+        (d) => d.id === selected[0] && canEditObject(member, d) && canResize(d),
+      );
+      if (drawing) {
+        const box = drawingBounds(drawing),
+          corner = corners.find((c) => {
+            const handle = cornerPoint(box, c);
+            return Math.hypot(p.x - handle.x, p.y - handle.y) <= 8 / view.scale;
+          });
+        if (corner) {
+          setGesture({
+            kind: "resize",
+            drawing,
+            corner,
+            start: p,
+            pointer: p,
+            snap,
+          });
+          return;
+        }
+      }
     }
     const token = [...state.tokens]
       .reverse()
@@ -395,7 +488,9 @@ export function Tabletop({
         x: gesture.origin.x + p.x - gesture.start.x,
         y: gesture.origin.y + p.y - gesture.start.y,
       }));
-    } else if (gesture.kind === "move")
+    } else if (gesture.kind === "resize")
+      setGesture({ ...gesture, pointer: point(event) });
+    else if (gesture.kind === "move")
       setGesture({
         ...gesture,
         delta: {
@@ -424,6 +519,23 @@ export function Tabletop({
     }
   }
   function up(event: ReactPointerEvent) {
+    if (gesture?.kind === "resize") {
+      const bounds = resizeDrag(
+        gesture.drawing,
+        gesture.corner,
+        gesture.start,
+        point(event),
+        view.scale,
+        gesture.snap,
+      );
+      if (bounds)
+        send({
+          type: "drawing.resize",
+          drawingId: gesture.drawing.id,
+          expectedVersion: gesture.drawing.version,
+          bounds,
+        });
+    }
     if (gesture?.kind === "draw") {
       if (gesture.drawing.kind === "rectangle") {
         const raw = point(event),
@@ -565,6 +677,10 @@ export function Tabletop({
             {selectionError ||
               `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
           </span>
+          {selectedObjects.length === 1 &&
+            "points" in selectedObjects[0]! &&
+            canResize(selectedObjects[0]) &&
+            tool === "select" && <small>Drag a corner to resize</small>}
           <button
             onClick={() => {
               setSelected([]);

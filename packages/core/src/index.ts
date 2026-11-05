@@ -2,7 +2,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -240,8 +240,30 @@ export const objectMoveTargetsSchema = z
       new Set(objects.map((object) => object.objectId)).size === objects.length,
     "Each object may appear only once.",
   );
+export const resizeBoundsSchema = z
+  .object({
+    left: z.number().finite().min(-10000).max(10000),
+    right: z.number().finite().min(-10000).max(10000),
+    top: z.number().finite().min(-10000).max(10000),
+    bottom: z.number().finite().min(-10000).max(10000),
+  })
+  .strict()
+  .refine(
+    (box) => box.right - box.left >= 1 && box.bottom - box.top >= 1,
+    "A resized drawing must be at least one unit wide and tall.",
+  );
+export type ResizeBounds = z.infer<typeof resizeBoundsSchema>;
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("drawing.resize"),
+      drawingId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      bounds: resizeBoundsSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

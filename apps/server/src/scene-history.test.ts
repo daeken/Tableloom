@@ -1690,3 +1690,161 @@ test("one hundred deleted objects restore as one retained edit, even after older
     f.db.close();
   }
 });
+
+test("drawing resize preserves shape/owner/style and exact points through create, move, resize, delete undo/redo", () => {
+  const f = fixture();
+  try {
+    for (const kind of ["rectangle", "stroke"] as const) {
+      const id = randomUUID(),
+        points = [
+          { x: 10.3, y: -20.4 },
+          { x: 0.1, y: 0.2 },
+          { x: 5.15, y: -11.7 },
+        ];
+      f.run({
+        type: "drawing.add",
+        drawing: { id, kind, color: "#aabbcc", points },
+      });
+      f.run({
+        type: "objects.move",
+        objects: [{ objectId: id, expectedVersion: 1 }],
+        delta: { x: 0.3, y: -0.1 },
+      });
+      const original = f.tables.load().drawings.find((d) => d.id === id)!;
+      const resized = f
+        .run({
+          type: "drawing.resize",
+          drawingId: id,
+          expectedVersion: 2,
+          bounds: { left: -10.7, top: -50.4, right: 70.3, bottom: 10.1 },
+        })
+        .drawings.find((d) => d.id === id)!;
+      assert.deepEqual(
+        { ...resized, points: original.points, version: original.version },
+        original,
+      );
+      const edge = f.history.status(f.player.member).undo!;
+      assert.equal(edge.action, "resize");
+      assert.equal(edge.objectType, "drawing");
+      assert.ok(!JSON.stringify(edge).includes("points"));
+      f.run({ type: "object.delete", objectId: id, expectedVersion: 3 });
+      assert.equal(
+        f.action("scene.undo").drawings.find((d) => d.id === id)!.version,
+        5,
+      );
+      assert.deepEqual(
+        f.action("scene.undo").drawings.find((d) => d.id === id)!.points,
+        original.points,
+      );
+      assert.deepEqual(
+        f.action("scene.undo").drawings.find((d) => d.id === id)!.points,
+        points,
+      );
+      assert.ok(!f.action("scene.undo").drawings.some((d) => d.id === id));
+      f.action("scene.redo");
+      f.action("scene.redo");
+      const again = f.action("scene.redo").drawings.find((d) => d.id === id)!;
+      assert.deepEqual(again.points, resized.points);
+      assert.equal(again.version, 11);
+      assert.ok(!f.action("scene.redo").drawings.some((d) => d.id === id));
+    }
+  } finally {
+    f.db.close();
+  }
+});
+
+test("resize rejects stale, unauthorized, missing, degenerate, unchanged and malformed geometry without state/history changes", () => {
+  const f = fixture();
+  try {
+    const id = randomUUID();
+    f.run(
+      {
+        type: "drawing.add",
+        drawing: {
+          id,
+          kind: "stroke",
+          points: [
+            { x: 0, y: 0 },
+            { x: 10, y: 10 },
+          ],
+          color: "#405f4d",
+        },
+      },
+      f.gm.member,
+    );
+    const command = {
+      type: "drawing.resize" as const,
+      drawingId: id,
+      expectedVersion: 1,
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    };
+    const before = f.tables.load(),
+      rows = f.db.prepare("SELECT * FROM scene_history_entries").all();
+    for (const input of [
+      command,
+      { ...command, drawingId: randomUUID() },
+      { ...command, expectedVersion: 2 },
+      { ...command, bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+      { ...command, bounds: { left: 0, top: 0, right: 10001, bottom: 10 } },
+      { ...command, bounds: { left: 0, top: 0, right: 0, bottom: 10 } },
+      { ...command, bounds: { left: 0, top: 0, right: NaN, bottom: 10 } },
+    ]) {
+      assert.throws(() =>
+        f.run(input, input === command ? f.player.member : f.gm.member),
+      );
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(
+        f.db.prepare("SELECT * FROM scene_history_entries").all(),
+        rows,
+      );
+    }
+    assert.equal(
+      commandSchema.safeParse({
+        id: randomUUID(),
+        ...command,
+        ownerId: f.player.member.id,
+      }).success,
+      false,
+    );
+    f.run(command, f.gm.member);
+    f.run(
+      {
+        type: "object.assign",
+        objectId: id,
+        expectedVersion: 2,
+        expectedOwnerId: f.gm.member.id,
+        ownerId: f.player.member.id,
+      },
+      f.gm.member,
+    );
+    f.run({
+      type: "objects.move",
+      objects: [{ objectId: id, expectedVersion: 3 }],
+      delta: { x: 1, y: 1 },
+    });
+    assert.equal(f.history.status(f.gm.member).undo!.available, false);
+    assert.throws(
+      () => f.action("scene.undo", f.gm.member),
+      /changed|unavailable/,
+    );
+    const flat = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: flat,
+        kind: "stroke",
+        color: "#405f4d",
+        points: [
+          { x: 1, y: 0 },
+          { x: 10, y: 0 },
+        ],
+      },
+    });
+    assert.throws(
+      () => f.run({ ...command, drawingId: flat }),
+      /width and height/,
+    );
+  } finally {
+    f.db.close();
+  }
+});

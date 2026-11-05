@@ -688,6 +688,92 @@ try {
         });
       }
     }
+    const resizedId = randomUUID(),
+      resizedPoints = [
+        { x: 0.1, y: 0.2 },
+        { x: 10.3, y: 20.4 },
+      ];
+    const addResizeId = randomUUID(),
+      addResizeAck = acknowledgement(live, addResizeId),
+      addResizeView = snapshot(live, (message) =>
+        message.state.drawings.some((d) => d.id === resizedId),
+      );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: addResizeId,
+          type: "drawing.add",
+          drawing: {
+            id: resizedId,
+            kind: "rectangle",
+            color: "#405f4d",
+            points: resizedPoints,
+          },
+        },
+      }),
+    );
+    await addResizeAck;
+    await addResizeView;
+    const resizeId = randomUUID(),
+      resizeAck = acknowledgement(live, resizeId),
+      resizedView = snapshot(live, (message) =>
+        message.state.drawings.some(
+          (d) => d.id === resizedId && d.version === 2,
+        ),
+      );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: resizeId,
+          type: "drawing.resize",
+          drawingId: resizedId,
+          expectedVersion: 1,
+          bounds: { left: -10, top: -20, right: 100, bottom: 200 },
+        },
+      }),
+    );
+    await resizeAck;
+    let resizeState = await resizedView;
+    const finalPoints = resizeState.state.drawings.find(
+      (d) => d.id === resizedId,
+    )!.points;
+    assert.equal(resizeState.history.undo!.action, "resize");
+    assert.deepEqual(finalPoints, [
+      { x: -10, y: -20 },
+      { x: 100, y: 200 },
+    ]);
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge =
+          resizeState.history[type === "scene.undo" ? "undo" : "redo"]!,
+        id = randomUUID(),
+        ack = acknowledgement(live, id),
+        view = snapshot(live, (message) =>
+          message.state.drawings.some(
+            (d) =>
+              d.id === resizedId &&
+              d.version === (type === "scene.undo" ? 3 : 4),
+          ),
+        );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      await ack;
+      resizeState = await view;
+      assert.deepEqual(
+        resizeState.state.drawings.find((d) => d.id === resizedId)!.points,
+        type === "scene.undo" ? resizedPoints : finalPoints,
+      );
+    }
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -728,5 +814,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/resize history, roll archive/cleanup, and clean shutdown.",
 );

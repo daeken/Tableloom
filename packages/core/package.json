@@ -11,6 +11,7 @@
     "./roll-history": "./src/roll-history.ts",
     "./documents": "./src/documents.ts",
     "./permissions": "./src/permissions.ts",
-    "./server": "./src/server.ts"
+    "./server": "./src/server.ts",
+    "./geometry": "./src/geometry.ts"
   }
 }
