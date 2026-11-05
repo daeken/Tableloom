@@ -1,5 +1,10 @@
-import { sceneTextContentSchema } from "@tableloom/core";
-import type { CommandInput, Drawing, TableView } from "@tableloom/core";
+import { sceneTextContentSchema, sameTextStyle } from "@tableloom/core";
+import type {
+  CommandInput,
+  Drawing,
+  TableView,
+  SceneTextStyle,
+} from "@tableloom/core";
 import type { Member } from "@tableloom/core/access";
 import {
   captureDeletionReview,
@@ -12,13 +17,20 @@ export function textEditCommand(
   member: Member | null,
   text: string,
   color: string,
+  textStyle?: SceneTextStyle,
 ): CommandInput | null {
-  const changes = sceneTextContentSchema.safeParse({ text, color });
+  const changes = sceneTextContentSchema.safeParse({
+    text,
+    color,
+    ...(textStyle ? { textStyle } : {}),
+  });
   if (
     captured.kind !== "text" ||
     !changes.success ||
     !deletionReviewCurrent(captureDeletionReview([captured]), state, member) ||
-    (text === captured.text && color === captured.color)
+    (text === captured.text &&
+      color === captured.color &&
+      (!textStyle || sameTextStyle(textStyle, captured.textStyle!)))
   )
     return null;
   return {

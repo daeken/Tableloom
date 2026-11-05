@@ -1,11 +1,17 @@
-import { drawingInputSchema, sceneTextSchema } from "@tableloom/core";
-import type { Point } from "@tableloom/core";
+import {
+  drawingInputSchema,
+  sceneTextSchema,
+  DEFAULT_TEXT_STYLE,
+  sceneTextStyleSchema,
+} from "@tableloom/core";
+import type { Point, SceneTextStyle } from "@tableloom/core";
 /** Initial neutral label box; later transforms use saved corners rather than font measurements. */
 export function textPlacement(
   text: string,
   anchor: Point,
   color: string,
   id: string,
+  textStyle: SceneTextStyle = { ...DEFAULT_TEXT_STYLE },
 ) {
   const value = sceneTextSchema.parse(text),
     lines = value.split("\n"),
@@ -17,6 +23,7 @@ export function textPlacement(
     id,
     kind: "text",
     text: value,
+    textStyle: sceneTextStyleSchema.parse(textStyle),
     color,
     points: [
       { x, y },

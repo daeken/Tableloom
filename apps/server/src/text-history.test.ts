@@ -302,7 +302,7 @@ test("campaign 3/history 8 upgrade existing scenes/inverses exactly and roll bac
           assert.equal(
             f.db.prepare("SELECT version FROM scene_history_version").get()!
               .version,
-            10,
+            11,
           );
         }
       }
@@ -482,7 +482,7 @@ test("saved text/color edits keep geometry and owner, reject stale/foreign/nonte
   }
 });
 
-test("history 9 to 10 retains text snapshots/links byte-exact, rejects future edit payloads, and rolls back marker failures", () => {
+test("history 9 to 11 retains text snapshots/links while seeding only legacy style, rejects future edit payloads, and rolls back marker failures", () => {
   for (const mode of ["none", "marker", "future"] as const) {
     const f = fixture();
     try {
@@ -497,6 +497,15 @@ test("history 9 to 10 retains text snapshots/links byte-exact, rejects future ed
         rows = f.db
           .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
           .all();
+      // Reconstruct real history-9 snapshots: text existed, style fields did not.
+      for (const row of rows) {
+        const payload = JSON.parse(String(row.payload_json));
+        if (payload.kind === "create" || payload.kind === "delete")
+          delete payload.object.textStyle;
+        f.db
+          .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+          .run(JSON.stringify(payload), row.id as string);
+      }
       f.db.exec("UPDATE scene_history_version SET version=9");
       if (mode === "marker")
         f.db.exec(
@@ -544,18 +553,358 @@ test("history 9 to 10 retains text snapshots/links byte-exact, rejects future ed
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        10,
+        11,
       );
       assert.deepEqual(
         f.db
           .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
-          .all(),
-        rows,
+          .all()
+          .map((row) => ({
+            ...row,
+            payload_json: JSON.parse(String(row.payload_json)),
+          })),
+        rows.map((row) => ({
+          ...row,
+          payload_json: JSON.parse(String(row.payload_json)),
+        })),
       );
       assert.deepEqual(history.status(f.player.member), status);
       assert.deepEqual(f.tables.load(), state);
       f.action("scene.undo");
       assert.equal(f.tables.load().drawings[0]!.text, "North gate\nCourtyard");
+    } finally {
+      f.db.close();
+    }
+  }
+});
+
+test("text style-only edits are bounded, owned and versioned, preserve exact boxes, and undo with wording/color and group geometry", () => {
+  const f = fixture();
+  try {
+    const id = f.add(),
+      original = f.tables.load().drawings[0]!,
+      style = { font: "serif", weight: "bold", align: "center" } as const;
+    const change = {
+      type: "drawing.text.update" as const,
+      drawingId: id,
+      expectedVersion: 1,
+      changes: {
+        text: original.text!,
+        color: original.color,
+        textStyle: style,
+      },
+    };
+    f.run(change);
+    let label = f.tables.load().drawings[0]!;
+    assert.deepEqual(label.textStyle, style);
+    assert.deepEqual(label.points, original.points);
+    assert.equal(label.ownerId, original.ownerId);
+    assert.equal(label.version, 2);
+    assert.throws(() => f.run(change));
+    for (const bad of [
+      { ...style, font: "url(https://example.invalid/font)" },
+      { ...style, font: "Comic Sans" },
+      { ...style, weight: "900" },
+      { ...style, align: "justify" },
+      { ...style, tracking: 100 },
+      null,
+    ]) {
+      const before = f.tables.load(),
+        status = f.history.status(f.player.member);
+      assert.throws(() =>
+        f.run({
+          ...change,
+          expectedVersion: 2,
+          changes: { ...change.changes, textStyle: bad },
+        } as unknown as CommandInput),
+      );
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(f.history.status(f.player.member), status);
+    }
+    assert.throws(() => f.run({ ...change, expectedVersion: 2 }));
+    // Omitting style changes preserves the current style through existing wording/color calls.
+    f.run({
+      type: "drawing.text.update",
+      drawingId: id,
+      expectedVersion: 2,
+      changes: { text: "Longer gate\nShort", color: "#ab1234" },
+    });
+    assert.deepEqual(f.tables.load().drawings[0]!.textStyle, style);
+    const token = randomUUID();
+    f.run({
+      type: "token.add",
+      token: {
+        id: token,
+        name: "Scout",
+        color: "#123456",
+        position: { x: 10, y: 10 },
+      },
+    });
+    f.run({
+      type: "objects.resize",
+      objects: [
+        { objectId: id, expectedVersion: 3 },
+        { objectId: token, expectedVersion: 1 },
+      ],
+      scale: 1.25,
+    });
+    f.action("scene.undo");
+    assert.deepEqual(f.tables.load().drawings[0]!.points, original.points);
+    assert.deepEqual(f.tables.load().drawings[0]!.textStyle, style);
+    f.action("scene.undo"); // token creation
+    f.action("scene.undo");
+    assert.equal(f.tables.load().drawings[0]!.text, original.text);
+    assert.deepEqual(f.tables.load().drawings[0]!.textStyle, style);
+    f.action("scene.undo");
+    assert.deepEqual(
+      f.tables.load().drawings[0]!.textStyle,
+      original.textStyle,
+    );
+    for (let i = 0; i < 4; i++) f.action("scene.redo");
+    label = f.tables.load().drawings[0]!;
+    assert.deepEqual(label.textStyle, style);
+    assert.equal(label.text, "Longer gate\nShort");
+    const saved = f.tables.load(),
+      status = f.history.status(f.player.member);
+    f.db.exec(
+      "CREATE TRIGGER reject_style_receipt BEFORE INSERT ON campaign_receipts BEGIN SELECT RAISE(ABORT,'fixture style rollback'); END",
+    );
+    assert.throws(
+      () =>
+        f.run({
+          ...change,
+          expectedVersion: label.version,
+          changes: {
+            ...change.changes,
+            textStyle: { font: "sans-serif", weight: "normal", align: "right" },
+          },
+        }),
+      /fixture style rollback/,
+    );
+    assert.deepEqual(f.tables.load(), saved);
+    assert.deepEqual(f.history.status(f.player.member), status);
+    f.db.exec("DROP TRIGGER reject_style_receipt");
+    assert.deepEqual(
+      new SceneHistoryStore(f.db, f.tables).status(f.player.member),
+      status,
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("campaign 4 and history 10 style upgrade seeds active/offstage and inverse defaults atomically, preserves unrelated state, and rejects future styles", () => {
+  for (const mode of [
+    "none",
+    "campaign-marker",
+    "offstage",
+    "history-marker",
+    "future-history",
+  ] as const) {
+    const f = fixture();
+    try {
+      const id = f.add();
+      f.run({
+        type: "drawing.text.update",
+        drawingId: id,
+        expectedVersion: 1,
+        changes: { text: "Updated gate\nShort", color: "#123456" },
+      });
+      const offstage = f.tables.createScene(f.gm.member.tableId, {
+          name: "Hidden sketch",
+        }),
+        label = f.tables.load().drawings[0]!,
+        offId = randomUUID();
+      f.db
+        .prepare("UPDATE scene_records SET state_json=? WHERE id=?")
+        .run(
+          JSON.stringify({ tokens: [], drawings: [{ ...label, id: offId }] }),
+          offstage.id,
+        );
+      f.db
+        .prepare(
+          "INSERT INTO object_id_reservations(campaign_id,id) VALUES(?,?)",
+        )
+        .run(f.gm.member.tableId, offId);
+      // Real legacy inverse shapes include text in scalar and whole-group deletions.
+      const spare = f.add("Spare label");
+      f.run({
+        type: "objects.delete",
+        objects: [
+          { objectId: id, expectedVersion: 2 },
+          { objectId: spare, expectedVersion: 1 },
+        ],
+      });
+      const third = f.add("Deleted label");
+      f.run({ type: "object.delete", objectId: third, expectedVersion: 1 });
+      const current = f.tables.load(),
+        status = f.history.status(f.player.member),
+        historyRows = f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        scenes = f.db.prepare("SELECT * FROM scene_records ORDER BY id").all(),
+        reservations = f.db
+          .prepare("SELECT * FROM object_id_reservations ORDER BY id")
+          .all();
+      const strip = (value: unknown): unknown => {
+        if (!value || typeof value !== "object") return value;
+        if (Array.isArray(value)) return value.map(strip);
+        return Object.fromEntries(
+          Object.entries(value)
+            .filter(([k]) => k !== "textStyle")
+            .map(([k, v]) => [k, strip(v)]),
+        );
+      };
+      for (const row of f.db
+        .prepare("SELECT id,state_json FROM campaign_records")
+        .all()) {
+        const data = JSON.parse(String(row.state_json));
+        data.schemaVersion = 7;
+        f.db
+          .prepare("UPDATE campaign_records SET state_json=? WHERE id=?")
+          .run(JSON.stringify(data), row.id as string);
+      }
+      for (const row of scenes)
+        f.db
+          .prepare("UPDATE scene_records SET state_json=? WHERE id=?")
+          .run(
+            JSON.stringify(strip(JSON.parse(String(row.state_json)))),
+            row.id as string,
+          );
+      for (const row of historyRows)
+        f.db
+          .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+          .run(
+            JSON.stringify(strip(JSON.parse(String(row.payload_json)))),
+            row.id as string,
+          );
+      f.db.exec(
+        "UPDATE campaign_storage_version SET version=4; UPDATE scene_history_version SET version=10",
+      );
+      if (mode === "campaign-marker")
+        f.db.exec(
+          "CREATE TRIGGER reject_style_campaign BEFORE UPDATE ON campaign_storage_version BEGIN SELECT RAISE(ABORT,'fixture style campaign'); END",
+        );
+      if (mode === "offstage")
+        f.db.prepare("UPDATE scene_records SET state_json=? WHERE id=?").run(
+          JSON.stringify({
+            tokens: [],
+            drawings: [
+              {
+                ...label,
+                id: offId,
+                textStyle: { font: "serif", weight: "bold", align: "right" },
+              },
+            ],
+          }),
+          offstage.id,
+        );
+      const oldCampaigns = f.db
+          .prepare("SELECT * FROM campaign_records ORDER BY id")
+          .all(),
+        oldScenes = f.db
+          .prepare("SELECT * FROM scene_records ORDER BY id")
+          .all();
+      if (mode === "campaign-marker" || mode === "offstage") {
+        assert.throws(() => new TableStore(f.db));
+        assert.equal(
+          f.db.prepare("SELECT version FROM campaign_storage_version").get()!
+            .version,
+          4,
+        );
+        assert.deepEqual(
+          f.db.prepare("SELECT * FROM campaign_records ORDER BY id").all(),
+          oldCampaigns,
+        );
+        assert.deepEqual(
+          f.db.prepare("SELECT * FROM scene_records ORDER BY id").all(),
+          oldScenes,
+        );
+        continue;
+      }
+      const tables = new TableStore(f.db);
+      assert.deepEqual(tables.load(), current);
+      assert.equal(
+        f.db.prepare("SELECT version FROM campaign_storage_version").get()!
+          .version,
+        5,
+      );
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_records ORDER BY id")
+          .all()
+          .map((r) => ({ ...r, state_json: JSON.parse(String(r.state_json)) })),
+        scenes.map((r) => ({
+          ...r,
+          state_json: JSON.parse(String(r.state_json)),
+        })),
+      );
+      if (mode === "history-marker")
+        f.db.exec(
+          "CREATE TRIGGER reject_style_history BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture style history'); END",
+        );
+      if (mode === "future-history")
+        f.db
+          .prepare(
+            "UPDATE scene_history_entries SET payload_json=? WHERE sequence=2",
+          )
+          .run(historyRows[1]!.payload_json as string);
+      const oldRows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+      if (mode !== "none") {
+        assert.throws(() => new SceneHistoryStore(f.db, tables));
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          10,
+        );
+        assert.deepEqual(
+          f.db
+            .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+            .all(),
+          oldRows,
+        );
+        if (mode === "history-marker")
+          f.db.exec("DROP TRIGGER reject_style_history");
+        else
+          f.db
+            .prepare(
+              "UPDATE scene_history_entries SET payload_json=? WHERE sequence=2",
+            )
+            .run(
+              JSON.stringify(
+                strip(JSON.parse(String(historyRows[1]!.payload_json))),
+              ),
+            );
+      }
+      const history = new SceneHistoryStore(f.db, tables);
+      assert.equal(
+        f.db.prepare("SELECT version FROM scene_history_version").get()!
+          .version,
+        11,
+      );
+      assert.deepEqual(history.status(f.player.member), status);
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all()
+          .map((r) => ({
+            ...r,
+            payload_json: JSON.parse(String(r.payload_json)),
+          })),
+        historyRows.map((r) => ({
+          ...r,
+          payload_json: JSON.parse(String(r.payload_json)),
+        })),
+      );
+      assert.deepEqual(
+        f.db.prepare("SELECT * FROM object_id_reservations ORDER BY id").all(),
+        reservations,
+      );
+      for (let i = 0; i < 5; i++) f.action("scene.undo");
+      assert.equal(tables.load().drawings[0]!.text, "North gate\nCourtyard");
+      assert.deepEqual(tables.load().drawings[0]!.textStyle, label.textStyle);
     } finally {
       f.db.close();
     }

@@ -3,6 +3,7 @@ import { createHash, randomInt, randomUUID } from "node:crypto";
 import {
   MAX_ROLL_HISTORY,
   DEFAULT_TOKEN_RADIUS,
+  DEFAULT_TEXT_STYLE,
   MAX_TOTAL_ROLLS,
   MAX_TABLE_NOTES,
   parseDice,
@@ -111,6 +112,8 @@ export function applyCommand(
       const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
       drawing.text = command.changes.text;
       drawing.color = command.changes.color;
+      if (command.changes.textStyle)
+        drawing.textStyle = { ...command.changes.textStyle };
       drawing.version += 1;
       break;
     }
@@ -184,7 +187,18 @@ export function applyCommand(
         next.notes.some((n) => n.id === command.drawing.id)
       )
         throw new Error("An object with this ID already exists.");
-      next.drawings.push({ ...command.drawing, ownerId: actor.id, version: 1 });
+      next.drawings.push({
+        ...command.drawing,
+        ...(command.drawing.kind === "text"
+          ? {
+              textStyle: {
+                ...(command.drawing.textStyle ?? DEFAULT_TEXT_STYLE),
+              },
+            }
+          : {}),
+        ownerId: actor.id,
+        version: 1,
+      });
       break;
     case "token.add":
       if (next.tokens.length >= 200)

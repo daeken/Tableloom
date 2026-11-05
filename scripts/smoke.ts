@@ -1013,7 +1013,11 @@ try {
           expectedVersion: textEdited.state.drawings.find(
             (d) => d.id === textId,
           )!.version,
-          changes: { text: "Courtyard\nEast gate", color: "#ab1234" },
+          changes: {
+            text: "Courtyard\nEast gate",
+            color: "#ab1234",
+            textStyle: { font: "serif", weight: "bold", align: "center" },
+          },
         },
       }),
     );
@@ -1051,6 +1055,12 @@ try {
       assert.equal(
         textEdited.state.drawings.find((d) => d.id === textId)!.color,
         type === "scene.undo" ? "#405f4d" : "#ab1234",
+      );
+      assert.deepEqual(
+        textEdited.state.drawings.find((d) => d.id === textId)!.textStyle,
+        type === "scene.undo"
+          ? { font: "monospace", weight: "normal", align: "left" }
+          : { font: "serif", weight: "bold", align: "center" },
       );
     }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
@@ -1276,5 +1286,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

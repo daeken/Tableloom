@@ -1,3 +1,5 @@
+import { DEFAULT_TEXT_STYLE } from "@tableloom/core";
+import { TextStyleFields } from "./TextStyleFields.js";
 import { useEffect, useRef, useState } from "react";
 import type { Point, DrawingInput } from "@tableloom/core";
 import { textPlacement } from "./text-placement.js";
@@ -16,6 +18,7 @@ export function TextPlacementDialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null),
     editor = useRef<HTMLTextAreaElement>(null),
+    [textStyle, setTextStyle] = useState({ ...DEFAULT_TEXT_STYLE }),
     [text, setText] = useState(""),
     [error, setError] = useState("");
   useEffect(() => {
@@ -26,7 +29,13 @@ export function TextPlacementDialog({
   }, []);
   let valid = false;
   try {
-    textPlacement(text, anchor, color, "00000000-0000-4000-8000-000000000000");
+    textPlacement(
+      text,
+      anchor,
+      color,
+      "00000000-0000-4000-8000-000000000000",
+      textStyle,
+    );
     valid = true;
   } catch {
     /* Draft validation is shown below. */
@@ -51,14 +60,21 @@ export function TextPlacementDialog({
       <textarea
         ref={editor}
         id="scene-text-input"
-        rows={6}
+        rows={4}
         maxLength={500}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      <TextStyleFields
+        value={textStyle}
+        change={setTextStyle}
+        prefix="new-label"
+        text={text}
+        color={color}
+      />
       <p>
         Plain text, with line breaks. Move and resize the saved label with
-        Select, then choose Edit label to change its wording or color.
+        Select, then choose Edit label to change its wording, color, or style.
       </p>
       {!valid && text && (
         <p className="form-error">
@@ -77,7 +93,17 @@ export function TextPlacementDialog({
           disabled={!valid || !enabled}
           onClick={() => {
             try {
-              if (save(textPlacement(text, anchor, color, crypto.randomUUID())))
+              if (
+                save(
+                  textPlacement(
+                    text,
+                    anchor,
+                    color,
+                    crypto.randomUUID(),
+                    textStyle,
+                  ),
+                )
+              )
                 close();
               else
                 setError(

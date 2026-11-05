@@ -1883,8 +1883,8 @@ p {
 .text-placement-dialog textarea {
   width: 100%;
   resize: vertical;
-  min-height: 130px;
-  max-height: 280px;
+  min-height: 100px;
+  max-height: 220px;
   padding: 10px;
   font: inherit;
   color: #303c33;
@@ -1893,6 +1893,9 @@ p {
   border-radius: 5px;
 }
 .text-placement-dialog {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  padding: 24px 28px;
   max-height: 90vh;
   overflow-y: auto;
 }
@@ -1914,4 +1917,44 @@ p {
 .text-placement-dialog > label {
   display: block;
   margin: 8px 0 6px;
+}
+.text-style-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+  min-width: 0;
+}
+.text-style-fields legend {
+  font-size: 11px;
+  color: #687565;
+  margin-bottom: 8px;
+}
+.text-style-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.text-style-fields select {
+  width: 100%;
+  padding: 6px 3px;
+  border: 1px solid #c8d0c2;
+  border-radius: 5px;
+  background: #fffef8;
+  color: #303c33;
+  font-size: 11px;
+}
+.text-style-preview {
+  white-space: pre;
+  overflow: auto;
+  max-height: 110px;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px dashed #c8d0c2;
+  border-radius: 5px;
+  font-size: 20px;
+  line-height: 1.3;
 }

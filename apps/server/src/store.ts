@@ -6,6 +6,7 @@ import {
   restoreTable,
   tableSchema,
   preTextDrawingSchema,
+  preStyleDrawingSchema,
 } from "@tableloom/core";
 import type { TableState } from "@tableloom/core";
 import {
@@ -31,7 +32,7 @@ import { transaction } from "./database.js";
 
 const campaignDataSchema = z
   .object({
-    schemaVersion: z.literal(7),
+    schemaVersion: z.literal(8),
     revision: tableSchema.shape.revision,
     rolls: tableSchema.shape.rolls,
     notes: tableSchema.shape.notes,
@@ -103,9 +104,13 @@ export class TableStore {
       const stored = this.db
         .prepare("SELECT version FROM campaign_storage_version WHERE id = 1")
         .get();
-      z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).parse(
-        stored?.version,
-      );
+      z.union([
+        z.literal(1),
+        z.literal(2),
+        z.literal(3),
+        z.literal(4),
+        z.literal(5),
+      ]).parse(stored?.version);
       if (
         ["campaign_records", "scene_records", "campaign_receipts"].some(
           (name) => !this.hasTable(name),
@@ -118,7 +123,8 @@ export class TableStore {
         );
       if (stored?.version === 1) this.upgradeObjectVersions();
       else if (stored?.version === 2) this.upgradeTokenSizes();
-      else if (stored?.version === 3) this.upgradeTextDrawings();
+      else if (stored?.version === 3 || stored?.version === 4)
+        this.upgradeTextDrawings(stored.version);
       return;
     }
     if (
@@ -182,7 +188,7 @@ export class TableStore {
     }
     this.db
       .prepare(
-        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 4)",
+        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 5)",
       )
       .run();
   }
@@ -246,13 +252,13 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json = ? WHERE id = ?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 7 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 8 }),
           ),
           id,
         );
     }
     this.db.exec(
-      "UPDATE campaign_storage_version SET version = 4 WHERE id = 1",
+      "UPDATE campaign_storage_version SET version = 5 WHERE id = 1",
     );
   }
 
@@ -308,20 +314,24 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json=? WHERE id=?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 7 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 8 }),
           ),
           id,
         );
     }
-    this.db.exec("UPDATE campaign_storage_version SET version=4 WHERE id=1");
+    this.db.exec("UPDATE campaign_storage_version SET version=5 WHERE id=1");
   }
 
-  private upgradeTextDrawings() {
+  private upgradeTextDrawings(storageVersion: 3 | 4) {
     const oldCampaign = campaignDataSchema.extend({
-        schemaVersion: z.literal(6),
+        schemaVersion: z.literal(storageVersion === 3 ? 6 : 7),
       }),
       oldScene = sceneDataSchema.extend({
-        drawings: z.array(preTextDrawingSchema).max(2000),
+        drawings: z
+          .array(
+            storageVersion === 3 ? preTextDrawingSchema : preStyleDrawingSchema,
+          )
+          .max(2000),
       });
     if (this.db.prepare("PRAGMA foreign_key_check(scene_records)").all().length)
       throw new Error("Campaign scene storage is inconsistent.");
@@ -363,12 +373,12 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json=? WHERE id=?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 7 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 8 }),
           ),
           id,
         );
     }
-    this.db.exec("UPDATE campaign_storage_version SET version=4 WHERE id=1");
+    this.db.exec("UPDATE campaign_storage_version SET version=5 WHERE id=1");
   }
   listCampaigns(): Campaign[] {
     return this.db

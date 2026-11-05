@@ -269,7 +269,7 @@ test("version 1 migration preserves data/revision and defaults to GM control wit
   Reflect.deleteProperty(legacy, "notes");
   const result = restoreTable(legacy);
   assert.equal(result.migrated, true);
-  assert.equal(result.state.schemaVersion, 7);
+  assert.equal(result.state.schemaVersion, 8);
   assert.equal(result.state.revision, 42);
   assert.deepEqual(
     result.state.tokens,

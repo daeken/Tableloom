@@ -6,6 +6,7 @@ import {
   pointSchema,
   tokenRadiusSchema,
   sceneTextContentSchema,
+  sameTextStyle,
 } from "./index.js";
 import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -81,8 +82,13 @@ export function authorizeCommand(
           "This label changed. Review its saved text before editing again.",
         );
       const changes = sceneTextContentSchema.parse(command.changes);
-      if (changes.text === drawing.text && changes.color === drawing.color)
-        throw new Error("Change the wording or color before saving.");
+      if (
+        changes.text === drawing.text &&
+        changes.color === drawing.color &&
+        (!changes.textStyle ||
+          sameTextStyle(changes.textStyle, drawing.textStyle!))
+      )
+        throw new Error("Change the wording, color, or style before saving.");
       return;
     }
     case "token.resize": {

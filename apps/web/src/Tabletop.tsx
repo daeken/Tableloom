@@ -256,7 +256,9 @@ export function Tabletop({
           label = new Text({
             text: drawing.text!,
             style: {
-              fontFamily: "monospace",
+              fontFamily: drawing.textStyle!.font,
+              fontWeight: drawing.textStyle!.weight,
+              align: drawing.textStyle!.align,
               fontSize: 24,
               lineHeight: 32,
               fill: drawing.color,

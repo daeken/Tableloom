@@ -1527,7 +1527,11 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
       type: "drawing.text.update",
       drawingId: id,
       expectedVersion: 1,
-      changes: { text: "<b>East gate</b>\n鍵", color: "#ab1234" },
+      changes: {
+        text: original,
+        color: "#405f4d",
+        textStyle: { font: "serif", weight: "bold", align: "center" },
+      },
     };
     assert.equal((await q.send(edit)).type, "error");
     assert.equal(store.load().drawings[0]!.version, 1);
@@ -1539,6 +1543,10 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
     );
     assert.deepEqual(g.latest().state.drawings[0]!.points, points);
     assert.equal(q.latest().state.drawings[0]!.text, edit.changes.text);
+    assert.deepEqual(
+      q.latest().state.drawings[0]!.textStyle,
+      edit.changes.textStyle,
+    );
     const edge = p.latest().history.undo!;
     assert.equal(edge.action, "edit");
     assert.equal(g.latest().history.undo, null);
@@ -1577,7 +1585,11 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
       ...edit,
       id: randomUUID(),
       expectedVersion: 2,
-      changes: { text: "Reviewed wording\nSouth gate", color: "#123456" },
+      changes: {
+        text: "Reviewed wording\nSouth gate",
+        color: "#123456",
+        textStyle: { font: "sans-serif", weight: "normal", align: "right" },
+      },
     };
     db.exec(
       "CREATE TRIGGER reject_text_edit_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture edit binding'); END",
@@ -1603,6 +1615,10 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
     );
     assert.equal(store.load().drawings[0]!.text, edit.changes.text);
     assert.equal(store.load().drawings[0]!.color, edit.changes.color);
+    assert.deepEqual(
+      store.load().drawings[0]!.textStyle,
+      edit.changes.textStyle,
+    );
     const redo = p.latest().history.redo!;
     sockets.forEach((s) => s.terminate());
     await app.close();
@@ -1614,6 +1630,10 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
     sockets.push(p.ws, g.ws, q.ws);
     assert.equal(p.latest().history.redo!.id, redo.id);
     assert.equal(p.latest().state.drawings[0]!.text, edit.changes.text);
+    assert.deepEqual(
+      p.latest().state.drawings[0]!.textStyle,
+      edit.changes.textStyle,
+    );
     assert.equal(
       (
         await p.send({
@@ -1628,6 +1648,10 @@ test("saved text edits are owned, sender-bound, atomic, restart-safe and expose 
     await until(() => g.latest().state.drawings[0]?.version === 5);
     assert.equal(store.load().drawings[0]!.text, next.changes.text);
     assert.equal(store.load().drawings[0]!.color, next.changes.color);
+    assert.deepEqual(
+      store.load().drawings[0]!.textStyle,
+      next.changes.textStyle,
+    );
     assert.equal(
       (
         await g.send({

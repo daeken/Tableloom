@@ -1,3 +1,4 @@
+import { TextStyleFields } from "./TextStyleFields.js";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { sceneTextContentSchema } from "@tableloom/core";
@@ -30,6 +31,7 @@ export function EditTextDialog({
     editor = useRef<HTMLTextAreaElement>(null),
     [captured] = useState(drawing),
     [text, setText] = useState(drawing.text ?? ""),
+    [textStyle, setTextStyle] = useState({ ...drawing.textStyle! }),
     [color, setColor] = useState(drawing.color),
     [error, setError] = useState("");
   useEffect(() => {
@@ -42,8 +44,12 @@ export function EditTextDialog({
       state,
       member,
     ),
-    valid = sceneTextContentSchema.safeParse({ text, color }).success,
-    command = textEditCommand(captured, state, member, text, color);
+    valid = sceneTextContentSchema.safeParse({
+      text,
+      color,
+      textStyle,
+    }).success,
+    command = textEditCommand(captured, state, member, text, color, textStyle);
   return createPortal(
     <dialog
       ref={dialog}
@@ -61,13 +67,13 @@ export function EditTextDialog({
       <h1 id="edit-label-title">Edit label</h1>
       <p>
         Everyone in this scene can read the saved label. Undo restores its
-        previous wording and color.
+        previous wording, color, and style.
       </p>
       <label htmlFor="edit-label-text">Label text</label>
       <textarea
         ref={editor}
         id="edit-label-text"
-        rows={6}
+        rows={4}
         maxLength={500}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -78,6 +84,13 @@ export function EditTextDialog({
         type="color"
         value={color}
         onChange={(e) => setColor(e.target.value)}
+      />
+      <TextStyleFields
+        value={textStyle}
+        change={setTextStyle}
+        prefix="edit-label"
+        text={text}
+        color={color}
       />
       <p>
         Use up to 500 characters and 20 lines. The label keeps its current box;

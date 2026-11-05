@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { tokenSchema, tableSchema } from "@tableloom/core";
+import { tokenSchema, tableSchema, sceneTextSnapshot } from "@tableloom/core";
 import type { Command, TableState, Token } from "@tableloom/core";
 import { applyCommand } from "@tableloom/core/server";
 import { memberSchema } from "@tableloom/core/access";
@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 10;
+          ?.version === 11;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -321,8 +321,8 @@ export class SceneHistoryStore {
         payload = payloadSchema.parse({
           kind: "text-update",
           objectType: "drawing",
-          before: { text: from.text, color: from.color },
-          after: { text: to.text, color: to.color },
+          before: sceneTextSnapshot(from),
+          after: sceneTextSnapshot(to),
         });
       } else if (command.type === "objects.resize") {
         ids = command.objects.map((o) => o.objectId);

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -21,25 +21,59 @@ export const sceneTextSchema = z
     "Use plain text and line breaks.",
   )
   .refine((text) => text.split("\n").length <= 20, "Use at most 20 lines.");
+export const sceneTextStyleSchema = z
+  .object({
+    font: z.enum(["monospace", "sans-serif", "serif"]),
+    weight: z.enum(["normal", "bold"]),
+    align: z.enum(["left", "center", "right"]),
+  })
+  .strict();
+export type SceneTextStyle = z.infer<typeof sceneTextStyleSchema>;
+export const DEFAULT_TEXT_STYLE: Readonly<SceneTextStyle> = {
+  font: "monospace",
+  weight: "normal",
+  align: "left",
+};
+export function sameTextStyle(a: SceneTextStyle, b: SceneTextStyle) {
+  return a.font === b.font && a.weight === b.weight && a.align === b.align;
+}
 export const sceneTextContentSchema = z
-  .object({ text: sceneTextSchema, color: colorSchema })
+  .object({
+    text: sceneTextSchema,
+    color: colorSchema,
+    textStyle: sceneTextStyleSchema.optional(),
+  })
+  .strict();
+export const sceneTextSnapshotSchema = sceneTextContentSchema.extend({
+  textStyle: sceneTextStyleSchema,
+});
+export const preStyleTextContentSchema = sceneTextContentSchema
+  .omit({ textStyle: true })
   .strict();
 const drawingDataSchema = z.object({
   id: z.uuid(),
   kind: z.enum(["stroke", "rectangle", "text"]),
   text: sceneTextSchema.optional(),
+  textStyle: sceneTextStyleSchema.optional(),
   points: z.array(pointSchema).min(2).max(2000),
   color: colorSchema,
   ownerId: z.uuid().nullable(),
   version: z.number().int().positive(),
 });
 function validateTextDrawing(
-  drawing: { kind: string; text?: string | undefined; points: Point[] },
+  drawing: {
+    kind: string;
+    text?: string | undefined;
+    textStyle?: SceneTextStyle | undefined;
+    points: Point[];
+  },
   context: z.RefinementCtx,
+  requireStyle = true,
 ) {
   if (drawing.kind === "text") {
     if (
       drawing.text === undefined ||
+      (requireStyle && drawing.textStyle === undefined) ||
       drawing.points.length !== 2 ||
       drawing.points[0]!.x >= drawing.points[1]!.x ||
       drawing.points[0]!.y >= drawing.points[1]!.y
@@ -49,7 +83,7 @@ function validateTextDrawing(
         message:
           "Text labels need text and two ordered corners with positive width and height.",
       });
-  } else if (drawing.text !== undefined)
+  } else if (drawing.text !== undefined || drawing.textStyle !== undefined)
     context.addIssue({
       code: "custom",
       message: "Only text labels may contain text.",
@@ -58,15 +92,26 @@ function validateTextDrawing(
 export const drawingSchema = drawingDataSchema
   .strict()
   .superRefine(validateTextDrawing);
+export const preStyleDrawingSchema = drawingDataSchema
+  .omit({ textStyle: true })
+  .strict()
+  .superRefine((d, c) => validateTextDrawing(d, c, false));
 export const preTextDrawingSchema = drawingDataSchema
-  .omit({ text: true })
+  .omit({ text: true, textStyle: true })
   .extend({ kind: z.enum(["stroke", "rectangle"]) })
   .strict();
 export type Drawing = z.infer<typeof drawingSchema>;
+export function sceneTextSnapshot(drawing: Drawing) {
+  return sceneTextSnapshotSchema.parse({
+    text: drawing.text,
+    color: drawing.color,
+    textStyle: drawing.textStyle,
+  });
+}
 export const drawingInputSchema = drawingDataSchema
   .omit({ ownerId: true, version: true })
   .strict()
-  .superRefine(validateTextDrawing);
+  .superRefine((d, c) => validateTextDrawing(d, c, false));
 export type DrawingInput = z.infer<typeof drawingInputSchema>;
 export const DEFAULT_TOKEN_RADIUS = 24;
 export const tokenRadiusSchema = z.number().finite().min(4).max(300);
@@ -125,7 +170,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(7),
+  schemaVersion: z.literal(8),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -171,7 +216,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 7,
+  schemaVersion: 8,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -185,6 +230,12 @@ const legacyDrawingSchema = preTextDrawingSchema
   .strict();
 const legacyTokenSchema = tokenSchema
   .omit({ version: true, radius: true })
+  .strict();
+const version7TableSchema = tableDataSchema
+  .extend({
+    schemaVersion: z.literal(7),
+    drawings: z.array(preStyleDrawingSchema).max(2000),
+  })
   .strict();
 const version6TableSchema = tableDataSchema
   .extend({
@@ -228,11 +279,25 @@ export function restoreTable(value: unknown): {
 } {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
+  const unstyled = version7TableSchema.safeParse(value);
+  if (unstyled.success)
+    return {
+      migrated: true,
+      state: tableSchema.parse({
+        ...unstyled.data,
+        schemaVersion: 8,
+        drawings: unstyled.data.drawings.map((d) =>
+          d.kind === "text"
+            ? { ...d, textStyle: { ...DEFAULT_TEXT_STYLE } }
+            : d,
+        ),
+      }),
+    };
   const previous = version6TableSchema.safeParse(value);
   if (previous.success)
     return {
       migrated: true,
-      state: tableSchema.parse({ ...previous.data, schemaVersion: 7 }),
+      state: tableSchema.parse({ ...previous.data, schemaVersion: 8 }),
     };
   const sized = version5TableSchema.safeParse(value);
   if (sized.success)
@@ -240,7 +305,7 @@ export function restoreTable(value: unknown): {
       migrated: true,
       state: tableSchema.parse({
         ...sized.data,
-        schemaVersion: 7,
+        schemaVersion: 8,
         tokens: sized.data.tokens.map((token) => ({
           ...token,
           radius: DEFAULT_TOKEN_RADIUS,
@@ -257,7 +322,7 @@ export function restoreTable(value: unknown): {
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 7,
+    schemaVersion: 8,
     notes: legacy.schemaVersion === 4 ? legacy.notes : [],
     drawings: legacy.drawings.map((drawing) => ({
       ...drawing,

@@ -1942,7 +1942,7 @@ test("schema-6 token snapshots gain fixed legacy radius atomically, including gr
       assert.equal(
         f.db.prepare("SELECT version FROM scene_history_version").get()!
           .version,
-        10,
+        11,
       );
       const restored = f.action("scene.undo");
       assert.deepEqual(
@@ -2104,7 +2104,7 @@ test("schema-7 sized token and scalar resize histories upgrade intact to 8; fail
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          10,
+          11,
         );
       }
       assert.deepEqual(

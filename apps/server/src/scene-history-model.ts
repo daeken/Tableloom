@@ -5,7 +5,8 @@ import {
   drawingSchema,
   translationSchema,
   tokenRadiusSchema,
-  sceneTextContentSchema,
+  sceneTextSnapshotSchema,
+  sameTextStyle,
 } from "@tableloom/core";
 const originalGeometrySchema = z.union([
   z
@@ -59,12 +60,15 @@ export const payloadSchema = z.union([
     .object({
       kind: z.literal("text-update"),
       objectType: z.literal("drawing"),
-      before: sceneTextContentSchema,
-      after: sceneTextContentSchema,
+      before: sceneTextSnapshotSchema,
+      after: sceneTextSnapshotSchema,
     })
     .strict()
     .refine(
-      (p) => p.before.text !== p.after.text || p.before.color !== p.after.color,
+      (p) =>
+        p.before.text !== p.after.text ||
+        p.before.color !== p.after.color ||
+        !sameTextStyle(p.before.textStyle, p.after.textStyle),
       "Text history must contain a change.",
     ),
   z
