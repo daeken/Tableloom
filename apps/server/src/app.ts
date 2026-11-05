@@ -39,6 +39,7 @@ import {
   sessionToken,
 } from "./access-http.js";
 
+import type { ServerSystemDefinition } from "@tableloom/module-sdk/server";
 const installedSystems = new Set(installedModules.map((module) => module.id));
 
 export async function createApp(options: {
@@ -49,6 +50,7 @@ export async function createApp(options: {
   publicOrigin?: string;
   secureCookies?: boolean;
   now?: () => number;
+  documentSystems?: readonly ServerSystemDefinition<unknown>[];
 }) {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -84,7 +86,7 @@ export async function createApp(options: {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
     store.load();
-    documents = new DocumentStore(database, store);
+    documents = new DocumentStore(database, store, options.documentSystems);
     history = new RollHistoryStore(database, store);
     bindings = new CommandBindings(database);
     sceneHistory = new SceneHistoryStore(database, store);

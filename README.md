@@ -75,7 +75,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 
 ### Make game modules playable
 
-- [ ] **Next:** connect persisted module documents to custom character sheets and validated module actions.
+- [x] Add validated, versioned server actions for persisted module documents.
+- [ ] **Next:** connect persisted module documents to custom character sheets and action controls.
 - [ ] Add a module preview/test harness with worked rules examples.
 - [ ] Load content packs with stable definitions, owned item instances and campaign homebrew overrides.
 - [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references.

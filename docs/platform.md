@@ -522,7 +522,7 @@ Selection never grants membership; use an invitation to join first. Existing GM 
 
 ## Module document API
 
-Module-backed documents are separate normalized rows, never included in table snapshots or campaign/scene lists. The current modules validate only provisional `{ name, notes }` data with document schema version 1; they do not implement published character sheets or game rules. Existing plain-text notes stay separate and are not converted. A browser sheet editor and module actions remain queued.
+Module-backed documents are separate normalized rows, never included in table snapshots or campaign/scene lists. The current modules validate only provisional `{ name, notes }` data with document schema version 1; they do not implement published character sheets or game rules. Existing plain-text notes stay separate and are not converted. A browser sheet editor remains queued; the server action API below is available for explicitly installed module actions. The three scaffolds register no actions.
 
 These cookie-authenticated endpoints require the URL campaign to match the session's active campaign. Select the campaign first; supplying an ID never grants membership. Mutations require the server origin. All responses use `Cache-Control: no-store`.
 
@@ -534,6 +534,7 @@ These cookie-authenticated endpoints require the URL campaign to match the sessi
 | `POST /:id` | Owner/GM only; accept `{ expectedVersion, title, visibility, data }`. Advance the edit version; stale versions return 409. |
 | `POST /:id/delete` | Owner/GM only; accept `{ expectedVersion }` and permanently delete. |
 | `POST /:id/migrate` | GM only; accept `{ expectedVersion }` and explicitly run the installed module's consecutive schema steps atomically. |
+| `POST /:id/actions` | Owner/GM only; accept `{ expectedVersion, action, input }`, execute one registered server action, validate its result, and return the updated document. |
 
 `visibility: "gm"` grants read access to the owner and campaign GMs; `"public"` grants read access to campaign members. Only owner/GM can edit/delete. Visibility is filtered in SQL before payload decoding or pagination. Hidden/foreign document IDs receive the same 404 as unknown IDs. Lists do not expose hidden titles, owner IDs, schema versions, bodies, or totals. Removed members lose access while the GM retains their documents. Private document activity never advances the table revision, campaign generation, or unrelated members' view fingerprints. Documents have no live change events yet: clients must refetch to see edits or access changes. Previously shared content cannot be recalled.
 
@@ -542,6 +543,32 @@ Each campaign is limited to 500 module documents with 120-character titles. Each
 Document storage schema 1 is independent of campaign storage schema 8, access storage schema 1, and table schema 11/live protocol 28. Every row records its exact system package pin, document `schemaVersion`, and optimistic edit `version`. Server-only module entry points can supply validated consecutive `from → to` schema migrations through `@tableloom/module-sdk/server`. Older document schemas remain listable but cannot be opened/edited until a GM explicitly migrates; absent steps, future schemas, invalid outputs, stale versions, and failed writes leave the row unchanged. Migration hooks are trusted installed code and do not enter the browser. The three scaffolds have no historical schema steps yet; execution is verified with synthetic test fixtures.
 
 This executor handles schema changes within the exact installed package pin; coordinated upgrades to another package version are not implemented. Campaign system/version changes are blocked while incompatible documents exist, including through live `system.set`, so records cannot be stranded silently. Remove those documents or wait for a supported package-upgrade workflow before switching systems. Document APIs have no create retry receipts, history, trash, restore, bulk migration, or sheet UI yet. Roll archive/cleanup controls are available below; broader snapshot-performance work remains queued.
+
+### Authoritative module document actions
+
+Server-only packages can register `documentActions` with `defineDocumentAction(sharedSystem, { id, inputSchema, run })` and `defineServerSystem`. The helper infers both module data and parsed action input types. IDs match `[a-z][a-z0-9.-]{0,63}`; duplicate IDs or registrations bound to another exact package/schema pin fail at startup. No caller-supplied code, imports or module paths are resolved. `createApp` may receive a trusted programmatic `documentSystems` registry; normal startup keeps the explicitly installed registry. This option is never read from an HTTP request.
+
+A request targets one document in the session's active campaign. Inside one SQLite transaction, the executor rechecks persisted membership, visibility, owner/GM editing rights, expected edit version, exact campaign/package pin and current document schema before invoking the action. Public read access alone does not permit actions. Hidden/foreign IDs remain 404, denied public edits are 403, and stale versions/pins/schemas are 409. Current stored data is validated before execution; the callback receives only document data, parsed input and server-resolved actor `{ id, role }`.
+
+`input` is required (send `null` for an action with a null schema). Raw input and parsed input obey the same finite-JSON, 64 KiB/node/depth limits as documents. The action's synchronous `run` returns replacement **data only**, validated/bounded against the pinned document schema before storing. Title, visibility, ownership, package/schema pin and campaign/scene metadata are unchanged. A success advances the document edit version once, even for unchanged data. Unknown actions, malformed input, handler failures and invalid results return 400 without a document write; handler error text is not exposed. Failed database writes roll back data and version. Document actions create no table revision, campaign generation, scene history, snapshot payload or live event.
+
+For example, a **synthetic note-editing action**, not an installed game rule:
+
+```ts
+const setNotes = defineDocumentAction(shared, {
+  id: "example.set-notes",
+  inputSchema: z.object({ notes: z.string().max(10000) }).strict(),
+  run: ({ data, input }) => ({ ...data, notes: input.notes }),
+});
+export const system = defineServerSystem({
+  ...shared,
+  documentActions: [setNotes],
+});
+```
+
+Actions are trusted synchronous in-process code, not a sandbox. This first executor supports one document transition; it supplies no multi-document transaction, dice/history integration, filesystem/network capability or browser action controls. Modules must avoid external side effects: database rollback does not undo arbitrary trusted-code effects. Existing dice outcomes remain server-authoritative through the normal roll commands. All three published-system packages remain rule-free scaffolds with no installed actions until sourced implementations are available.
+
+There are no action receipts/replay results yet. Repeating a successful request with its original `expectedVersion` returns 409 **before executing again**, including after restart. After a lost response, refetch and reconcile the document; never silently retry with a newly fetched version. Sheet drafts, action UI, action discovery and module preview fixtures remain separate work in README.
 
 ## Roll history and archive
 

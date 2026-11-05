@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { documentData } from "@tableloom/module-sdk";
+import { documentData, documentActionIdSchema } from "@tableloom/module-sdk";
 import { versionPinSchema } from "./campaigns.js";
 
 export const MAX_CAMPAIGN_DOCUMENTS = 500;
@@ -48,6 +48,13 @@ export const documentUpdateSchema = z
   .strict();
 export const documentVersionSchema = z
   .object({ expectedVersion: z.number().int().positive() })
+  .strict();
+export const documentActionSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    action: documentActionIdSchema,
+    input: documentSchema.shape.data,
+  })
   .strict();
 export const documentPageSchema = z
   .object({

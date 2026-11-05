@@ -6,6 +6,9 @@ export type { DocumentData } from "./document-data.js";
 export const systemIdSchema = z.string().regex(/^[a-z][a-z0-9-]{1,63}$/);
 export type SystemId = z.infer<typeof systemIdSchema>;
 export const moduleVersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/);
+export const documentActionIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9.-]{0,63}$/);
 
 export const sourceReferenceSchema = z.object({
   title: z.string().min(1),

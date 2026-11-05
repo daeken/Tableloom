@@ -4,6 +4,7 @@ import {
   documentCreateSchema,
   documentUpdateSchema,
   documentVersionSchema,
+  documentActionSchema,
 } from "@tableloom/core/documents";
 import { AccessError, AccessStore } from "./access.js";
 import { StoreError } from "./store.js";
@@ -77,4 +78,11 @@ export function registerDocumentRoutes(
       body = documentVersionSchema.parse(request.body);
     return documents.migrate(member, id(request), body.expectedVersion);
   });
+  app.post(`${root}/:id/actions`, async (request) =>
+    documents.act(
+      actor(request),
+      id(request),
+      documentActionSchema.parse(request.body),
+    ),
+  );
 }

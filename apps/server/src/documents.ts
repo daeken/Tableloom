@@ -13,6 +13,7 @@ import {
   documentCreateSchema,
   documentUpdateSchema,
   documentPageSchema,
+  documentActionSchema,
   MAX_CAMPAIGN_DOCUMENTS,
 } from "@tableloom/core/documents";
 import type {
@@ -238,6 +239,60 @@ export class DocumentStore {
           "DELETE FROM module_documents WHERE id = ? AND campaign_id = ?",
         )
         .run(id, member.tableId);
+    });
+  }
+
+  /** One authoritative document transition; no caller-provided modules or metadata writes. */
+  act(
+    actor: Member,
+    id: string,
+    input: z.input<typeof documentActionSchema>,
+  ): SystemDocument {
+    const body = documentActionSchema.parse(input);
+    return transaction(this.db, () => {
+      const member = this.member(actor),
+        row = this.visible(member, id),
+        metadata = this.metadata(row);
+      this.editable(member, metadata);
+      this.expected(metadata, body.expectedVersion);
+      const definition = this.forDocument(metadata);
+      if (metadata.schemaVersion !== definition.documentVersion)
+        throw new StoreError(
+          "Migrate this document before using its actions.",
+          409,
+        );
+      const action = definition.documentActions?.find(
+        (action) => action.id === body.action,
+      );
+      if (!action)
+        throw new StoreError("That document action is not installed.", 400);
+      const before = this.storedData(definition, this.decode(row));
+      let data: DocumentData;
+      try {
+        data = this.inputData(
+          definition,
+          action.execute(before, body.input, {
+            id: member.id,
+            role: member.role,
+          }),
+        );
+      } catch {
+        throw new StoreError(
+          "The document action failed or its input/result is invalid. No changes were saved.",
+          400,
+        );
+      }
+      const result = documentSchema.parse({
+        ...metadata,
+        version: metadata.version + 1,
+        data,
+      });
+      this.db
+        .prepare(
+          "UPDATE module_documents SET data_json = ?, version = version + 1 WHERE id = ? AND campaign_id = ?",
+        )
+        .run(JSON.stringify(data), id, member.tableId);
+      return result;
     });
   }
 
