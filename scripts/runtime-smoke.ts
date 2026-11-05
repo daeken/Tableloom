@@ -10,6 +10,7 @@ import {
 import { documentSchema } from "@tableloom/core/documents";
 import { assetSchema } from "@tableloom/core/assets";
 import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
+import { pngFixture } from "../apps/server/src/png-fixture.js";
 import { z } from "zod";
 const hash = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
@@ -97,6 +98,11 @@ async function verifyCampaignExport(
       archiveSha256: z.string(),
       blockers: z.array(z.string()),
       pendingValidation: z.array(z.string()),
+      imageValidation: z.object({
+        checked: z.literal(1),
+        pixels: z.number().int().positive(),
+        pixelLimit: z.number().int().positive(),
+      }),
       destination: z.object({
         campaignCapacity: z.object({
           used: z.number().int().positive(),
@@ -115,6 +121,12 @@ async function verifyCampaignExport(
   assert.ok(!report.pendingValidation.includes("full-storage-quotas"));
   assert.ok(report.pendingValidation.includes("object-history-causal-graph"));
   assert.ok(!report.pendingValidation.includes("history-causal-graph"));
+  assert.ok(!report.pendingValidation.includes("image-decoding"));
+  const originalPng = Buffer.from(image.bytes, "base64");
+  assert.equal(
+    report.imageValidation.pixels,
+    originalPng.readUInt32BE(16) * originalPng.readUInt32BE(20),
+  );
   assert.equal(
     report.archiveSha256,
     createHash("sha256").update(serialized).digest("hex"),
@@ -149,6 +161,33 @@ async function verifyCampaignExport(
     "A forged map cursor must fail compiled preflight",
   );
   await denied.arrayBuffer();
+  records.scene_backgrounds[0]!.history_cursor =
+    archive.records.scene_backgrounds[0]!.history_cursor;
+  const assets = z
+    .array(z.record(z.string(), z.unknown()))
+    .parse(records.campaign_assets);
+  const malformed = pngFixture(
+    originalPng.readUInt32BE(16),
+    originalPng.readUInt32BE(20),
+    { packed: Buffer.from([0x78, 0x9c, 0]) },
+  );
+  assets[0]!.bytes = malformed.toString("base64");
+  assets[0]!.byte_length = malformed.length;
+  assets[0]!.sha256 = hash(malformed);
+  records.campaign_assets = assets;
+  modified.records = records;
+  const invalidImage = await request(
+    url,
+    "/api/campaign-imports/preflight",
+    cookie,
+    modified,
+  );
+  assert.equal(
+    invalidImage.status,
+    400,
+    "A hash-consistent invalid PNG must fail compiled preflight",
+  );
+  assert.match(await invalidImage.text(), /PNG/);
 }
 export async function verifyRuntimeHttp(url: string) {
   const health = await request(url, "/api/health");

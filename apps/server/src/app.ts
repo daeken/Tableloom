@@ -26,6 +26,7 @@ import { applyCommand, projectTable } from "@tableloom/core/server";
 import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
 import { registerCampaignPreflightRoutes } from "./campaign-preflight-http.js";
+import type { CampaignImageInspector } from "./campaign-image-inspection.js";
 import { installedModules } from "./modules.js";
 import { OutboundChannel } from "./outbound.js";
 import { SceneHistoryStore } from "./scene-history.js";
@@ -64,6 +65,7 @@ export async function createApp(options: {
   catalog?: InstalledCatalog;
   sessionCookieName?: string;
   contentPacks?: readonly ContentPackDefinition<unknown>[];
+  imageInspector?: CampaignImageInspector;
 }) {
   if (options.databasePath !== ":memory:")
     assertDataDirectoryReady(dirname(resolve(options.databasePath)));
@@ -324,6 +326,9 @@ export async function createApp(options: {
     catalog,
     contentCatalog,
     systems,
+    ...(options.imageInspector
+      ? { imageInspector: options.imageInspector }
+      : {}),
   });
   registerChatRoutes(app, access, chat);
   registerDocumentRoutes(app, access, documents);

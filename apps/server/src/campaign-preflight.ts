@@ -29,6 +29,7 @@ import {
   type MapHistoryEntry,
 } from "./scene-map-history-model.js";
 import { validateCampaignStorageQuotas } from "./campaign-storage-quotas.js";
+import type { CampaignImageInspector } from "./campaign-image-inspection.js";
 
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -57,7 +58,7 @@ const sceneDataSchema = z
 type PackageStatus =
   "available" | "unavailable" | "changed" | "incompatible" | "historical-only";
 
-/** Inspect an untrusted archive; deliberately produces no writable import plan. */
+/** Structural/semantic inspection only: image decoding stays pending. HTTP uses the async wrapper below. */
 export function inspectCampaignTransfer(
   serialized: string,
   catalog: InstalledCatalog,
@@ -66,6 +67,57 @@ export function inspectCampaignTransfer(
   db: DatabaseSync,
 ) {
   const archive = parseCampaignTransfer(serialized);
+  return inspectParsedCampaignTransfer(
+    archive,
+    serialized,
+    catalog,
+    content,
+    systems,
+    db,
+  );
+}
+
+/** HTTP preflight completes image decoding without running it on the request thread. */
+export async function inspectCampaignTransferWithImages(
+  serialized: string,
+  catalog: InstalledCatalog,
+  content: ContentCatalog,
+  systems: readonly ServerSystemDefinition<unknown>[],
+  db: DatabaseSync,
+  imageInspector: CampaignImageInspector,
+  signal?: AbortSignal,
+) {
+  imageInspector.assertAvailable();
+  const archive = parseCampaignTransfer(serialized);
+  const report = inspectParsedCampaignTransfer(
+    archive,
+    serialized,
+    catalog,
+    content,
+    systems,
+    db,
+  );
+  const imageValidation = await imageInspector.inspect(
+    archive.records.campaign_assets,
+    signal,
+  );
+  return {
+    ...report,
+    imageValidation,
+    pendingValidation: report.pendingValidation.filter(
+      (item) => item !== "image-decoding",
+    ),
+  };
+}
+
+function inspectParsedCampaignTransfer(
+  archive: CampaignTransfer,
+  serialized: string,
+  catalog: InstalledCatalog,
+  content: ContentCatalog,
+  systems: readonly ServerSystemDefinition<unknown>[],
+  db: DatabaseSync,
+) {
   validateCampaignStorageQuotas(archive.records);
   let report: ReturnType<typeof inspect>;
   try {
