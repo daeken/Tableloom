@@ -19,6 +19,8 @@
     "build": "npm run build -w @tableloom/web && npm run build -w @tableloom/server",
     "check": "npm run typecheck && npm test && npm run build && npm run modules:check && npm run bundle:report && npm run smoke",
     "smoke": "node --import tsx scripts/smoke.ts",
+    "runtime:check": "npm run build && node --import tsx scripts/runtime-check.ts",
+    "container:check": "node --import tsx scripts/container-check.ts",
     "format": "prettier --write .",
     "start": "node apps/server/dist/index.js",
     "bundle:report": "node --import tsx scripts/bundle-report.ts",

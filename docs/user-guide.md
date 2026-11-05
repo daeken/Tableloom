@@ -86,3 +86,36 @@ GMs can use **Manage content packs** in the catalog panel to select exact instal
 Open a definition and choose **Edit campaign homebrew** when its module provides an editor. Change the name, audience, module fields and replacement source references, then **Save homebrew replacement**. This replaces the catalog entry for this campaign; owned copies keep their earlier source/state. Changing a private entry to **Everyone at the table** requires reviewing the replacement fields and listed sources. Any further edit clears that review checkbox. The editor starts with the entry's effective source list; it does not add separate original-source citations. Review every listed source before sharing.
 
 Save or discard the homebrew draft before choosing another entry, making a copy or managing packs. Refresh keeps a dirty draft; a changed definition blocks saving until **Discard homebrew draft**. Copy and homebrew editing are kept separate while a homebrew form is open. To restore an overridden entry, expand **Reset to the installed definition…** and confirm: this restores its installed data, name, sources **and audience**. Reset has no undo. Published content already copied/read by others cannot be recalled by resetting or hiding the entry. These controls use synthetic examples in the preview until real packs and rulebooks are supplied.
+
+
+## Docker packaging
+
+The repository includes a multi-stage `Dockerfile` and `compose.yaml`. **Container verification is pending:** this development machine has a Docker CLI but no running engine or installed Compose/build plugins. Compose syntax and a fresh source-free production install have been checked; actual Linux image building, volume ownership, non-root operation and container replacement still need `npm run container:check` on a working local Docker setup. The README task stays unchecked until that succeeds.
+
+With Docker Engine and Compose/buildx available, the intended local startup is:
+
+```sh
+docker compose up --build -d
+docker compose ps
+```
+
+Open http://localhost:3001. Compose binds the published port to loopback by default. The image listens on port 3001 internally; `TABLELOOM_PORT` changes the host port, and `TABLELOOM_BIND` changes the host interface. `PUBLIC_ORIGIN` sets the exact browser-facing origin as described above, including HTTPS cookie behavior. No reverse proxy or TLS termination is bundled. `TABLELOOM_IMAGE` optionally changes the locally built image tag (default `tableloom:local`); nothing is pushed to a registry.
+
+The image is configured to run as **node, UID/GID 1000**, with a private `/app/data` directory. Compose mounts the named `tableloom-data` volume there, makes the application filesystem read-only, gives `/tmp` a small temporary filesystem, drops capabilities, prevents privilege escalation and forwards termination signals through Docker's init process. Database state, uploaded images (stored inside SQLite), sessions and the generated `host-key` all live in that volume. Only the data volume is intended to persist; runtime sources/development tools are not copied into the image.
+
+On first use, read the generated private key on your server to set up the host:
+
+```sh
+docker compose exec -T tableloom cat /app/data/host-key
+```
+
+The key is not baked into the image, passed through default Compose configuration or printed in application logs. Optional `TABLELOOM_HOST_KEY` injection requires your own Compose override/environment mapping; supplying it bypasses generated-key loading. Bind mounts also require administrator-prepared write ownership for UID/GID 1000 and a private key file; the application does not start as root to repair ownership. The default named-volume initialization/ownership remains part of the pending engine verification.
+
+`docker compose stop` shuts down the service, and ordinary `docker compose down` retains its named volume. Rebuild/recreate with `docker compose up --build -d` to reuse that data. Do not remove the volume during an upgrade. Consistent backup/restore and downgrade tooling are still pending; keep the data volume and host key safe. The container health probe reads `/api/health` through loopback and checks the protocol version; it does not log credentials or mutate data, and it is not a complete database-integrity check.
+
+For development verification:
+
+- `npm run runtime:check` builds the app, installs production dependencies into a fresh temporary folder, confirms no source/compiler/tsx is present, and checks built assets, generated key permissions, authentication, WebSockets, stored records/images and clean restart persistence. It uses your local Node 24 and removes its temporary data. It proves the production dependency boundary, not container ownership/mount behavior.
+- `npm run container:check` requires a running **local socket** Docker engine and Compose/buildx. It builds an isolated randomly named project/image with a private test volume and ephemeral loopback port, checks UID/read-only filesystem/health and the same HTTP workflow, then recreates the container and checks key/session/record/image persistence. It removes only its own project, volume and image afterward. Remote Docker endpoints are rejected. It never uses the normal Compose project's data. A failure before Docker preflight creates nothing; an interrupted process may need cleanup of the printed test project.
+
+The base image uses the official [Node 24 Debian slim image](https://github.com/nodejs/docker-node/blob/main/24/bookworm-slim/Dockerfile). Docker's [volume documentation](https://docs.docker.com/engine/storage/volumes/) describes named-volume retention and initialization. The base tag tracks Node 24 updates rather than a pinned image digest; npm dependencies use the repository lockfile. When adding workspace modules, update the Dockerfile manifest-copy list and the isolated runtime check together.

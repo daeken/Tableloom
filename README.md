@@ -29,6 +29,8 @@ npm run build
 npm start           # http://127.0.0.1:3001
 ```
 
+Docker packaging is included; [container setup and verification](docs/user-guide.md#docker-packaging) currently awaits a working Docker engine/Compose on the development machine.
+
 Use `HOST`, `PORT`, `DATA_DIR`, `TABLELOOM_HOST_KEY` and `PUBLIC_ORIGIN` to configure hosting. See the [usage and hosting guide](docs/user-guide.md) for sessions, recovery, permissions, private content and configuration.
 
 ## Stack and design
@@ -88,8 +90,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 
 ### Make self-hosting dependable
 
-- [ ] **Next:** add a multi-stage Docker image, Compose setup, persistent volume and non-root runtime.
-- [ ] Add consistent database/asset backup and restore, with tested recovery.
+- [ ] **Needs Docker engine + Compose/build plugins:** verify the added multi-stage image, persistent volume and non-root runtime with `npm run container:check`.
+- [ ] **Next:** add consistent database/asset backup and restore, with tested recovery.
 - [ ] Add CI for clean install, strict checks, tests and builds.
 - [ ] Document reverse proxy/HTTPS, upgrades, trusted-module installation and campaign export/import.
 - [ ] Playtest a complete campaign session with a real group and fix workflow friction.

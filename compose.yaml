@@ -1,0 +1,23 @@
+services:
+  tableloom:
+    build: .
+    image: "${TABLELOOM_IMAGE:-tableloom:local}"
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${TABLELOOM_BIND:-127.0.0.1}:${TABLELOOM_PORT:-3001}:3001"
+    environment:
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
+    volumes:
+      - tableloom-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=16777216,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+
+volumes:
+  tableloom-data:
