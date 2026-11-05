@@ -10,7 +10,7 @@ The goal is support for **any game system** through independently versioned code
 
 The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** saves module-provided character records with private/shared access. The content-pack backend supports pinned definitions, campaign homebrew overrides and owned instances, with module-provided catalog/copy controls and synthetic previews. GMs can select installed packs and edit/reset campaign homebrew with module-provided fields.
 
-**Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility, performance and deployment tooling still need work.
+**Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility, performance and campaign transfer still need work.
 
 ## Run locally
 
@@ -97,8 +97,9 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Verify the multi-stage Docker image, non-root runtime and persistent volume across container recreation in Linux CI.
 - [x] Add consistent database/asset backup and restore, with tested recovery into new directories.
 - [x] Add CI for clean install, strict checks, tests, builds, backup recovery and container persistence.
-- [ ] **Next:** document reverse proxy/HTTPS, upgrades, trusted-module installation and campaign export/import.
-- [ ] Playtest a complete campaign session with a real group and fix workflow friction.
+- [x] Document reverse proxy/HTTPS, upgrades, trusted-module installation and current transfer limits.
+- [ ] **Next:** implement portable campaign export/import with explicit privacy, ownership and package-pin validation.
+- [ ] **Needs a playtest group:** run a complete campaign session and fix workflow friction.
 - [ ] **After playtest feedback:** add note history/trash and richer document content.
 
 ## Documentation and contributing

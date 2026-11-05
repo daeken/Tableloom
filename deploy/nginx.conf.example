@@ -1,0 +1,37 @@
+# Include inside nginx's http {} context. Adapt host/certificate paths, then nginx -t.
+# Assumes nginx runs on the Docker/Node host and Tableloom is bound to loopback:3001.
+# Configure Tableloom PUBLIC_ORIGIN=https://table.example before using this endpoint.
+map $http_upgrade $tableloom_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 80;
+    server_name table.example;
+    return 308 https://table.example$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name table.example;
+    ssl_certificate /etc/letsencrypt/live/table.example/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/table.example/privkey.pem;
+
+    # Raw image bodies are capped by the app at 5 MiB; JSON has lower app limits.
+    client_max_body_size 6m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $tableloom_connection_upgrade;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+    }
+}

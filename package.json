@@ -21,6 +21,7 @@
     "smoke": "node --import tsx scripts/smoke.ts",
     "runtime:check": "npm run build && node --import tsx scripts/runtime-check.ts",
     "container:check": "node --import tsx scripts/container-check.ts",
+    "proxy:check": "node --import tsx scripts/proxy-config-check.ts",
     "backup": "node apps/server/dist/backup-cli.js backup",
     "restore": "node apps/server/dist/backup-cli.js restore",
     "backup:verify": "node apps/server/dist/backup-cli.js verify",

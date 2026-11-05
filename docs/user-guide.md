@@ -144,3 +144,60 @@ Only verify/recover archives you trust. Verification does not load modules, migr
 The commands use exclusive creation, private incomplete markers and flushed files/directories. Failed operations remove only their newly created files; if cleanup cannot finish, a marker remains and the server refuses that directory. Archives are also refused as live `DATA_DIR` values, preventing accidental writes to a backup. A process kill can leave an incomplete directory; use a different destination and inspect the incomplete one before cleaning it up. There is no overwrite/force mode, automatic retention, scheduling, encryption, compression or in-app download endpoint. The commands do not expose backups or recovery keys to campaign players.
 
 The compiled commands are also included in the Docker image as `node apps/server/dist/backup-cli.js backup|verify|restore`. Container recreation against the named data volume passed Linux CI. Backup/restore through separately mounted archive/recovery directories has not yet been exercised inside Docker; supply appropriately owned mounts and explicit paths when testing that workflow.
+
+
+## Reverse proxy and HTTPS
+
+Serve Tableloom at the **root of one HTTPS origin**, such as `https://table.example`. Subpaths such as `/vtt/` are unsupported: the browser uses root `/api` and asset paths, and `PUBLIC_ORIGIN` accepts only an HTTP(S) origin without credentials, query, fragment or path. Use a certificate trusted by your players' browsers and configure DNS/TLS in your existing hosting setup; Tableloom does not issue certificates or configure your domain.
+
+Keep Node or the Compose-published port on loopback when the proxy runs on the same host. Persist the public origin in your normal service configuration. For Compose, an ignored `.env` beside `compose.yaml` can contain:
+
+```dotenv
+PUBLIC_ORIGIN=https://table.example
+TABLELOOM_BIND=127.0.0.1
+TABLELOOM_PORT=3001
+```
+
+Use that same configuration on later recreations. The default Compose file does not map `TABLELOOM_HOST_KEY` automatically; the generated private key still lives in the data volume unless you explicitly configure an override.
+
+A proxy must forward the complete site to the Node backend, preserving paths, query strings, cookies and the browser's **Origin**. Forward the external Host header and WebSocket Upgrade/Connection headers, using HTTP/1.1 upstream. Do **not** replace Origin with a fixed trusted value or strip it: mutations and `/api/live` require the real matching origin. `PUBLIC_ORIGIN=https://table.example` makes the HTTP backend accept that external HTTPS origin and issue Secure cookies. Forwarded scheme/host/client-IP headers are not trusted by the app and do not replace this setting.
+
+Allow the app's 5-MiB raw image uploads at the proxy (the example allows 6 MiB); application JSON/upload limits still apply. Preserve API `Cache-Control: no-store` and disable proxy caching of authenticated responses. Forward the WebSocket protocol query unchanged. The app sends 30-second pings, so allow idle time beyond that rather than using a short proxy timeout. Sign-in rate limiting currently sees the proxy's socket IP, so users behind one proxy share its built-in sign-in attempt bucket; adding forwarded IP headers does not change this behavior.
+
+If you already use nginx, [deploy/nginx.conf.example](../deploy/nginx.conf.example) is an optional include for its `http {}` context. Replace every example hostname and certificate path, then validate with `nginx -t` in your installation before loading it. It assumes a proxy on the Docker/Node host with backend `127.0.0.1:3001`. For a proxy in another container, use a deliberately configured private container network/upstream instead; that container's loopback is not the Tableloom container. No proxy service or certificate is installed by this repository. The forwarding directives follow nginx's [WebSocket](https://nginx.org/en/docs/http/websocket.html) and [proxy-header](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header) documentation.
+
+After configuring your endpoint, check `/api/health`, host sign-in, a second player's invitation, a live scene change/dice result and an image upload through the public URL. An unauthenticated `/api/table` returning 401 is expected. For 403 on sign-in or live connection, compare the browser's exact origin with `PUBLIC_ORIGIN` and check that Origin reaches Node unchanged. For HTTP success but no live updates, check WebSocket upgrade forwarding. For upload 413, check both proxy and app size limits. Do not work around these errors by weakening origin or cookie protections.
+
+The application-side HTTP/WebSocket contract is integration-tested with an HTTP upstream simulating TLS offload. CI additionally runs `nginx -t` against the checked-in example using a temporary self-signed fixture and no network/listener. That verifies syntax, not your DNS, certificate chain, renewal, firewall or real proxy deployment.
+
+## Upgrades and rollback
+
+Upgrades can change database formats, live protocol and module schemas. Keep the reviewed application revision/image, matching trusted modules/content-pack versions, service settings and host-key configuration. Record those references **beside**, not inside, a backup archive: the archive's strict three-file format rejects extras. Save browser drafts before maintenance; drafts are not backups.
+
+1. Build and check the candidate in a separate checkout/image so the running server's assets and dependencies stay intact. Use `npm ci` and `npm run check`, or build your candidate image. Preserve local module changes; do not force-reset a working checkout.
+2. Take and verify a [backup](#backup-and-recovery), restore it into a new rehearsal directory, and test the candidate there. For a native local rehearsal, use an explicit separate origin/port, for example `HOST=127.0.0.1 PORT=3002 PUBLIC_ORIGIN=http://127.0.0.1:3002 DATA_DIR=/srv/tableloom-rehearsal npm start`. Open that exact loopback URL. Check access, scenes, private/shared records, maps, rolls and module fields; do not expose the rehearsal as the live table.
+3. For cutover, stop the live server and take a **final verified backup** before running the candidate on live data. This captures edits made after the rehearsal snapshot. Select the intended final data directory/volume explicitly, then start the candidate with the normal public origin and key configuration. Native hosting can use a freshly restored final snapshot to retain the original directory untouched; backup/restore through separate Docker mounts still needs operator validation.
+4. Check the real endpoint and have players reload old tabs. Old protocol versions fail the live handshake rather than guessing compatibility. Keep the previous build and final pre-upgrade archive until recovery has been checked.
+
+Compose upgrades must keep the existing project identity and data volume. Record the current project with `docker compose ls`; use the same `-p <existing-project>` if moving to another checkout directory. Changing the project/volume name can create a fresh empty instance. `docker compose up --build -d` recreates the service against its existing volume; ordinary `down` keeps that volume. Do not remove it as an upgrade step.
+
+Known storage upgrades run through the existing validated migrations; unknown/future formats and missing package pins fail startup. There is no general downgrade or automatic campaign package-pin migration. If the candidate fails, stop it and investigate without editing version markers or package pins to bypass checks. Rollback uses the previous compatible build and a **new directory restored from its pre-upgrade archive**, not an older binary pointed at a database already migrated by newer code. Data after that archive's snapshot is absent; restore does not merge it back. Avoid serving two independently writable copies as the same live table.
+
+## Installing trusted modules and content packs
+
+Modules are **reviewed source packages compiled into your server and browser**, not uploaded rule files or sandboxed plugins. There is no marketplace installer, arbitrary import-path loader or visual rules builder. Server code has the host process's access; install only code you intend to trust with all campaign data. The three game packages remain provisional scaffolds until source rulebooks are supplied.
+
+For an agent/developer adding a module:
+
+- Add its separately versioned workspace package under `systems/`, using the SDK's shared, `/client` and `/server` entry points. Keep schemas/pure shared data separate from browser controls and server migrations/actions/content providers. Private pack definitions and authoritative code stay server-only; the browser imports shared schemas/pins and typed UI adapters.
+- Register its manifest in `apps/server/src/modules.ts`, server definition in `apps/server/src/document-modules.ts`, and manifest/browser adapter in `apps/web/src/App.tsx` (`modules` and `panels`). Add explicit workspace dependencies to the server/web package manifests. Update the Dockerfile and `scripts/runtime-check.ts` manifest lists when adding a workspace, refresh the lockfile and run the full checks.
+- Use the isolated module preview/tests before trying a copy of real data. Browser boundary scans cover the synthetic preview markers, not an audit of arbitrary module code; inspect actual browser imports/assets too. Published content and rule cases need the supplied edition/page references.
+- Register versioned content packs on the trusted server system with `defineContentPack`/optional owned-instance factories, and matching `defineBrowserContent` controls in the client adapter. Rebuild/restart before selecting a loaded compatible pack in **Your game → Manage content packs**. A checkbox selects existing code; it does not download or install a package.
+
+Campaigns pin exact system and pack versions. The server installs **one version per system ID**, so swapping a used system version is not a side-by-side upgrade or an automatic migration. Document schema migration does not silently change that package pin. Keep the old build/data for campaigns that still require it until an explicit compatible transition exists. Multiple versions of a content pack may be registered, but a campaign selects one per ID; active overrides/owned copies protect their current pins. Changing content under an existing pack version fails fingerprint validation. Bump versions for data/schema/behavior changes and rehearse on a restored copy; never relabel old stored data to force it to load.
+
+## Campaign transfer: current limits
+
+**Portable per-campaign export/import is not implemented.** There is no campaign archive endpoint, UI or CLI, and campaign metadata/record JSON responses are not transfer files. Copying one campaign row omits related scenes, assets, histories, documents, ownership/access and package references.
+
+The supported transfer today is a **whole-instance** backup, verify and restore into a new data directory on a matching installation. It brings every campaign and the saved identity/access state and recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. Treat that archive as private administrator data, not a player/character share file. The README keeps selective portable transfer as unfinished work; the backup command must not be presented as that feature.
