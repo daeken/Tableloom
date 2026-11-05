@@ -1,3 +1,5 @@
+import { ObjectPickerDialog } from "./ObjectPickerDialog.js";
+import { keyboardMoveCommand } from "./keyboard-objects.js";
 import { PointerSession, withinTap } from "./pointer-session.js";
 import { ParticipantCursors } from "./ParticipantCursors.js";
 import type {
@@ -159,6 +161,7 @@ export function Tabletop({
   }
   const gestureScope = `${tool}:${grid.version}`;
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [objectPickerOpen, setObjectPickerOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectionActionsOpen, setSelectionActionsOpen] = useState(false);
   useEffect(() => setSelectionActionsOpen(false), [tool, selected.join("|")]);
@@ -1073,7 +1076,7 @@ export function Tabletop({
         enabled: enabled && ready,
         gesture: session.current.active,
         pending,
-        canDeleteSelection:
+        editableSelection:
           tool === "select" &&
           selectedObjects.length > 0 &&
           selectedObjects.length === selected.length &&
@@ -1095,6 +1098,22 @@ export function Tabletop({
         const command = sceneHistoryCommand(
           history,
           action.direction,
+          enabled && ready,
+          pending,
+        );
+        if (command) send(command);
+        break;
+      }
+      case "objects":
+        setObjectPickerOpen(true);
+        break;
+      case "nudge": {
+        const command = keyboardMoveCommand(
+          selectedObjects,
+          state,
+          member,
+          action.direction,
+          (snap ? grid.settings.spacing : 1) * (action.large ? 10 : 1),
           enabled && ready,
           pending,
         );
@@ -1284,8 +1303,29 @@ export function Tabletop({
         Share my cursor
       </label>
       <span className="keyboard-focus-hint" id="tabletop-keyboard-hint">
-        Click or Tab to focus the battlefield. Press ? for keyboard shortcuts.
+        Click or Tab to focus the battlefield. Press L to select objects; in
+        Select mode use arrow keys to move them. Press ? for keyboard shortcuts.
       </span>
+      {objectPickerOpen && (
+        <ObjectPickerDialog
+          state={state}
+          member={member}
+          selected={selected}
+          enabled={enabled}
+          pending={pending}
+          close={() => {
+            setObjectPickerOpen(false);
+            focusBattlefield();
+          }}
+          choose={(ids) => {
+            setSelected(ids);
+            setSelectionError("");
+            setTool("select");
+            setObjectPickerOpen(false);
+            focusBattlefield();
+          }}
+        />
+      )}
       {shortcutsOpen && (
         <KeyboardShortcutsDialog
           close={() => setShortcutsOpen(false)}
@@ -1309,6 +1349,16 @@ export function Tabletop({
           className="drawing-order-open"
           onPointerDown={(e) => e.stopPropagation()}
         >
+          <button
+            disabled={!enabled || pending}
+            aria-keyshortcuts="L"
+            onClick={() => {
+              setGesture(null);
+              setObjectPickerOpen(true);
+            }}
+          >
+            Select objects…
+          </button>
           {(["drawing", "token"] as const).map((kind) => (
             <button
               key={kind}
@@ -1358,6 +1408,16 @@ export function Tabletop({
               }}
             >
               Keyboard shortcuts
+            </button>
+            <button
+              disabled={!enabled || pending}
+              aria-keyshortcuts="L"
+              onClick={() => {
+                setGesture(null);
+                setObjectPickerOpen(true);
+              }}
+            >
+              Select objects…
             </button>
             <span role="status">
               {selectionError ||

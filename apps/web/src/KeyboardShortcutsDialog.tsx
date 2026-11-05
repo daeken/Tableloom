@@ -49,6 +49,21 @@ export function KeyboardShortcutsDialog({
             </td>
           </tr>
           <tr>
+            <th scope="row">Select objects</th>
+            <td>
+              <kbd>L</kbd> Open searchable object choices; use Tab and Space,
+              then Use selection.
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Move selection</th>
+            <td>
+              Arrow keys move one canvas unit; Shift moves ten. With Snap
+              enabled, each step is one grid spacing (ten with Shift),
+              preserving existing offsets. Select mode only; no held-key repeat.
+            </td>
+          </tr>
+          <tr>
             <th scope="row">Snap</th>
             <td>
               <kbd>S</kbd> Toggle local snapping

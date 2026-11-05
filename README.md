@@ -59,7 +59,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Guard pointer gestures with one owner, second-contact cancellation and release-only tap actions.
 - [x] Fit dense selection actions and resize/review dialogs on narrow screens.
 - [ ] **Needs device access:** verify touch/pen behavior on real hardware.
-- [ ] **Next:** complete keyboard object workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
+- [x] Add keyboard object selection and bounded arrow-key movement with existing undo/redo.
+- [ ] **Next:** finish keyboard creation/geometry workflows and screen-reader, contrast, zoom and mobile-keyboard checks.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
 ### Make game modules playable

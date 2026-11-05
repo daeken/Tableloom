@@ -30,7 +30,7 @@ const scope = (changes: Partial<ShortcutScope> = {}): ShortcutScope => ({
   enabled: true,
   gesture: false,
   pending: false,
-  canDeleteSelection: true,
+  editableSelection: true,
   undoAvailable: true,
   redoAvailable: true,
   ...changes,
@@ -68,7 +68,7 @@ test("battlefield tool/local keys map explicitly, preserve browser modifiers, an
   assert.deepEqual(tabletopShortcut(key("?", { shiftKey: true }), scope()), {
     type: "help",
   });
-  for (const value of ["a", "ArrowLeft", "Enter", "Tab", "F5"])
+  for (const value of ["a", "Enter", "Tab", "F5"])
     assert.equal(tabletopShortcut(key(value), scope()), null);
   for (const value of ["+", "-", "0", "r", "t", "w", "y"])
     assert.equal(
@@ -111,7 +111,7 @@ test("gestures, pending edits, unavailable history and invalid selections block 
       type: "blocked",
     });
     assert.deepEqual(
-      tabletopShortcut(key(value), scope({ canDeleteSelection: false })),
+      tabletopShortcut(key(value), scope({ editableSelection: false })),
       { type: "blocked" },
     );
     assert.deepEqual(tabletopShortcut(key(value), scope()), {
@@ -199,4 +199,49 @@ test("keyboard history uses the same available current cursor/version as buttons
       null,
     );
   }
+});
+
+test("object lookup and arrow nudges require battlefield scope, preserve native keys, and block repeats/gestures/pending/offline", () => {
+  assert.deepEqual(tabletopShortcut(key("l"), scope()), { type: "objects" });
+  for (const [value, direction] of [
+    ["ArrowLeft", "left"],
+    ["ArrowRight", "right"],
+    ["ArrowUp", "up"],
+    ["ArrowDown", "down"],
+  ]) {
+    for (const large of [false, true])
+      assert.deepEqual(
+        tabletopShortcut(key(value!, { shiftKey: large }), scope()),
+        { type: "nudge", direction, large },
+      );
+    assert.equal(
+      tabletopShortcut(key(value!), scope({ editableSelection: false })),
+      null,
+    );
+    for (const changes of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { altKey: true },
+      { isComposing: true },
+    ])
+      assert.equal(tabletopShortcut(key(value!, changes), scope()), null);
+    for (const changes of [{ focused: false }, { dialogOpen: true }])
+      assert.equal(tabletopShortcut(key(value!), scope(changes)), null);
+    for (const changes of [
+      { pending: true },
+      { enabled: false },
+      { gesture: true },
+    ])
+      assert.deepEqual(tabletopShortcut(key(value!), scope(changes)), {
+        type: "blocked",
+      });
+    assert.deepEqual(tabletopShortcut(key(value!, { repeat: true }), scope()), {
+      type: "blocked",
+    });
+  }
+  for (const changes of [{ gesture: true }, { enabled: false }])
+    assert.deepEqual(tabletopShortcut(key("l"), scope(changes)), {
+      type: "blocked",
+    });
+  assert.equal(tabletopShortcut(key("l"), scope({ focused: false })), null);
 });

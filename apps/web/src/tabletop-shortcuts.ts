@@ -1,3 +1,4 @@
+import type { NudgeDirection } from "./keyboard-objects.js";
 import type { Tool } from "./Tabletop.js";
 export const toolKeys: Record<Tool, string> = {
   select: "V",
@@ -26,11 +27,12 @@ export interface ShortcutScope {
   enabled: boolean;
   gesture: boolean;
   pending: boolean;
-  canDeleteSelection: boolean;
+  editableSelection: boolean;
   undoAvailable: boolean;
   redoAvailable: boolean;
 }
 export type TabletopShortcut =
+  | { type: "nudge"; direction: NudgeDirection; large: boolean }
   | { type: "tool"; tool: Tool }
   | { type: "history"; direction: "undo" | "redo" }
   | {
@@ -43,6 +45,7 @@ export type TabletopShortcut =
         | "zoom-in"
         | "zoom-out"
         | "zoom-reset"
+        | "objects"
         | "blocked";
     };
 /** Return null to preserve native editing/browser keys outside the focused battlefield. */
@@ -66,6 +69,17 @@ export function tabletopShortcut(
       action = { type: "history", direction: key.shiftKey ? "redo" : "undo" };
     else if (key.ctrlKey && !key.shiftKey && key.key.toLowerCase() === "y")
       action = { type: "history", direction: "redo" };
+  } else if (
+    ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key.key)
+  ) {
+    if (!scope.editableSelection) return null;
+    const direction = {
+      ArrowLeft: "left",
+      ArrowRight: "right",
+      ArrowUp: "up",
+      ArrowDown: "down",
+    }[key.key] as NudgeDirection;
+    action = { type: "nudge", direction, large: key.shiftKey };
   } else if (key.key === "?") action = { type: "help" };
   else if (!key.shiftKey) {
     const tool = (Object.keys(toolKeys) as Tool[]).find(
@@ -74,6 +88,7 @@ export function tabletopShortcut(
     if (tool) action = { type: "tool", tool };
     else if (key.key === "Escape")
       action = { type: scope.gesture ? "cancel" : "clear" };
+    else if (key.key.toLowerCase() === "l") action = { type: "objects" };
     else if (key.key.toLowerCase() === "s") action = { type: "snap" };
     else if (key.key === "Delete" || key.key === "Backspace")
       action = { type: "delete-review" };
@@ -92,8 +107,8 @@ export function tabletopShortcut(
     return action;
   if (!scope.enabled) return { type: "blocked" };
   if (
-    action.type === "delete-review" &&
-    (scope.pending || !scope.canDeleteSelection)
+    (action.type === "delete-review" || action.type === "nudge") &&
+    (scope.pending || !scope.editableSelection)
   )
     return { type: "blocked" };
   if (

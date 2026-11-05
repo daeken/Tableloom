@@ -2011,6 +2011,7 @@ p {
 }
 .drawing-order-open {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   position: absolute;
   top: 16px;
@@ -2020,6 +2021,56 @@ p {
   font-size: 11px;
   background: #fffef8;
   border: 1px solid #d4dacb;
+}
+.object-picker-dialog {
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}
+.object-picker-dialog > p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.object-picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 12px 0;
+}
+.object-picker-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px;
+  border-bottom: 1px solid #d9dcce;
+  cursor: pointer;
+}
+.object-picker-list input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+.object-picker-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.object-picker-list small {
+  display: block;
+  font-size: 10px;
+  color: #687565;
+}
+.object-picker-pages {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}
+.object-picker-pages button {
+  padding: 8px;
+  border: 1px solid #d9dcce;
 }
 .drawing-order-list {
   max-height: 280px;

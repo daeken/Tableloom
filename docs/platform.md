@@ -276,6 +276,8 @@ Click the battlefield or Tab to its **Shared battlefield** region to focus it; a
 | `V`, `H`, `M` | Select, Pan, Measure |
 | `P`, `R`, `T` | Freehand pen, Room, Text label |
 | `O`, `E` | Token placement, Eraser |
+| `L` | Open searchable editable-object choices |
+| Arrow keys / Shift + arrow | Move selected objects by one / ten canvas units; with Snap on, one / ten grid spacings |
 | `S` | Toggle local Snap to grid |
 | `+` or `=`, `-`, `0` | Zoom in, zoom out, reset camera |
 | `Ctrl/⌘ Z` | Undo the current available scene-history edge |
@@ -288,7 +290,13 @@ Click the battlefield or Tab to its **Shared battlefield** region to focus it; a
 
 Delete/Backspace never immediately removes objects: the existing frozen review opens with **Cancel** focused and requires explicit confirmation. Undo/redo share command construction with the existing buttons and send only the displayed available history ID/version through the normal context/acknowledgement/permission contracts. Pending scene edits, unavailable cursors, invalid/lost selections and disconnects block applicable persistent actions. During a pointer gesture only Escape acts; release/cancel before using other shortcuts. Repeated keydown events are consumed without repeating an action. IME composition/229, Alt/AltGraph, already-handled events and unsupported modifier combinations are left to their owners. Browser Ctrl/⌘ zoom, reload, tabs and other unbound combinations are untouched.
 
-Future refinements include arrow-key movement/resizing, numeric ruler endpoints, remapping, sticky/temporary Pan, select-all and broader keyboard/touch/screen-reader work. Existing server-side history/conflict rules remain authoritative. No network or persistence formats change.
+Future refinements include keyboard creation/coordinate entry, numeric ruler endpoints, remapping, sticky/temporary Pan, select-all and broader keyboard/touch/screen-reader work. Existing server-side history/conflict rules remain authoritative. No network or persistence formats change.
+
+## Keyboard object selection and movement
+
+Focus **Shared battlefield**, press **L** or choose **Select objects…**, then search by name, text or ID. Only current-scene objects you can edit appear, with at most 50 rows per page and 100 selected objects. Choices persist across filtering/pages; missing or no-longer-editable choices block confirmation instead of silently shrinking the set. Tab/Space selects checkboxes, **Use selection** applies the local set and switches to Select, and Cancel/Escape returns battlefield focus without applying a draft.
+
+With the battlefield focused in Select mode, arrows move the complete selection by **one canvas unit**, or **ten** with Shift. With Snap on, these become one/ten current grid spacings, preserving existing offsets rather than realigning an off-grid group. Movement clamps rigidly at world bounds and uses the existing version-checked `objects.move` command, permissions and durable undo/redo. Each accepted keypress is one edit. Held repeats, pending edits, active pointer gestures and disconnected views do not issue moves. Fields/dialogs/native browser modifiers retain their own keys; arrows with no editable Select-mode selection retain native behavior. Keyboard creation and the broader accessibility audit remain in the README task list.
 
 ## Pointer ownership and cancellation
 
