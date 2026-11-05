@@ -76,6 +76,12 @@ export const contentPackSchema = z
         message: "Content pack exceeds 8 MiB.",
       });
   });
+export interface ContentInstanceFactory {
+  schemaVersion: number;
+  dataSchema: z.ZodType<unknown>;
+  /** Server-only executor. The authoring helper validates the typed definition input. */
+  create(data: unknown): unknown;
+}
 export interface ContentPackDefinition<T> {
   id: string;
   version: string;
@@ -83,6 +89,7 @@ export interface ContentPackDefinition<T> {
   systemVersion: string;
   dataSchema: z.ZodType<T>;
   definitions: (ContentDefinition<T> & { visibility: "public" | "gm" })[];
+  instances?: ContentInstanceFactory;
 }
 /** Source data stays in trusted server entry points, never browser imports. */
 export function defineContentPack<T>(
@@ -92,6 +99,7 @@ export function defineContentPack<T>(
     version: string;
     dataSchema: z.ZodType<T>;
     definitions: (ContentDefinition<T> & { visibility?: "public" | "gm" })[];
+    instances?: ContentInstanceFactory;
   },
 ): ContentPackDefinition<T> {
   const pack = contentPackSchema.parse({
@@ -108,5 +116,10 @@ export function defineContentPack<T>(
   });
   // Recheck size after schema normalization/transforms.
   contentPackSchema.parse({ ...pack, definitions });
-  return { ...pack, definitions, dataSchema: input.dataSchema };
+  return {
+    ...pack,
+    definitions,
+    dataSchema: input.dataSchema,
+    ...(input.instances ? { instances: input.instances } : {}),
+  };
 }

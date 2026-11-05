@@ -2,7 +2,29 @@ import { z } from "zod";
 import { defineSystem, documentActionIdSchema } from "./index.js";
 import type { SystemDefinition } from "./index.js";
 import { documentData } from "./document-data.js";
-import type { ContentPackDefinition } from "./content.js";
+import type {
+  ContentPackDefinition,
+  ContentInstanceFactory,
+} from "./content.js";
+
+/** Keeps instance creation typed inside the module and out of shared/browser entry points. */
+export function defineContentInstances<Definition, Instance>(
+  definitionSchema: z.ZodType<Definition>,
+  options: {
+    schemaVersion: number;
+    dataSchema: z.ZodType<Instance>;
+    create: (definition: Definition) => Instance;
+  },
+): ContentInstanceFactory {
+  z.number().int().positive().parse(options.schemaVersion);
+  return {
+    schemaVersion: options.schemaVersion,
+    dataSchema: options.dataSchema,
+    create(raw) {
+      return options.create(definitionSchema.parse(documentData(raw)));
+    },
+  };
+}
 
 export interface DocumentActionActor {
   readonly id: string;

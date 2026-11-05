@@ -35,6 +35,8 @@ import { registerDocumentRoutes } from "./documents-http.js";
 import { documentSystems as defaultDocumentSystems } from "./document-modules.js";
 import { ContentCatalog, withContentMetadata } from "./content-catalog.js";
 import { CampaignContentStore } from "./content.js";
+import { ContentInstanceStore } from "./instances.js";
+import { registerInstanceRoutes } from "./instances-http.js";
 import { registerContentRoutes } from "./content-http.js";
 import type { ContentPackDefinition } from "@tableloom/module-sdk/content";
 import { AccessStore } from "./access.js";
@@ -129,6 +131,7 @@ export async function createApp(options: {
   let access: AccessStore;
   let documents: DocumentStore;
   let content: CampaignContentStore;
+  let instances: ContentInstanceStore;
   let history: RollHistoryStore;
   let bindings: CommandBindings;
   let sceneHistory: SceneHistoryStore;
@@ -142,6 +145,12 @@ export async function createApp(options: {
     store.load();
     documents = new DocumentStore(database, store, systems);
     content = new CampaignContentStore(database, store, contentCatalog);
+    instances = new ContentInstanceStore(
+      database,
+      store,
+      contentCatalog,
+      content,
+    );
     history = new RollHistoryStore(database, store);
     bindings = new CommandBindings(database);
     sceneHistory = new SceneHistoryStore(database, store);
@@ -306,6 +315,7 @@ export async function createApp(options: {
   registerChatRoutes(app, access, chat);
   registerDocumentRoutes(app, access, documents);
   registerContentRoutes(app, access, content);
+  registerInstanceRoutes(app, access, instances);
   await registerAssetRoutes(app, access, assets);
   registerSceneMapRoutes(app, access, sceneMaps, assets, refreshCampaign);
   registerSceneGridRoutes(app, access, sceneGrids, refreshCampaign);

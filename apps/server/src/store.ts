@@ -793,6 +793,28 @@ export class TableStore {
     campaignId: string,
     settings: Pick<CampaignSettings, "system" | "contentPacks">,
   ) {
+    if (this.hasTable("content_instances")) {
+      const rows = this.db
+        .prepare(
+          "SELECT DISTINCT system_id,system_version,pack_id,pack_version FROM content_instances WHERE campaign_id=?",
+        )
+        .all(campaignId);
+      if (
+        rows.some(
+          (row) =>
+            row.system_id !== settings.system.id ||
+            row.system_version !== settings.system.version ||
+            !settings.contentPacks.some(
+              (pin) =>
+                pin.id === row.pack_id && pin.version === row.pack_version,
+            ),
+        )
+      )
+        throw new StoreError(
+          "Remove owned content instances before removing their pack or changing the system pin. Instance migration is not available yet.",
+          409,
+        );
+    }
     if (!this.hasTable("content_overrides")) return;
     const active = this.db
       .prepare(

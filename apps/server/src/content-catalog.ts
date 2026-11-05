@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import type { z } from "zod";
+import { z } from "zod";
 import { contentPackSchema } from "@tableloom/module-sdk/content";
 import type {
   ContentPackDefinition,
   ContentReference,
+  ContentInstanceFactory,
 } from "@tableloom/module-sdk/content";
 import { contentKey } from "@tableloom/core/content";
 import type { InstalledCatalog } from "./store.js";
@@ -51,6 +52,7 @@ export class ContentCatalog {
     pack: ReturnType<typeof contentPackSchema.parse>;
     dataSchema: ContentPackDefinition<unknown>["dataSchema"];
     digest: string;
+    instances?: ContentInstanceFactory;
   }[];
   private byPack = new Map<string, ContentCatalog["packs"][number]>();
   private byDefinition = new Map<
@@ -64,7 +66,7 @@ export class ContentCatalog {
       throw new Error("Install at most 100 content pack versions.");
     const seen = new Set<string>();
     this.packs = providers.map((provider) => {
-      const { dataSchema, ...raw } = provider;
+      const { dataSchema, instances, ...raw } = provider;
       const pack = contentPackSchema.parse(structuredClone(raw)),
         key = `${pack.id}@${pack.version}`;
       if (seen.has(key))
@@ -73,9 +75,30 @@ export class ContentCatalog {
       for (const definition of pack.definitions)
         validatedContentData(dataSchema, definition.data);
       pack.definitions.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      const digest = createHash("sha256").update(canonical(pack)).digest("hex");
+      if (instances) {
+        z.number().int().positive().parse(instances.schemaVersion);
+        if (
+          typeof instances.create !== "function" ||
+          typeof instances.dataSchema?.parse !== "function"
+        )
+          throw new Error("Invalid content instance factory registration.");
+      }
+      const digest = createHash("sha256")
+        .update(
+          canonical(
+            instances
+              ? { ...pack, instanceSchemaVersion: instances.schemaVersion }
+              : pack,
+          ),
+        )
+        .digest("hex");
       freezeJson(pack);
-      return Object.freeze({ pack, dataSchema, digest });
+      return Object.freeze({
+        pack,
+        dataSchema,
+        digest,
+        ...(instances ? { instances: Object.freeze({ ...instances }) } : {}),
+      });
     });
     for (const entry of this.packs) {
       this.byPack.set(`${entry.pack.id}@${entry.pack.version}`, entry);
