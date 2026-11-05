@@ -1,0 +1,81 @@
+{
+  "measuredOn": "2026-11-05",
+  "renderer": "retained scene objects",
+  "baseline": "2026-11-05.json",
+  "canvas": {
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "devicePixelRatio": 2,
+      "rendererResolution": 2
+    },
+    "warmup": 5,
+    "results": [
+      {
+        "scenario": "small",
+        "drawings": 20,
+        "tokens": 10,
+        "points": 474,
+        "viewport": {
+          "width": 1200,
+          "height": 600
+        },
+        "rebuild": {
+          "samples": 30,
+          "p50Ms": 0.4000000059604645,
+          "p95Ms": 0.699999988079071,
+          "maxMs": 0.7000000178813934
+        },
+        "updateToTwoFrames": {
+          "samples": 30,
+          "p50Ms": 33.20000001788139,
+          "p95Ms": 35.29999998211861,
+          "maxMs": 35.400000005960464
+        }
+      },
+      {
+        "scenario": "medium",
+        "drawings": 300,
+        "tokens": 60,
+        "points": 6800,
+        "viewport": {
+          "width": 1200,
+          "height": 600
+        },
+        "rebuild": {
+          "samples": 30,
+          "p50Ms": 0.699999988079071,
+          "p95Ms": 0.9000000059604645,
+          "maxMs": 1
+        },
+        "updateToTwoFrames": {
+          "samples": 30,
+          "p50Ms": 33.5,
+          "p95Ms": 36.20000001788139,
+          "maxMs": 37
+        }
+      },
+      {
+        "scenario": "large",
+        "drawings": 2000,
+        "tokens": 200,
+        "points": 45354,
+        "viewport": {
+          "width": 1200,
+          "height": 600
+        },
+        "rebuild": {
+          "samples": 30,
+          "p50Ms": 1.5999999940395355,
+          "p95Ms": 1.7999999821186066,
+          "maxMs": 1.800000011920929
+        },
+        "updateToTwoFrames": {
+          "samples": 30,
+          "p50Ms": 33.400000005960464,
+          "p95Ms": 35.19999998807907,
+          "maxMs": 35.30000001192093
+        }
+      }
+    ]
+  }
+}

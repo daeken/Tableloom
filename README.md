@@ -71,11 +71,11 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Fix long campaign-name reflow and check narrow/short viewport layouts.
 - [x] Split initial frontend JavaScript and add reproducible bundle-size reporting.
 - [x] Add repeatable snapshot/canvas benchmarks and record a synthetic-scene baseline.
-- [ ] **Next:** reuse unchanged scene graphics/text instead of rebuilding everything on each snapshot; compare against the recorded large-scene baseline.
+- [x] Reuse unchanged scene graphics/text across snapshots and compare against the large-scene baseline.
 
 ### Make game modules playable
 
-- [ ] Connect persisted module documents to custom character sheets and validated module actions.
+- [ ] **Next:** connect persisted module documents to custom character sheets and validated module actions.
 - [ ] Add a module preview/test harness with worked rules examples.
 - [ ] Load content packs with stable definitions, owned item instances and campaign homebrew overrides.
 - [ ] **Needs PDFs:** inventory and implement Cyberpunk RED with edition/page references.

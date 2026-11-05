@@ -28,7 +28,6 @@ import type { Measurement, MeasurementDrag } from "./measurement.js";
 import type { SceneGrid } from "@tableloom/core/scene-grid";
 import { SceneOrderDialog } from "./SceneOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
-import { shapeStyleOf, drawingLayerOf, tokenLayerOf } from "@tableloom/core";
 import type { BackgroundView } from "@tableloom/core/scene-map";
 import { EditTextDialog } from "./EditTextDialog.js";
 import { TextPlacementDialog } from "./TextPlacementDialog.js";
@@ -49,7 +48,8 @@ import type { SnapAnchor } from "./grid.js";
 import { DeleteSelectionDialog } from "./DeleteSelectionDialog.js";
 import { captureDeletionReview } from "./scene-selection.js";
 import type { DeletionReviewItem } from "./scene-selection.js";
-import { Application, Container, Graphics, Text } from "pixi.js";
+import { Application, Container, Graphics } from "pixi.js";
+import { SceneGraphics } from "./scene-graphics.js";
 import type {
   CommandInput,
   DrawingInput,
@@ -153,6 +153,7 @@ export function Tabletop({
   const host = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const worldRef = useRef<Container | null>(null);
+  const sceneGraphicsRef = useRef<SceneGraphics | null>(null);
   const [ready, setReady] = useState(false);
   const [mapFailure, setMapFailure] = useState<string | null>(null);
   const [failure, setFailure] = useState("");
@@ -231,13 +232,14 @@ export function Tabletop({
     null,
   );
   useEffect(() => {
-    setSelected((previous) =>
-      previous.filter((id) =>
+    setSelected((previous) => {
+      const next = previous.filter((id) =>
         [...state.tokens, ...state.drawings].some(
           (object) => object.id === id && canEditObject(member, object),
         ),
-      ),
-    );
+      );
+      return next.length === previous.length ? previous : next;
+    });
   }, [state, member]);
 
   useEffect(() => {
@@ -266,6 +268,7 @@ export function Tabletop({
         app.stage.addChild(world);
         appRef.current = app;
         worldRef.current = world;
+        sceneGraphicsRef.current = new SceneGraphics(world);
         setReady(true);
       })
       .catch(() =>
@@ -276,6 +279,8 @@ export function Tabletop({
     return () => {
       stopped = true;
       if (appRef.current === app) {
+        sceneGraphicsRef.current?.destroy();
+        sceneGraphicsRef.current = null;
         app.destroy(true, { children: true });
         appRef.current = null;
         worldRef.current = null;
@@ -372,13 +377,14 @@ export function Tabletop({
 
   useEffect(() => {
     const world = worldRef.current;
-    if (!ready || !world) return;
+    const scene = sceneGraphicsRef.current;
+    if (!ready || !world || !scene) return;
     const rebuildStarted = onSceneRebuild ? performance.now() : 0;
-    for (const child of world.removeChildren())
+    for (const child of scene.selection.removeChildren())
       child.destroy({ children: true });
     world.position.set(view.x, view.y);
     world.scale.set(view.scale);
-    const gridLines = new Graphics(),
+    const gridLines = scene.grid.clear(),
       area = visibleGrid(view, viewport.width, viewport.height, grid.settings);
     if (area) {
       for (const x of area.vertical)
@@ -387,19 +393,7 @@ export function Tabletop({
         gridLines.moveTo(area.left, y).lineTo(area.right, y);
     }
     gridLines.stroke({ color: "#c7c6b9", width: 1, alpha: 0.5 });
-    world.addChild(gridLines);
-    const drawingLayer = new Container({ label: "Drawings" }),
-      tokenLayer = new Container({ label: "Tokens" }),
-      upperDrawingLayer = new Container({ label: "Drawings above tokens" }),
-      upperTokenLayer = new Container({ label: "Tokens above drawings" }),
-      selectionLayer = new Container({ label: "Selection" });
-    world.addChild(
-      drawingLayer,
-      tokenLayer,
-      upperDrawingLayer,
-      upperTokenLayer,
-      selectionLayer,
-    );
+    const selectionLayer = scene.selection;
     const previews = new Map<string, SceneObject>();
     if (gesture?.kind === "move") {
       const delta = dragDelta(
@@ -431,59 +425,16 @@ export function Tabletop({
       gesture?.kind === "draw"
         ? [...state.drawings, gesture.drawing]
         : state.drawings;
-    for (const original of drawings) {
+    const visibleDrawings = drawings.map((original) => {
       const preview = previews.get(original.id);
-      const drawing = preview && "points" in preview ? preview : original;
-      const contentLayer =
-        drawingLayerOf(drawing) === "above-tokens"
-          ? upperDrawingLayer
-          : drawingLayer;
-      const first = drawing.points[0];
-      const last = drawing.points.at(-1);
-      if (!first || !last) continue;
-      const graphic = new Graphics();
-      if (drawing.kind === "text") {
-        const box = objectBounds(drawing),
-          label = new Text({
-            text: drawing.text!,
-            style: {
-              fontFamily: drawing.textStyle!.font,
-              fontWeight: drawing.textStyle!.weight,
-              align: drawing.textStyle!.align,
-              fontSize: 24,
-              lineHeight: 32,
-              fill: drawing.color,
-            },
-          });
-        label.position.set(box.left, box.top);
-        label.scale.set(
-          (box.right - box.left) / Math.max(1, label.width),
-          (box.bottom - box.top) / Math.max(1, label.height),
-        );
-        contentLayer.addChild(label);
-      } else if (drawing.kind === "rectangle") {
-        graphic.roundRect(
-          Math.min(first.x, last.x),
-          Math.min(first.y, last.y),
-          Math.max(1, Math.abs(last.x - first.x)),
-          Math.max(1, Math.abs(last.y - first.y)),
-          3,
-        );
-        const fill = shapeStyleOf(drawing).fill;
-        if (fill) graphic.fill({ color: fill.color, alpha: fill.opacity });
-      } else {
-        graphic.moveTo(first.x, first.y);
-        for (const point of drawing.points.slice(1))
-          graphic.lineTo(point.x, point.y);
-      }
-      if (drawing.kind !== "text")
-        graphic.stroke({
-          color: drawing.color,
-          width: shapeStyleOf(drawing).lineWidth,
-          cap: "round",
-          join: "round",
-        });
-      contentLayer.addChild(graphic);
+      return preview && "points" in preview ? preview : original;
+    });
+    const visibleTokens = state.tokens.map((original) => {
+      const preview = previews.get(original.id);
+      return preview && "position" in preview ? preview : original;
+    });
+    scene.sync(visibleDrawings, visibleTokens);
+    for (const drawing of visibleDrawings) {
       if (selected.includes(drawing.id)) {
         const box = objectBounds(drawing),
           padding = 6 / view.scale;
@@ -498,50 +449,14 @@ export function Tabletop({
         selectionLayer.addChild(outline);
       }
     }
-    for (const original of state.tokens) {
-      const preview = previews.get(original.id);
-      const token = preview && "position" in preview ? preview : original;
-      const contentLayer =
-        tokenLayerOf(token) === "above-drawings" ? upperTokenLayer : tokenLayer;
+    for (const token of visibleTokens) {
       const { x, y } = token.position;
-      const graphic = new Graphics();
-      graphic
-        .circle(x + 2, y + 4, token.radius)
-        .fill({ color: "#242e29", alpha: 0.18 });
       if (selected.includes(token.id))
         selectionLayer.addChild(
           new Graphics()
             .circle(x, y, token.radius + 6)
             .stroke({ color: "#405f4d", width: 2 }),
         );
-      graphic
-        .circle(x, y, token.radius)
-        .fill(token.color)
-        .stroke({ color: "#fffaf0", width: 3 });
-      contentLayer.addChild(graphic);
-      const initial = new Text({
-        text: token.name.slice(0, 1).toUpperCase(),
-        style: {
-          fontFamily: "Georgia",
-          fontSize: Math.max(10, Math.min(64, token.radius * 0.96)),
-          fill: "#ffffff",
-        },
-      });
-      initial.anchor.set(0.5);
-      initial.position.set(x, y - 1);
-      contentLayer.addChild(initial);
-      const label = new Text({
-        text: token.name,
-        style: {
-          fontFamily: "Arial",
-          fontSize: 12,
-          fontWeight: "600",
-          fill: "#323f35",
-        },
-      });
-      label.anchor.set(0.5, 0);
-      label.position.set(x, y + token.radius + 8);
-      contentLayer.addChild(label);
     }
     const resizable =
       tool === "select" && selected.length === 1 && !pending && enabled
