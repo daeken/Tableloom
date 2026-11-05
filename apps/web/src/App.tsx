@@ -1,3 +1,4 @@
+import { toolKeys } from "./tabletop-shortcuts.js";
 import { GridSettingsDialog } from "./GridSettingsDialog.js";
 import { SceneMapDialog } from "./SceneMapDialog.js";
 import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
@@ -434,6 +435,8 @@ export function App() {
                 campaignId={member?.tableId ?? ""}
                 sceneId={table.context?.sceneId ?? ""}
                 tool={tool}
+                setTool={setTool}
+                history={table.history}
                 color={color}
                 tokenName={tokenName}
                 enabled={connected}
@@ -447,7 +450,8 @@ export function App() {
               {tools.map(({ id, label, Icon }) => (
                 <button
                   key={id}
-                  title={label}
+                  title={`${label} (${toolKeys[id]})`}
+                  aria-keyshortcuts={toolKeys[id]}
                   aria-label={label}
                   aria-pressed={tool === id}
                   className={tool === id ? "active" : ""}

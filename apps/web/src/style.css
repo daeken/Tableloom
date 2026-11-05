@@ -2100,3 +2100,60 @@ p {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.tabletop:focus-visible {
+  outline: 2px solid #405f4d;
+  outline-offset: -3px;
+}
+.shortcuts-open {
+  position: absolute;
+  top: 46px;
+  left: 138px;
+  background: #faf9f5;
+  color: #405f4d;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.keyboard-focus-hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.keyboard-shortcuts-dialog {
+  width: min(540px, 90vw);
+  padding: 28px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.keyboard-shortcuts-dialog table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.keyboard-shortcuts-dialog th,
+.keyboard-shortcuts-dialog td {
+  padding: 8px 4px;
+  border-bottom: 1px solid #d9dcce;
+  text-align: left;
+  vertical-align: top;
+}
+.keyboard-shortcuts-dialog th {
+  width: 24%;
+}
+.keyboard-shortcuts-dialog kbd {
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.keyboard-shortcuts-dialog .shortcuts-close {
+  display: block;
+  margin: 14px 0 0 auto;
+  padding: 9px 14px;
+  border-radius: 5px;
+  background: #405f4d;
+  color: #fffaf0;
+}

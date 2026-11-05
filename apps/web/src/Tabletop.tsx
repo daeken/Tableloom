@@ -1,3 +1,8 @@
+import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog.js";
+import { tabletopShortcut } from "./tabletop-shortcuts.js";
+import { sceneHistoryCommand } from "./scene-history-command.js";
+import type { SceneHistory } from "@tableloom/core/scene-history";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { MeasurementControls } from "./MeasurementControls.js";
 import {
   beginMeasurement,
@@ -90,6 +95,8 @@ interface Props {
   sceneId: string;
   member: Member | null;
   tool: Tool;
+  setTool: (tool: Tool) => void;
+  history: SceneHistory | null;
   color: string;
   tokenName: string;
   enabled: boolean;
@@ -106,6 +113,8 @@ export function Tabletop({
   sceneId,
   member,
   tool,
+  setTool,
+  history,
   color,
   tokenName,
   enabled,
@@ -122,6 +131,7 @@ export function Tabletop({
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [measurement, setMeasurement] = useState<Measurement | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [snap, setSnap] = useState(false);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -483,8 +493,9 @@ export function Tabletop({
       y: clamp((p.y - view.y) / view.scale),
     };
   }
-  function down(event: ReactPointerEvent) {
+  function down(event: ReactPointerEvent<HTMLDivElement>) {
     if (!ready || !enabled || event.button !== 0 || textAnchor) return;
+    event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = point(event);
     if (tool === "measure") {
@@ -778,11 +789,101 @@ export function Tabletop({
     : selectedObjects.every((object) => "points" in object)
       ? "drawing"
       : "object";
+  function focusBattlefield() {
+    requestAnimationFrame(() => host.current?.focus({ preventScroll: true }));
+  }
+  function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const action = tabletopShortcut(
+      {
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+        repeat: event.repeat,
+        isComposing: event.nativeEvent.isComposing,
+        keyCode: event.keyCode,
+        defaultPrevented: event.defaultPrevented,
+      },
+      {
+        focused:
+          event.target === event.currentTarget &&
+          event.currentTarget.ownerDocument.activeElement ===
+            event.currentTarget,
+        dialogOpen: Boolean(
+          event.currentTarget.ownerDocument.querySelector(
+            "dialog[open], [role='dialog'][aria-modal='true']",
+          ),
+        ),
+        enabled: enabled && ready,
+        gesture: gesture !== null,
+        pending,
+        canDeleteSelection:
+          tool === "select" &&
+          selectedObjects.length > 0 &&
+          selectedObjects.length === selected.length &&
+          selectedObjects.every((object) => canEditObject(member, object)),
+        undoAvailable: history?.undo?.available === true,
+        redoAvailable: history?.redo?.available === true,
+      },
+    );
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    switch (action.type) {
+      case "blocked":
+        break;
+      case "tool":
+        setTool(action.tool);
+        break;
+      case "history": {
+        const command = sceneHistoryCommand(
+          history,
+          action.direction,
+          enabled && ready,
+          pending,
+        );
+        if (command) send(command);
+        break;
+      }
+      case "snap":
+        setSnap((value) => !value);
+        break;
+      case "cancel":
+        setGesture(null);
+        break;
+      case "clear":
+        setGesture(null);
+        setMeasurement(null);
+        setSelected([]);
+        setSelectionError("");
+        break;
+      case "help":
+        setShortcutsOpen(true);
+        break;
+      case "delete-review":
+        setDeleteReview(captureDeletionReview(selectedObjects));
+        break;
+      case "zoom-in":
+        zoom(1.25);
+        break;
+      case "zoom-out":
+        zoom(0.8);
+        break;
+      case "zoom-reset":
+        setView({ x: 0, y: 0, scale: 1 });
+        break;
+    }
+  }
   return (
     <div
       ref={host}
       className={`tabletop tool-${tool}`}
       aria-label="Shared battlefield"
+      aria-describedby="tabletop-keyboard-hint"
+      role="region"
+      tabIndex={0}
+      onKeyDown={keyboard}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
@@ -802,7 +903,10 @@ export function Tabletop({
           anchor={textAnchor}
           color={color}
           enabled={enabled && !pending}
-          close={() => setTextAnchor(null)}
+          close={() => {
+            setTextAnchor(null);
+            focusBattlefield();
+          }}
           save={(drawing) => send({ type: "drawing.add", drawing })}
         />
       )}
@@ -872,10 +976,34 @@ export function Tabletop({
         <input
           type="checkbox"
           checked={snap}
+          aria-keyshortcuts="S"
           onChange={(event) => setSnap(event.target.checked)}
         />{" "}
         Snap to grid
       </label>
+      {((selected.length === 0 && !selectionError) || tool === "measure") && (
+        <button
+          className="shortcuts-open"
+          aria-keyshortcuts="Shift+/"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={() => {
+            setGesture(null);
+            setShortcutsOpen(true);
+          }}
+        >
+          Keyboard shortcuts
+        </button>
+      )}
+      <span className="keyboard-focus-hint" id="tabletop-keyboard-hint">
+        Click or Tab to focus the battlefield. Press ? for keyboard shortcuts.
+      </span>
+      {shortcutsOpen && (
+        <KeyboardShortcutsDialog
+          close={() => setShortcutsOpen(false)}
+          restoreFocus={focusBattlefield}
+        />
+      )}
       {tool === "measure" && (
         <MeasurementControls
           measurement={ruler}
@@ -916,6 +1044,14 @@ export function Tabletop({
           className="selection-controls"
           onPointerDown={(event) => event.stopPropagation()}
         >
+          <button
+            onClick={() => {
+              setGesture(null);
+              setShortcutsOpen(true);
+            }}
+          >
+            Keyboard shortcuts
+          </button>
           <span role="status">
             {selectionError ||
               `${selected.length} ${selectionType}${selected.length === 1 ? "" : "s"} selected`}
@@ -1015,7 +1151,10 @@ export function Tabletop({
           enabled={enabled}
           pending={pending}
           send={send}
-          close={() => setResizeSelection(null)}
+          close={() => {
+            setResizeSelection(null);
+            focusBattlefield();
+          }}
         />
       )}
       {sceneOrder && (
@@ -1026,7 +1165,10 @@ export function Tabletop({
           member={member}
           enabled={enabled}
           pending={pending}
-          close={() => setSceneOrder(null)}
+          close={() => {
+            setSceneOrder(null);
+            focusBattlefield();
+          }}
           send={(command) => {
             const queued = send(command);
             if (
@@ -1053,7 +1195,10 @@ export function Tabletop({
           enabled={enabled}
           pending={pending}
           send={send}
-          close={() => setEditShape(null)}
+          close={() => {
+            setEditShape(null);
+            focusBattlefield();
+          }}
         />
       )}
       {editText && (
@@ -1064,7 +1209,10 @@ export function Tabletop({
           enabled={enabled}
           pending={pending}
           send={send}
-          close={() => setEditText(null)}
+          close={() => {
+            setEditText(null);
+            focusBattlefield();
+          }}
         />
       )}
       {resizeToken && (
@@ -1075,7 +1223,10 @@ export function Tabletop({
           enabled={enabled}
           pending={pending}
           send={send}
-          close={() => setResizeToken(null)}
+          close={() => {
+            setResizeToken(null);
+            focusBattlefield();
+          }}
         />
       )}
       {deleteReview && (
@@ -1086,7 +1237,10 @@ export function Tabletop({
           enabled={enabled}
           pending={pending}
           send={send}
-          close={() => setDeleteReview(null)}
+          close={() => {
+            setDeleteReview(null);
+            focusBattlefield();
+          }}
         />
       )}
       <div
