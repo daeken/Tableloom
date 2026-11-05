@@ -65,7 +65,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add keyboard width/height entry for individual rooms, freehand drawings and text labels.
 - [x] Add keyboard ruler endpoint entry with local distance previews and optional snapping.
 - [x] Improve built-in text, field boundaries and keyboard-focus contrast.
-- [ ] **Next:** check screen-reader navigation, zoom and mobile-keyboard behavior.
+- [x] Expose named panel tabs with keyboard navigation and preserved editor drafts.
+- [ ] **Next:** finish screen-reader navigation, zoom and mobile-keyboard checks.
 - [ ] Measure canvas redraw/snapshot performance and split the initial frontend bundle.
 
 ### Make game modules playable

@@ -340,6 +340,14 @@ At phone widths, a selected object shows a collapsed **Actions…** disclosure b
 
 Synthetic browser checks cover **320, 390, 701, 768 and 1,280 CSS-pixel widths**, keyboard dialog/skip navigation and retained local drafts. This is an initial layout/navigation increment, not a complete accessibility or touchscreen certification. Real-device touch/pen verification, pinch behavior, fully keyboard-driven geometry editing, assistive-technology audits, physical mobile keyboards and real-device touch testing remain queued. The battlefield still reserves its surface for drawing/dragging, so scroll the page using surrounding content or use the skip links to reach panels.
 
+## Panel tab navigation
+
+The Dice & rolls, Your game, Notes and Chat controls expose a named **Table panels** tablist. Each tab has an explicit selected state and a stable relationship to its named tabpanel. Inactive panels are hidden from rendering, keyboard navigation and the accessibility tree. One tab is a Tab stop; Tab enters the active named panel, and Shift-Tab returns to its selected tab.
+
+Left/Right wrap focus through the four choices; Home/End focus the first/last. Activation is manual: Enter, Space or a click selects the focused panel. Arrowing through choices does not open a panel or start Chat polling. Leaving the list without activating restores its Tab stop to the selected tab. Vertical arrows, native Tab/Shift-Tab, modified shortcuts and composing input keep their browser/editor behavior. This follows the [W3C manual-activation tabs pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/).
+
+Notes and Chat remain mounted under their hidden panels, preserving existing unsaved drafts and view/identity reset behavior. Dice drafts remain in app state; game content follows the current system as before. Panel changes issue no persistent command. Panels retain the flexible/scrolling rail layout; focused tab buttons and panels use inset rings so the rail does not clip focus. Native accessibility-tree inspection and keyboard/reflow checks cover this structure; real screen-reader operation and the wider navigation audit remain unverified.
+
 ## Interface contrast and keyboard focus
 
 Built-in muted text uses `--text-muted` (`#58634f`) across navigation, hints, counters, metadata, form labels and placeholders. Error text keeps a darker warm hue. Existing form boundaries use `--control-border` (`#77826e`); decorative borders and authored scene colors are separate. A conservative computed-color sample across the empty table, Dice/validation, Notes, Chat, module panel, creation/ruler dialogs and compact campaign controls measured all sampled text above 4.5:1, with a minimum of **5.12:1** against the pale canvas. Muted text is **5.86:1** against the base page; the field boundary is **3.26:1** against the pale canvas.

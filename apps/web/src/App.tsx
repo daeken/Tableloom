@@ -1,3 +1,5 @@
+import { PanelTabs } from "./PanelTabs.js";
+import type { PanelTab } from "./panel-tabs.js";
 import {
   CompactControlsDialog,
   useCompactLayout,
@@ -16,9 +18,7 @@ import {
   ChevronDown,
   Circle,
   Dice5,
-  MessageCircle,
   Eraser,
-  FileText,
   Hand,
   Layers2,
   MousePointer2,
@@ -141,7 +141,7 @@ export function App() {
   const setRollVisibility = (value: RollVisibility) =>
     setDraft({ ...currentDraft, visibility: value });
   const [rollError, setRollError] = useState("");
-  const [tab, setTab] = useState<"rolls" | "game" | "notes" | "chat">("rolls");
+  const [tab, setTab] = useState<PanelTab>("rolls");
   const [copied, setCopied] = useState(false);
   const table = useTable(viewerKey, refresh, member?.tableId ?? null);
   const { status, error, clearError, send } = table;
@@ -606,176 +606,188 @@ export function App() {
           tabIndex={-1}
           aria-label="Dice, sheets, notes and chat"
         >
-          <div className="panel-tabs">
-            <button
-              className={tab === "rolls" ? "active" : ""}
-              onClick={() => setTab("rolls")}
-            >
-              <Dice5 size={16} /> Dice &amp; rolls
-            </button>
-            <button
-              className={tab === "game" ? "active" : ""}
-              onClick={() => setTab("game")}
-            >
-              <Layers2 size={16} /> Your game
-            </button>
-            <button
-              className={tab === "notes" ? "active" : ""}
-              onClick={() => setTab("notes")}
-            >
-              <FileText size={16} /> Notes
-            </button>
-            <button
-              className={tab === "chat" ? "active" : ""}
-              onClick={() => setTab("chat")}
-            >
-              <MessageCircle size={16} /> Chat
-            </button>
-          </div>
-          {member && (
-            <ChatPanel
-              key={`chat:${viewerKey}`}
-              member={member}
-              active={tab === "chat"}
-              enabled={connected}
-            />
-          )}
-          {member && state && (
-            <NotesPanel
-              key={viewerKey}
-              active={tab === "notes"}
-              notes={state.notes}
-              deliveries={table.deliveries}
-              member={member}
-              enabled={connected}
-              send={send}
-            />
-          )}
-          {tab === "game" ? (
-            <Panel />
-          ) : tab === "rolls" ? (
-            <>
-              <section className="dice-section">
-                <span className="eyebrow">LET FATE HAVE A SAY</span>
-                <h2>A roll of the dice.</h2>
-                <p className="muted">A little uncertainty goes a long way.</p>
-                <form onSubmit={roll}>
-                  <label htmlFor="roll-visibility">Who sees this roll?</label>
-                  <select
-                    id="roll-visibility"
-                    className="roll-visibility"
-                    value={rollVisibility}
-                    onChange={(event) =>
-                      setRollVisibility(
-                        event.target.value === "gm" ? "gm" : "public",
-                      )
-                    }
-                  >
-                    <option value="public">Everyone at the table</option>
-                    <option value="gm">You and the GM</option>
-                  </select>
-                  <label htmlFor="dice-expression">Dice expression</label>
-                  <div className="roll-input">
-                    <Dice5 size={19} />
-                    <input
-                      id="dice-expression"
-                      value={expression}
-                      maxLength={32}
-                      onChange={(e) => setExpression(e.target.value)}
-                      placeholder="2d6 + 3"
-                      autoComplete="off"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!connected}
-                      aria-label="Roll dice"
+          <PanelTabs active={tab} change={setTab} />
+          <section
+            id="table-panel-chat"
+            className="side-panel"
+            role="tabpanel"
+            aria-labelledby="table-tab-chat"
+            tabIndex={0}
+            hidden={tab !== "chat"}
+          >
+            {member && (
+              <ChatPanel
+                key={`chat:${viewerKey}`}
+                member={member}
+                active={tab === "chat"}
+                enabled={connected}
+              />
+            )}
+          </section>
+          <section
+            id="table-panel-notes"
+            className="side-panel"
+            role="tabpanel"
+            aria-labelledby="table-tab-notes"
+            tabIndex={0}
+            hidden={tab !== "notes"}
+          >
+            {member && state && (
+              <NotesPanel
+                key={viewerKey}
+                active={tab === "notes"}
+                notes={state.notes}
+                deliveries={table.deliveries}
+                member={member}
+                enabled={connected}
+                send={send}
+              />
+            )}
+          </section>
+          <section
+            id="table-panel-game"
+            className="side-panel"
+            role="tabpanel"
+            aria-labelledby="table-tab-game"
+            tabIndex={0}
+            hidden={tab !== "game"}
+          >
+            {tab === "game" && <Panel />}
+          </section>
+          <section
+            id="table-panel-rolls"
+            className="side-panel"
+            role="tabpanel"
+            aria-labelledby="table-tab-rolls"
+            tabIndex={0}
+            hidden={tab !== "rolls"}
+          >
+            {tab === "rolls" && (
+              <>
+                <section className="dice-section">
+                  <span className="eyebrow">LET FATE HAVE A SAY</span>
+                  <h2>A roll of the dice.</h2>
+                  <p className="muted">A little uncertainty goes a long way.</p>
+                  <form onSubmit={roll}>
+                    <label htmlFor="roll-visibility">Who sees this roll?</label>
+                    <select
+                      id="roll-visibility"
+                      className="roll-visibility"
+                      value={rollVisibility}
+                      onChange={(event) =>
+                        setRollVisibility(
+                          event.target.value === "gm" ? "gm" : "public",
+                        )
+                      }
                     >
-                      <ArrowUpRight size={19} />
-                    </button>
-                  </div>
-                </form>
-                <div className="quick-dice">
-                  {["d4", "d6", "d8", "d10", "d12", "d20"].map((die) => (
-                    <button
-                      key={die}
-                      disabled={!connected}
-                      onClick={() => {
-                        setExpression(die);
-                        roll(undefined, die);
-                      }}
-                    >
-                      {die}
-                    </button>
-                  ))}
-                </div>
-                {rollError && (
-                  <p className="inline-error" role="alert">
-                    {rollError}
-                  </p>
-                )}
-              </section>
-              <section className="roll-history">
-                <button
-                  className="history-manage"
-                  disabled={!member || !connected}
-                  onClick={() => setHistoryOpen(true)}
-                >
-                  Manage roll history
-                </button>
-                <div className="section-row">
-                  <span className="eyebrow">THE EVENING'S ROLLS</span>
-                  <span className="count">{state?.rolls.length ?? 0}</span>
-                </div>
-                {!state?.rolls.length ? (
-                  <div className="empty-rolls">
-                    <Dice5 size={31} strokeWidth={1} />
-                    <p>
-                      The dice are quiet.
-                      <br />
-                      <span>Give them something to say.</span>
-                    </p>
-                  </div>
-                ) : (
-                  <ol aria-live="polite">
-                    {[...(state?.rolls ?? [])].reverse().map((result) => (
-                      <li key={result.id}>
-                        <div className="roll-meta">
-                          <strong>{result.actor}</strong>
-                          <time dateTime={result.at}>
-                            {new Date(result.at).toLocaleTimeString([], {
-                              hour: "numeric",
-                              minute: "2-digit",
-                            })}
-                          </time>
-                        </div>
-                        <div className="roll-result">
-                          <div>
-                            <span className="roll-expression">
-                              {result.expression}
-                            </span>
-                            {result.visibility === "gm" && (
-                              <span className="roll-private">Private roll</span>
-                            )}
-                            <p className="roll-breakdown">
-                              [{result.dice.join(", ")}]
-                              {result.modifier
-                                ? ` ${result.modifier > 0 ? "+" : "−"} ${Math.abs(result.modifier)}`
-                                : ""}
-                            </p>
-                          </div>
-                          <span className="roll-total">{result.total}</span>
-                        </div>
-                      </li>
+                      <option value="public">Everyone at the table</option>
+                      <option value="gm">You and the GM</option>
+                    </select>
+                    <label htmlFor="dice-expression">Dice expression</label>
+                    <div className="roll-input">
+                      <Dice5 size={19} />
+                      <input
+                        id="dice-expression"
+                        value={expression}
+                        maxLength={32}
+                        onChange={(e) => setExpression(e.target.value)}
+                        placeholder="2d6 + 3"
+                        autoComplete="off"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!connected}
+                        aria-label="Roll dice"
+                      >
+                        <ArrowUpRight size={19} />
+                      </button>
+                    </div>
+                  </form>
+                  <div className="quick-dice">
+                    {["d4", "d6", "d8", "d10", "d12", "d20"].map((die) => (
+                      <button
+                        key={die}
+                        disabled={!connected}
+                        onClick={() => {
+                          setExpression(die);
+                          roll(undefined, die);
+                        }}
+                      >
+                        {die}
+                      </button>
                     ))}
-                  </ol>
-                )}
-              </section>
-              <div className="dice-footnote">
-                <span className="live-dot" /> Rolled together. Saved to your
-                table.
-              </div>
-            </>
-          ) : null}
+                  </div>
+                  {rollError && (
+                    <p className="inline-error" role="alert">
+                      {rollError}
+                    </p>
+                  )}
+                </section>
+                <section className="roll-history">
+                  <button
+                    className="history-manage"
+                    disabled={!member || !connected}
+                    onClick={() => setHistoryOpen(true)}
+                  >
+                    Manage roll history
+                  </button>
+                  <div className="section-row">
+                    <span className="eyebrow">THE EVENING'S ROLLS</span>
+                    <span className="count">{state?.rolls.length ?? 0}</span>
+                  </div>
+                  {!state?.rolls.length ? (
+                    <div className="empty-rolls">
+                      <Dice5 size={31} strokeWidth={1} />
+                      <p>
+                        The dice are quiet.
+                        <br />
+                        <span>Give them something to say.</span>
+                      </p>
+                    </div>
+                  ) : (
+                    <ol aria-live="polite">
+                      {[...(state?.rolls ?? [])].reverse().map((result) => (
+                        <li key={result.id}>
+                          <div className="roll-meta">
+                            <strong>{result.actor}</strong>
+                            <time dateTime={result.at}>
+                              {new Date(result.at).toLocaleTimeString([], {
+                                hour: "numeric",
+                                minute: "2-digit",
+                              })}
+                            </time>
+                          </div>
+                          <div className="roll-result">
+                            <div>
+                              <span className="roll-expression">
+                                {result.expression}
+                              </span>
+                              {result.visibility === "gm" && (
+                                <span className="roll-private">
+                                  Private roll
+                                </span>
+                              )}
+                              <p className="roll-breakdown">
+                                [{result.dice.join(", ")}]
+                                {result.modifier
+                                  ? ` ${result.modifier > 0 ? "+" : "−"} ${Math.abs(result.modifier)}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <span className="roll-total">{result.total}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+                <div className="dice-footnote">
+                  <span className="live-dot" /> Rolled together. Saved to your
+                  table.
+                </div>
+              </>
+            )}
+          </section>
         </aside>
       </div>
       {error && (
