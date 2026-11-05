@@ -777,3 +777,80 @@ test("import people directory is host-only, strictly paginated and read-only; me
     await f.close();
   }
 });
+
+test("file-result status is host-only, byte-exact, read-only and available during image work; saved results survive changed retry choices", async () => {
+  const c = controlled(),
+    f = await setup(c.inspector),
+    root = "/api/campaign-imports/status";
+  try {
+    assert.equal((await f.post(root, f.file)).statusCode, 401);
+    assert.equal(
+      (
+        await f.post(root, f.file, f.cookie, {
+          origin: "https://elsewhere.example",
+        })
+      ).statusCode,
+      403,
+    );
+    const other = await f.player();
+    f.db
+      .prepare("UPDATE access_memberships SET role='gm' WHERE user_id=?")
+      .run(other.id);
+    assert.equal((await f.post(root, f.file, other.cookie)).statusCode, 403);
+    assert.equal(
+      (await f.post(root + "?unexpected=1", f.file, f.cookie)).statusCode,
+      400,
+    );
+    assert.equal(
+      (await f.post(root, Buffer.from([0xff]), f.cookie)).statusCode,
+      400,
+    );
+    const before = contents(f.db),
+      status = await f.post(root, f.file, f.cookie),
+      ticket = status.json();
+    assert.equal(status.statusCode, 200);
+    assert.equal(status.headers["cache-control"], "no-store");
+    assert.equal(status.headers["set-cookie"], undefined);
+    assert.equal(ticket.hostId, f.hostId);
+    assert.equal(ticket.result, null);
+    assert.equal(
+      ticket.archiveSha256,
+      createHash("sha256").update(f.file).digest("hex"),
+    );
+    assert.equal(contents(f.db), before);
+    const changed = await f.post(root, f.file + "\n", f.cookie);
+    assert.notEqual(changed.json().requestId, ticket.requestId);
+    const inspecting = f
+      .post("/api/campaign-imports/preflight", f.file, f.cookie)
+      .then((r) => r);
+    await until(() => c.inspector.busy);
+    const during = await f.post(root, f.file, f.cookie);
+    assert.equal(during.statusCode, 200);
+    assert.equal(during.json().requestId, ticket.requestId);
+    assert.equal(contents(f.db), before);
+    c.finish();
+    assert.equal((await inspecting).statusCode, 200);
+    const importing = f
+      .post(
+        "/api/campaign-imports/import",
+        importPayload(f.file, f.plan, ticket.requestId),
+        f.cookie,
+      )
+      .then((r) => r);
+    await until(() => c.inspector.busy);
+    c.finish();
+    const imported = await importing;
+    assert.equal(imported.statusCode, 201);
+    const committed = contents(f.db),
+      saved = await f.post(root, f.file, f.cookie);
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.json().result.campaign.id, imported.json().campaign.id);
+    assert.equal(saved.json().result.replayed, true);
+    assert.equal(contents(f.db), committed);
+    const revoked = await f.post("/api/access/logout", "{}", f.cookie);
+    assert.equal(revoked.statusCode, 200);
+    assert.equal((await f.post(root, f.file, f.cookie)).statusCode, 401);
+  } finally {
+    await f.close();
+  }
+});

@@ -195,8 +195,9 @@ export function CampaignDialog({
         <section className="access-section">
           <h2>Review a campaign file</h2>
           <p>
-            Import reviews are available to the server host and make no saved
-            changes.
+            The server host can review files, confirm ownership and create a
+            separate campaign. Interrupted imports can be recovered with the
+            same file.
           </p>
           <button disabled={busy} onClick={() => setImportOpen(true)}>
             Review campaign import…
@@ -310,7 +311,24 @@ export function CampaignDialog({
       )}
       {importOpen && member.role === "gm" && (
         <Suspense fallback={<p role="status">Loading import review…</p>}>
-          <CampaignImportReviewDialog close={() => setImportOpen(false)} />
+          <CampaignImportReviewDialog
+            close={() => setImportOpen(false)}
+            openCampaign={async (id) => {
+              accept(
+                await accessRequest(
+                  `/api/campaigns/${id}/select`,
+                  accessStatusSchema,
+                  {},
+                ),
+              );
+              close();
+            }}
+            saved={() => {
+              void load().catch(() =>
+                setError("Refresh the campaign list to see the saved import."),
+              );
+            }}
+          />
         </Suspense>
       )}
       {exportOpen && member.role === "gm" && (

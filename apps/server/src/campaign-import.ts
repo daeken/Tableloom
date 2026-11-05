@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { z } from "zod";
-import { campaignMembershipSchema } from "@tableloom/core/campaigns";
+import {
+  transferImportReceiptSchema as resultSchema,
+  transferImportStatusSchema,
+} from "@tableloom/core/campaign-transfer";
 import type { ServerSystemDefinition } from "@tableloom/module-sdk/server";
-import { transaction } from "./database.js";
+import { transaction, destinationSnapshot } from "./database.js";
 import { StoreError, type TableStore, type InstalledCatalog } from "./store.js";
 import { AccessError, type AccessStore } from "./access.js";
 import type { ContentCatalog } from "./content-catalog.js";
@@ -23,25 +26,6 @@ import { prepareCampaignCandidate } from "./campaign-prepare.js";
 export const MAX_IMPORT_RECEIPTS = 1000;
 const MAX_RESULT_BYTES = 256 * 1024,
   hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const resultSchema = z
-  .object({
-    status: z.literal("imported"),
-    requestId: z.uuid(),
-    archiveSha256: hashSchema,
-    ownershipPlanSha256: hashSchema,
-    resourcePolicy: z.literal(FRESH_RESOURCE_POLICY),
-    importedAt: z.iso.datetime(),
-    campaign: campaignMembershipSchema,
-    summary: z
-      .object({
-        createdPeople: z.number().int().nonnegative(),
-        attributionRecords: z.number().int().nonnegative(),
-        memberships: z.number().int().positive(),
-        rows: z.number().int().nonnegative(),
-      })
-      .strict(),
-  })
-  .strict();
 const receiptSchema = z
   .object({
     request_id: z.uuid(),
@@ -89,6 +73,29 @@ const policies = {
   keyof CampaignTransfer["records"],
   "insert" | "discard" | "asset" | "sequence"
 >;
+
+/** Persistent browser protocol: do not change this domain/algorithm without a recovery migration. */
+export function browserImportRequestId(hostId: string, archiveSha256: string) {
+  z.uuid().parse(hostId);
+  hashSchema.parse(archiveSha256);
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify(["tableloom-browser-import-v1", hostId, archiveSha256]),
+    )
+    .digest("hex");
+  // RFC 9562 custom UUID (v8), with a domain-separated SHA-256 source.
+  const hex =
+    digest.slice(0, 12) +
+    "8" +
+    digest.slice(13, 16) +
+    (8 + (parseInt(digest[16]!, 16) & 3)).toString(16) +
+    digest.slice(17, 32);
+  return z
+    .uuid()
+    .parse(
+      `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`,
+    );
+}
 
 export class CampaignImportStore {
   constructor(
@@ -187,6 +194,52 @@ export class CampaignImportStore {
       fingerprint: fingerprint(fileHash, planHash),
     };
   }
+  private requireTarget(hostId: string, targetId: string) {
+    if (
+      !this.db
+        .prepare(
+          "SELECT 1 FROM campaign_records c JOIN access_campaigns a ON a.id=c.id WHERE c.id=?",
+        )
+        .get(targetId) ||
+      this.access.getMember(hostId, targetId)?.role !== "gm"
+    )
+      throw new StoreError(
+        "The previous import target is no longer available.",
+        409,
+      );
+  }
+  /** Stable per host/exact file, independent of ownership choices. Never reserve or mint a second copy. */
+  status(archiveSha256: string, token: string) {
+    hashSchema.parse(archiveSha256);
+    return destinationSnapshot(this.db, () => {
+      const host = this.access.requireServerHost(token),
+        requestId = browserImportRequestId(host.id, archiveSha256),
+        raw = this.db
+          .prepare("SELECT * FROM campaign_import_requests WHERE request_id=?")
+          .get(requestId);
+      let result: (ImportResult & { replayed: true }) | null = null;
+      if (raw) {
+        const receipt = this.receipt(raw);
+        if (
+          receipt.row.host_id !== host.id ||
+          receipt.result.archiveSha256 !== archiveSha256
+        )
+          throw new StoreError(
+            "That file request ID conflicts with an existing import.",
+            409,
+          );
+        this.requireTarget(host.id, receipt.row.target_id);
+        result = { ...receipt.result, replayed: true };
+      }
+      return transferImportStatusSchema.parse({
+        status: "import-request-status",
+        hostId: host.id,
+        requestId,
+        archiveSha256,
+        result,
+      });
+    });
+  }
   replay(input: CampaignImportRequest, token: string) {
     const host = this.access.requireServerHost(token),
       identity = this.identity(input),
@@ -200,18 +253,7 @@ export class CampaignImportStore {
         "That import request ID already belongs to another request.",
         409,
       );
-    if (
-      !this.db
-        .prepare(
-          "SELECT 1 FROM campaign_records c JOIN access_campaigns a ON a.id=c.id WHERE c.id=?",
-        )
-        .get(row.target_id) ||
-      this.access.getMember(host.id, row.target_id)?.role !== "gm"
-    )
-      throw new StoreError(
-        "The previous import target is no longer available.",
-        409,
-      );
+    this.requireTarget(host.id, row.target_id);
     return { ...result, replayed: true as const };
   }
   commit(input: CampaignImportRequest, token: string, checked: VerifiedSource) {

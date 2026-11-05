@@ -9,7 +9,11 @@ import {
   parseImportEnvelope,
   type OwnershipPlan,
 } from "./campaign-ownership-plan.js";
-import { CampaignImportStore, MAX_IMPORT_RECEIPTS } from "./campaign-import.js";
+import {
+  CampaignImportStore,
+  MAX_IMPORT_RECEIPTS,
+  browserImportRequestId,
+} from "./campaign-import.js";
 import { CampaignImageInspector } from "./campaign-image-inspection.js";
 import { installedModules } from "./modules.js";
 import { documentSystems } from "./document-modules.js";
@@ -603,6 +607,63 @@ test("unavailable historical pack claims cannot create global bindings; trusted 
         )
         .get(oldPack.id, oldPack.version)!.digest,
       digest,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("browser request identity is a stable upgrade contract scoped to the host and exact file", () => {
+  const host = "00000000-0000-4000-8000-000000000001",
+    hash = "a".repeat(64);
+  assert.equal(
+    browserImportRequestId(host, hash),
+    "d8e3b029-a845-87ba-8d22-7dffa3ca1009",
+  );
+  assert.notEqual(
+    browserImportRequestId(randomUUID(), hash),
+    browserImportRequestId(host, hash),
+  );
+  assert.notEqual(
+    browserImportRequestId(host, "b".repeat(64)),
+    browserImportRequestId(host, hash),
+  );
+  assert.throws(() => browserImportRequestId("invalid", hash));
+});
+
+test("read-only file status recovers one durable browser import independently of plan changes and never regrants lost access", async () => {
+  const f = await setup();
+  try {
+    const before = contents(f.destination.db),
+      status = f.store.status(f.checked.archiveSha256, f.token);
+    assert.equal(status.result, null);
+    assert.equal(contents(f.destination.db), before);
+    assert.deepEqual(f.store.status(f.checked.archiveSha256, f.token), status);
+    const input = { ...f.input, requestId: status.requestId };
+    const result = f.store.commit(input, f.token, f.checked);
+    assert.equal(result.replayed, false);
+    const saved = f.imports().status(f.checked.archiveSha256, f.token);
+    assert.equal(saved.result!.campaign.id, result.campaign.id);
+    assert.equal(saved.result!.replayed, true);
+    const committed = contents(f.destination.db);
+    assert.equal(f.store.commit(input, f.token, f.checked).replayed, true);
+    assert.equal(contents(f.destination.db), committed);
+    const changedPlan = structuredClone(input);
+    changedPlan.plan.acknowledgeMerges = !changedPlan.plan.acknowledgeMerges;
+    changedPlan.expectedPlanSha256 = (await import("node:crypto"))
+      .createHash("sha256")
+      .update(JSON.stringify(changedPlan.plan))
+      .digest("hex");
+    conflict(() => f.store.commit(changedPlan, f.token, f.checked));
+    assert.equal(contents(f.destination.db), committed);
+    f.destination.db
+      .prepare("DELETE FROM access_memberships WHERE user_id=? AND table_id=?")
+      .run(f.destination.gm.member.id, result.campaign.id);
+    const removed = contents(f.destination.db);
+    conflict(() => f.store.status(f.checked.archiveSha256, f.token));
+    assert.equal(contents(f.destination.db), removed);
+    assert.throws(() =>
+      f.store.status(f.checked.archiveSha256, f.destination.player.token),
     );
   } finally {
     await f.close();

@@ -10,7 +10,7 @@ The goal is support for **any game system** through independently versioned code
 
 The platform already supports authenticated campaigns, invitations and returning players; GM/player permissions; multiple scenes; drawings, tokens, text, maps, layers and undo/redo; server-side dice with private rolls; notes, chat, named presence and optional shared cursors. Compact controls and keyboard shortcuts are available. **Your game** saves module-provided character records with private/shared access. The content-pack backend supports pinned definitions, campaign homebrew overrides and owned instances, with module-provided catalog/copy controls and synthetic previews. GMs can select installed packs and edit/reset campaign homebrew with module-provided fields.
 
-**Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility and performance still need work. Browser export and host-only import review are ready; confirmed import/retry controls are unfinished.
+**Early development:** game modules are scaffolds. Playable character sheets, published rules, items and powers are not implemented yet. Rulebook work is waiting for source PDFs. Touch/accessibility and performance still need work. Browser campaign transfer includes private-content and ownership review, atomic creation and recovery of interrupted imports.
 
 ## Run locally
 
@@ -98,7 +98,7 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add consistent database/asset backup and restore, with tested recovery into new directories.
 - [x] Add CI for clean install, strict checks, tests, builds, backup recovery and container persistence.
 - [x] Document reverse proxy/HTTPS, upgrades, trusted-module installation and current transfer limits.
-- [ ] **Next:** finish portable campaign export/import with explicit privacy, ownership and package-pin validation. Browser export, host-only file/ownership/mapped-data review and retry-safe atomic import APIs are ready; confirmed creation and retry controls remain.
+- [x] Add portable campaign export/import with explicit privacy, ownership and package-pin validation, confirmed browser creation and recovery of interrupted imports. One browser import per host/exact file; intentional extra copies remain available through the API.
 - [ ] **Needs a playtest group:** run a complete campaign session and fix workflow friction.
 - [ ] **After playtest feedback:** add note history/trash and richer document content.
 

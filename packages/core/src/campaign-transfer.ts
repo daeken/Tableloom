@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { memberSchema } from "./access.js";
-import { campaignSchema, versionPinSchema } from "./campaigns.js";
+import {
+  campaignMembershipSchema,
+  campaignSchema,
+  versionPinSchema,
+} from "./campaigns.js";
 
 export const MAX_TRANSFER_FILE_BYTES = 32 * 1024 * 1024;
 export const FRESH_RESOURCE_POLICY =
@@ -189,3 +193,42 @@ export type TransferOwnershipReview = z.infer<
 >;
 export type TransferCandidate = z.infer<typeof transferCandidateSchema>;
 export type ImportPeoplePage = z.infer<typeof importPeoplePageSchema>;
+
+export const transferImportReceiptSchema = z
+  .object({
+    status: z.literal("imported"),
+    requestId: z.uuid(),
+    archiveSha256: hash,
+    ownershipPlanSha256: hash,
+    resourcePolicy: z.literal(FRESH_RESOURCE_POLICY),
+    importedAt: z.iso.datetime(),
+    campaign: campaignMembershipSchema.refine(
+      (campaign) => campaign.role === "gm",
+    ),
+    summary: z
+      .object({
+        createdPeople: count,
+        attributionRecords: count,
+        memberships: count.positive(),
+        rows: count,
+      })
+      .strict(),
+  })
+  .strict();
+export const transferImportResultSchema = transferImportReceiptSchema
+  .extend({ replayed: z.boolean() })
+  .strict();
+export const transferImportStatusSchema = z
+  .object({
+    status: z.literal("import-request-status"),
+    hostId: z.uuid(),
+    requestId: z.uuid(),
+    archiveSha256: hash,
+    result: transferImportResultSchema
+      .extend({ replayed: z.literal(true) })
+      .nullable(),
+  })
+  .strict();
+export type TransferImportReceipt = z.infer<typeof transferImportReceiptSchema>;
+export type TransferImportResult = z.infer<typeof transferImportResultSchema>;
+export type TransferImportStatus = z.infer<typeof transferImportStatusSchema>;

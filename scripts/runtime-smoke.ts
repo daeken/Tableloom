@@ -18,6 +18,7 @@ import { assetSchema } from "@tableloom/core/assets";
 import { jpegFixture } from "../apps/server/src/jpeg-fixture.js";
 import { pngFixture } from "../apps/server/src/png-fixture.js";
 import { z } from "zod";
+import { transferImportStatusSchema } from "@tableloom/core/campaign-transfer";
 const hash = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 const request = (url: string, path: string, cookie = "", body?: unknown) =>
@@ -32,6 +33,20 @@ const request = (url: string, path: string, cookie = "", body?: unknown) =>
       ? {}
       : { method: "POST", body: JSON.stringify(body) }),
   });
+async function importStatus(url: string, cookie: string, file: string) {
+  const response = await fetch(url + "/api/campaign-imports/status", {
+    method: "POST",
+    signal: AbortSignal.timeout(5000),
+    headers: {
+      Origin: url,
+      Cookie: cookie,
+      "Content-Type": "application/json",
+    },
+    body: file,
+  });
+  assert.equal(response.status, 200);
+  return transferImportStatusSchema.parse(await response.json());
+}
 async function verifyCampaignExport(
   url: string,
   cookie: string,
@@ -502,12 +517,16 @@ export async function seedRuntime(url: string, hostKey: string) {
   const { ownershipReview } = z
     .object({ ownershipReview: z.object({ planSha256: z.string() }) })
     .parse(await review.json());
+  const ticket = await importStatus(url, cookie, transfer.file);
+  assert.equal(ticket.archiveSha256, transfer.plan.archiveSha256);
+  assert.equal(ticket.hostId, member.id);
+  assert.equal(ticket.result, null);
   const importRequest = {
     file: transfer.file,
     plan,
     expectedPlanSha256: ownershipReview.planSha256,
     resourcePolicy: "fresh-campaign-and-resource-identifiers",
-    requestId: randomUUID(),
+    requestId: ticket.requestId,
     confirm: "create-new-campaign",
   };
   const imported = await request(
@@ -619,6 +638,14 @@ export async function verifyRuntimePersistence(
     state.campaignVersion,
     state.assetHash,
   );
+  const recovered = await importStatus(
+    url,
+    state.cookie,
+    state.imported.request.file,
+  );
+  assert.equal(recovered.requestId, state.imported.request.requestId);
+  assert.equal(recovered.result!.campaign.id, state.imported.campaignId);
+  assert.equal(recovered.result!.replayed, true);
   const replay = await request(
     url,
     "/api/campaign-imports/import",

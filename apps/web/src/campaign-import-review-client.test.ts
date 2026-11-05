@@ -11,6 +11,7 @@ import { ownershipPlanSchema } from "@tableloom/core/campaign-transfer";
 import type {
   OwnershipPlan,
   TransferInspection,
+  TransferImportResult,
 } from "@tableloom/core/campaign-transfer";
 const host = { id: randomUUID(), name: "Same name" },
   other = { id: randomUUID(), name: "Local friend" },
@@ -139,7 +140,52 @@ const json = (value: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
-async function fixture() {
+const stableRequestId = randomUUID();
+function backendState() {
+  return {
+    result: null as TransferImportResult | null,
+    creations: 0,
+    bodies: [] as string[],
+  };
+}
+function commitFake(backend: ReturnType<typeof backendState>, body: string) {
+  backend.bodies.push(body);
+  const input = JSON.parse(body) as {
+    requestId: string;
+    expectedPlanSha256: string;
+    plan: OwnershipPlan;
+  };
+  if (backend.result) {
+    if (backend.result.ownershipPlanSha256 !== input.expectedPlanSha256)
+      return json({ error: "different confirmed plan" }, 409);
+    return json({ ...backend.result, replayed: true });
+  }
+  backend.creations++;
+  const counts = reviewed(input.plan).ownershipReview.counts;
+  backend.result = {
+    status: "imported",
+    requestId: input.requestId,
+    archiveSha256: digest,
+    ownershipPlanSha256: input.expectedPlanSha256,
+    resourcePolicy: "fresh-campaign-and-resource-identifiers",
+    importedAt: "2026-11-05T00:00:00.000Z",
+    campaign: {
+      ...campaign,
+      id: randomUUID(),
+      activeSceneId: randomUUID(),
+      role: "gm",
+    },
+    summary: {
+      createdPeople: counts.newUsers,
+      attributionRecords: counts.unclaimed,
+      memberships: counts.memberships,
+      rows: 1,
+    },
+    replayed: false,
+  };
+  return json(backend.result, 201);
+}
+async function fixture(backend = backendState(), timeoutMs = 30000) {
   let view: ImportReviewState,
     intercept:
       ((path: string, init: RequestInit) => Promise<Response> | null) | null =
@@ -152,6 +198,16 @@ async function fixture() {
       if (override) return override;
       if (!init.method)
         return json({ host, people: [host, other], nextCursor: null });
+      if (path.endsWith("/status"))
+        return json({
+          status: "import-request-status",
+          hostId: host.id,
+          requestId: stableRequestId,
+          archiveSha256: digest,
+          result: backend.result ? { ...backend.result, replayed: true } : null,
+        });
+      if (path.endsWith("/import"))
+        return commitFake(backend, String(init.body));
       if (path.endsWith("/preflight")) return json(inspection);
       const raw = JSON.parse(String(init.body)) as { plan: OwnershipPlan };
       const plan = ownershipPlanSchema.parse(raw.plan);
@@ -177,12 +233,23 @@ async function fixture() {
     (state) => {
       view = state;
     },
+    timeoutMs,
   );
   client.start();
   await client.loadPeople();
   return {
     client,
     calls,
+    backend,
+    async ready() {
+      await client.selectFile(new File([fileText], "private.json"));
+      client.acknowledgeUpload(true);
+      assert.equal(await client.inspect(), true);
+      for (const id of sourceIds) client.choose(id, { kind: "unclaimed" });
+      client.acknowledgeReview(true);
+      assert.equal(await client.reviewOwnership(), true);
+      assert.equal(await client.prepare(), true);
+    },
     view: () => view!,
     override: (fn: typeof intercept) => {
       intercept = fn;
@@ -484,7 +551,10 @@ test("wrong-file, changed-plan and incomplete image/candidate summaries cannot a
 
 test("late file checks after close or file replacement cannot restore old identities, private bytes or approvals", async () => {
   const f = await fixture();
-  let release: ((response: Response) => void) | undefined;
+  let release: ((response: Response) => void) | undefined, started: () => void;
+  const began = new Promise<void>((resolve) => {
+    started = resolve;
+  });
   try {
     await f.client.selectFile(new File([fileText], "old.json"));
     f.client.acknowledgeUpload(true);
@@ -492,11 +562,13 @@ test("late file checks after close or file replacement cannot restore old identi
       path.endsWith("/preflight")
         ? new Promise((resolve) => {
             release = resolve;
+            started();
           })
         : null,
     );
-    const pending = f.client.inspect(),
-      signal = f.calls.at(-1)!.init.signal!;
+    const pending = f.client.inspect();
+    await began;
+    const signal = f.calls.at(-1)!.init.signal!;
     assert.equal(await f.client.inspect(), false);
     f.client.stop();
     f.client.start();
@@ -586,4 +658,291 @@ test("bounded reports reject excessive response bytes before rendering private d
   assert.match(view!.error, /timed out/);
   assert.equal(view!.busy, null);
   timeout.stop();
+});
+
+test("creation needs a final confirmation, keeps the reviewed source/plan and never creates a second copy after success", async () => {
+  const f = await fixture();
+  try {
+    await f.ready();
+    assert.equal(await f.client.create(), false);
+    assert.equal(f.backend.creations, 0);
+    f.client.acknowledgeCreation(true);
+    assert.equal(await f.client.create(), true);
+    assert.equal(f.backend.creations, 1);
+    assert.equal(f.view().execution, "complete");
+    assert.equal(f.view().result!.replayed, false);
+    const input = JSON.parse(f.backend.bodies[0]!);
+    assert.equal(input.file, fileText);
+    assert.equal(input.requestId, stableRequestId);
+    assert.equal(input.confirm, "create-new-campaign");
+    assert.equal(
+      input.expectedPlanSha256,
+      f.view().review!.ownershipReview.planSha256,
+    );
+    assert.notEqual(f.view().result!.campaign.id, campaign.id);
+    assert.equal(await f.client.create(), false);
+    assert.equal(await f.client.retry(), false);
+    assert.equal(
+      await f.client.selectFile(new File([fileText], "again.json")),
+      false,
+    );
+    assert.equal(f.backend.creations, 1);
+  } finally {
+    f.client.stop();
+  }
+});
+
+test("a lost response after commit recovers the saved result without another writer call", async () => {
+  const f = await fixture();
+  try {
+    await f.ready();
+    f.override((path, init) => {
+      if (!path.endsWith("/import")) return null;
+      commitFake(f.backend, String(init.body));
+      return Promise.reject(new Error("SECRET connection lost"));
+    });
+    f.client.acknowledgeCreation(true);
+    assert.equal(await f.client.create(), false);
+    assert.equal(f.view().execution, "uncertain");
+    assert.match(f.view().error, /may have finished/);
+    assert.ok(!f.view().error.includes("SECRET"));
+    const choices = structuredClone(f.view().choices);
+    f.client.choose(sourceIds[0]!, {
+      kind: "new",
+      name: "Changed",
+      role: "gm",
+    });
+    assert.deepEqual(f.view().choices, choices);
+    assert.equal(
+      await f.client.selectFile(new File([fileText], "new.json")),
+      false,
+    );
+    f.override(null);
+    assert.equal(await f.client.retry(), true);
+    assert.equal(f.view().result!.replayed, true);
+    assert.equal(f.backend.bodies.length, 1);
+    assert.equal(f.backend.creations, 1);
+  } finally {
+    f.client.stop();
+  }
+});
+
+test("retry after an uncommitted failure sends the exact same serialized request and status-only checks cannot start a write", async () => {
+  const f = await fixture();
+  let first = "";
+  try {
+    await f.ready();
+    f.override((path, init) => {
+      if (!path.endsWith("/import")) return null;
+      first = String(init.body);
+      return Promise.resolve(json({ error: "SECRET unavailable" }, 503));
+    });
+    f.client.acknowledgeCreation(true);
+    assert.equal(await f.client.create(), false);
+    assert.equal(f.backend.creations, 0);
+    assert.equal(await f.client.checkSavedResult(), false);
+    assert.match(f.view().error, /earlier request may still finish/);
+    assert.equal(f.backend.creations, 0);
+    f.override(null);
+    assert.equal(await f.client.retry(), true);
+    assert.equal(f.backend.bodies[0], first);
+    assert.equal(f.backend.creations, 1);
+  } finally {
+    f.client.stop();
+  }
+});
+
+test("reopening with the same file recovers before preflight, and an existing different review is disclosed instead of creating another copy", async () => {
+  const backend = backendState(),
+    f = await fixture(backend);
+  await f.ready();
+  f.client.acknowledgeCreation(true);
+  assert.equal(await f.client.create(), true);
+  const target = f.view().result!.campaign.id;
+  f.client.stop();
+  const reopened = await fixture(backend);
+  try {
+    reopened.override((path) =>
+      path.endsWith("/preflight")
+        ? Promise.reject(
+            new Error(
+              "A full campaign registry or changed module must not prevent receipt recovery",
+            ),
+          )
+        : null,
+    );
+    await reopened.client.selectFile(new File([fileText], "same-file.json"));
+    reopened.client.acknowledgeUpload(true);
+    assert.equal(await reopened.client.inspect(), true);
+    assert.equal(reopened.view().result!.campaign.id, target);
+    assert.equal(reopened.view().execution, "complete");
+    assert.equal(reopened.view().inspection, null);
+    assert.equal(backend.creations, 1);
+  } finally {
+    reopened.client.stop();
+  }
+  const race = await fixture();
+  try {
+    await race.ready();
+    const alternate = buildReviewPlan(race.view())!;
+    alternate.assignments[0]!.target = {
+      kind: "existing",
+      userId: host.id,
+      role: "gm",
+    };
+    const planSha256 = createHash("sha256")
+      .update(JSON.stringify(alternate))
+      .digest("hex");
+    commitFake(
+      race.backend,
+      JSON.stringify({
+        requestId: stableRequestId,
+        expectedPlanSha256: planSha256,
+        plan: alternate,
+      }),
+    );
+    race.client.acknowledgeCreation(true);
+    assert.equal(await race.client.create(), true);
+    assert.equal(race.view().differentPlan, true);
+    assert.equal(race.backend.creations, 1);
+    assert.equal(race.backend.bodies.length, 1);
+  } finally {
+    race.client.stop();
+  }
+});
+
+test("closing during the pre-write result check drops late completion and cannot issue an import", async () => {
+  const f = await fixture();
+  let release: ((r: Response) => void) | undefined, started: () => void;
+  const began = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  try {
+    await f.ready();
+    f.override((path) =>
+      path.endsWith("/status")
+        ? new Promise((resolve) => {
+            release = resolve;
+            started();
+          })
+        : null,
+    );
+    f.client.acknowledgeCreation(true);
+    const pending = f.client.create();
+    await began;
+    const signal = f.calls.at(-1)!.init.signal!;
+    f.client.stop();
+    assert.equal(signal.aborted, true);
+    release!(
+      json({
+        status: "import-request-status",
+        hostId: host.id,
+        requestId: stableRequestId,
+        archiveSha256: digest,
+        result: null,
+      }),
+    );
+    assert.equal(await pending, false);
+    assert.equal(f.backend.creations, 0);
+    assert.ok(f.calls.every((c) => !c.path.endsWith("/import")));
+    assert.equal(f.view().result, null);
+  } finally {
+    f.client.stop();
+  }
+});
+
+test("malformed committed responses remain uncertain, while permission loss releases private state and requires recovery after sign-in", async () => {
+  const f = await fixture();
+  try {
+    await f.ready();
+    f.override((path, init) => {
+      if (!path.endsWith("/import")) return null;
+      commitFake(f.backend, String(init.body));
+      return Promise.resolve(
+        json({ ...f.backend.result, ownershipPlanSha256: "f".repeat(64) }),
+      );
+    });
+    f.client.acknowledgeCreation(true);
+    assert.equal(await f.client.create(), false);
+    assert.equal(f.view().execution, "uncertain");
+    assert.equal(f.view().result, null);
+    f.override(null);
+    assert.equal(await f.client.checkSavedResult(), true);
+    assert.equal(f.backend.creations, 1);
+  } finally {
+    f.client.stop();
+  }
+  const revoked = await fixture();
+  try {
+    await revoked.ready();
+    revoked.override((path) =>
+      path.endsWith("/import")
+        ? Promise.resolve(json({ error: "SECRET denied" }, 403))
+        : null,
+    );
+    revoked.client.acknowledgeCreation(true);
+    assert.equal(await revoked.client.create(), false);
+    assert.equal(revoked.view().host, null);
+    assert.equal(revoked.view().file, null);
+    assert.deepEqual(revoked.view().choices, {});
+    assert.match(revoked.view().error, /may have finished/);
+    assert.equal(await revoked.client.retry(), false);
+  } finally {
+    revoked.client.stop();
+  }
+});
+
+test("two tabs confirming the same file use one request ID and receive one campaign", async () => {
+  const backend = backendState(),
+    a = await fixture(backend),
+    b = await fixture(backend);
+  try {
+    await a.ready();
+    await b.ready();
+    a.client.acknowledgeCreation(true);
+    b.client.acknowledgeCreation(true);
+    assert.deepEqual(
+      await Promise.all([a.client.create(), b.client.create()]),
+      [true, true],
+    );
+    assert.equal(backend.creations, 1);
+    assert.equal(a.view().result!.campaign.id, b.view().result!.campaign.id);
+    assert.ok(
+      backend.bodies.every(
+        (body) => JSON.parse(body).requestId === stableRequestId,
+      ),
+    );
+  } finally {
+    a.client.stop();
+    b.client.stop();
+  }
+});
+
+test("an import timeout keeps a frozen request that can be retried without changing its ID or plan", async () => {
+  const f = await fixture(backendState(), 20);
+  let first = "";
+  try {
+    await f.ready();
+    f.override((path, init) => {
+      if (!path.endsWith("/import")) return null;
+      first = String(init.body);
+      return new Promise((_resolve, reject) => {
+        init.signal!.addEventListener(
+          "abort",
+          () => reject(new Error("SECRET timeout")),
+          { once: true },
+        );
+      });
+    });
+    f.client.acknowledgeCreation(true);
+    assert.equal(await f.client.create(), false);
+    assert.equal(f.view().execution, "uncertain");
+    assert.equal(f.view().busy, null);
+    f.override(null);
+    assert.equal(await f.client.retry(), true);
+    assert.equal(f.backend.bodies[0], first);
+    assert.equal(f.backend.creations, 1);
+  } finally {
+    f.client.stop();
+  }
 });

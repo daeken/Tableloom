@@ -198,7 +198,7 @@ Campaigns pin exact system and pack versions. The server installs **one version 
 
 ## Campaign transfer: current limits
 
-**Campaign export, preflight, ownership review, candidate preparation and atomic import have administrator APIs. Browser export and read-only import review are available; confirmed import/retry controls and a CLI are unfinished.** Import creates a separate campaign on a compatible installation; it does not replace [whole-instance backups](#backup-and-recovery), which also preserve credentials, recovery keys and server configuration.
+**Campaign export, preflight, ownership review, candidate preparation and atomic import have administrator APIs. Browser export, confirmed import and file-based retry recovery are available. No standalone transfer CLI ships yet.** Import creates a separate campaign on a compatible installation; it does not replace [whole-instance backups](#backup-and-recovery), which also preserve credentials, recovery keys and server configuration.
 
 ### Download a campaign from the browser
 
@@ -228,17 +228,23 @@ Exports are limited to 32 MiB of JSON and 100,000 data rows; embedded images use
 For **whole-instance** transfer, back up, verify and restore into a new data directory on a matching installation. It brings every campaign and saved access state/recovery key; it cannot select one campaign, remap owners, merge into an existing server or supply missing module/pack code. Selective transfer is available through the APIs below; its UI remains in the README task list.
 
 
-### Review an import from the browser
+### Import a campaign from the browser
 
-Open the campaign picker and choose **Review campaign import…**. Only the signed-in **server host**, acting as a GM, can load the review. Other campaign GMs receive an access message and cannot select/upload a file. This workflow is **read-only**: it creates no campaigns, people, memberships or invitations. Confirmed creation and safe retry controls are still being built; use the administrator import API below when you need to execute an import.
+Open the campaign picker and choose **Review campaign import…**. Only the signed-in **server host**, acting as a GM, can import files. Other campaign GMs receive an access message and cannot select/upload a file. Inspection, ownership review and mapped-data validation make no saved changes. Only the final confirmed creation writes a separate campaign; existing campaigns remain unchanged.
 
-Choose a UTF-8 Tableloom export of at most 32 MiB. Reading the file locally does not upload it. Confirm **Allow this server to inspect all private content in this file**, then choose **Inspect private file**. The full file is sent to this server, including private/unrevealed content. File/package blockers appear before ownership review; compatible trusted modules and declarations are required. Unsupported, malformed, empty or oversized local files are not uploaded.
+Choose a UTF-8 Tableloom export of at most 32 MiB. Reading it locally does not upload it. Confirm **Allow this server to inspect all private content in this file**, then choose **Inspect private file**. The full file is sent, including private/unrevealed content. The server first checks whether this exact file already has a saved browser import; if so, it recovers that result without repeating module/image validation. Otherwise, file/package blockers appear before ownership review. Unsupported, malformed, empty or oversized local files are not uploaded.
 
-Choose ownership for **every** source identity, including departed/unnamed people. Nothing is selected automatically, even when names or UUIDs match. Keep unclaimed attribution without access, create a distinct named person with an explicit role, or select an existing local person. Search local names or page through the list; it includes the host and profiles with current membership in at least one campaign, excluding membership-free attribution profiles. Changing results preserves selected people. Source identities are shown 25 per page, and choices persist across pages. Source roles describe the file, not destination access. Selecting a different local person resets the proposed role to Player; the host independently remains a GM. New people receive no session or invitation.
+Choose ownership for **every** source identity, including departed/unnamed people. Nothing is selected automatically, even when names or UUIDs match. Keep unclaimed attribution without access, create a distinct named person with an explicit role, or select an existing local person. Search local names or page through the list; it includes the host and profiles with current membership in at least one campaign, excluding membership-free attribution profiles. Results and source-identity pages preserve selected people. Source roles describe the file, not destination access. Selecting a different local person resets the proposed role to Player; the host independently remains a GM. New people receive no session or invitation from import.
 
-If several source identities map to one local person, explicitly confirm their combination, including private content and editing history. Confirm the people/access review, then choose **Review ownership choices**. The summary includes the server's current resolved names and roles. Choose **Validate mapped campaign** to check fresh resource IDs, modules, ownership, history and storage limits together. A successful result still creates nothing and reserves no IDs. A final import must repeat these checks atomically. Unknown historical content-pack bindings can still block execution until trusted code is installed/verified.
+Confirm any identity combinations, including their private content and editing history, then confirm the access choices and choose **Review ownership choices**. Read the server-resolved names/roles, then choose **Validate mapped campaign**. Successful validation reserves nothing and creates nothing. Finally confirm **Create a new campaign with these private records and reviewed memberships**, then choose **Create imported campaign**. The server repeats current checks and saves the campaign atomically. An unknown historical content-pack binding can still block creation until trusted code is installed/verified.
 
-Any ownership edit clears previous approval and mapped validation. Replacing the file clears all choices and consent. Closing cancels requests, discards the in-memory file/review and returns to the campaign picker without discarding campaign settings drafts. Reopening starts fresh. The app writes no file or plan to browser storage; a lost session/host change clears private review state. Requests time out after 30 seconds. Review can always be repeated safely because it makes no saved changes.
+If the result is uncertain, **Check saved result** only looks for completion; **Retry same confirmed import** checks and resends the unchanged confirmed request if necessary. Closing or timing out does not guarantee cancellation: creation may have finished. After closing, reloading or signing in again, reselect the **exact same file** and allow inspection to recover its saved result before offering creation. No private file or plan is saved in local/session storage. The same host and file bytes use one stable browser request ID, across tabs and restarts; a different ownership review cannot create a second copy under that ID. If another review won the race, the recovered result says so. An unavailable target or lost GM access blocks recovery without recreating it or restoring grants.
+
+**Keep the original file unchanged for recovery.** Renaming it is harmless; changing any bytes, including whitespace, makes a different file. The browser imports that exact file once per host. Intentional additional copies require a separately chosen API request UUID. API imports made with independent request IDs remain independent operations.
+
+Creation/recovery leaves the active campaign unchanged and refreshes the campaign list. Save current drafts, then choose **Open imported campaign**, or close and select it normally. New people can join through **Invite & players** return codes after opening that campaign. Result names/counts describe the saved import; later campaign edits do not rewrite its receipt.
+
+Ownership edits clear previous approval and final creation consent. Once creation is confirmed, the request is locked while its result is unresolved; reopen to start a fresh review. Closing discards in-memory file/plan data and preserves settings drafts in the campaign picker. Requests allow 30 seconds for individual review operations and 60 seconds for compound status/inspection or creation/retry operations. Whole-instance backups include saved results, so file-based recovery also works after a matching backup restore/container replacement.
 
 ### Read-only destination preflight
 
@@ -297,7 +303,7 @@ The server host is always planned as a GM independently of source roles and coun
 
 The result is `status: "ownership-review-only"`, **always** `importReady: false`, with normalized plan/assignment previews, current local names, merge/capacity summaries and `planSha256`. Completion removes only `ownership-plan` from pending checks; incomplete module identity inventory, unacknowledged merges or too many planned members keep it pending. Image/source/package checks run again. Local targets and host authorization are checked after image work. A missing local person or changed file fingerprint returns 409. The plan hash fingerprints normalized choices; it is not a reservation, permission token or guarantee that a later write will succeed.
 
-This endpoint allocates no IDs, creates no people/memberships/invitations/sessions, copies no source credentials and saves nothing. The browser review above uses this endpoint; campaign creation remains API-only. It accepts a 65-MiB JSON envelope to accommodate escaping a file of at most 32 MiB, plus a bounded plan (at most 1,000 assignments and 512 KiB of normalized JSON). Existing proxies capped at 32 MiB may reject larger wrapped reviews; use the current 65-MiB example. Raw preflight/image/ordinary JSON limits remain unchanged.
+This endpoint allocates no IDs, creates no people/memberships/invitations/sessions, copies no source credentials and saves nothing. The browser review above uses this endpoint; confirmed creation is available in the browser workflow above. It accepts a 65-MiB JSON envelope to accommodate escaping a file of at most 32 MiB, plus a bounded plan (at most 1,000 assignments and 512 KiB of normalized JSON). Existing proxies capped at 32 MiB may reject larger wrapped reviews; use the current 65-MiB example. Raw preflight/image/ordinary JSON limits remain unchanged.
 
 
 ### Prepare a fresh campaign candidate
@@ -322,8 +328,12 @@ Old command retry receipts and digest bindings are omitted from the candidate: t
 
 The response is `status: "candidate-preflight-only"` and **always** `importReady: false`. `resourcePlan` gives completion, policy, a preview campaign UUID, candidate fingerprint, mapping counts and dropped retry counts. `candidateValidation` reports mapped history/module checks. A complete candidate has only `atomic-import` pending. Preparation rechecks mapped storage quotas, identity inventory, module schemas/references, history graphs and destination capacity/package bindings. Candidate IDs are checked against global destination keys; no existing campaign or resource is overwritten. Merges that exceed storage limits or break editing-stack order are blocked, without silently pruning data.
 
-Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **Preparation saves nothing.** The import endpoint repeats checks under its atomic write transaction; confirmed import/retry controls and a CLI remain unfinished.
+Incomplete source/ownership review leaves candidate generation blocked. Later failures add `candidate_mapping_failed`, `mapped_storage_limits_exceeded`, `mapped_campaign_invalid` or `mapped_campaign_unavailable`; failed-stage summaries omit private errors and partial candidates. Adjust the ownership choices or source data and review again. A retry generates different IDs and fingerprints; previews reserve nothing and their hashes are not import tokens. **Preparation saves nothing.** Browser confirmation calls the atomic import endpoint below, which repeats these checks under its write transaction. No standalone transfer CLI ships yet.
 
+
+### Check a saved browser import
+
+The server host can POST the **raw exact UTF-8 file text** to `/api/campaign-imports/status`, using the same headers/body convention as raw preflight. Its limit is 32 MiB. It returns `status: "import-request-status"`, `hostId`, `archiveSha256`, a stable `requestId`, and either `result: null` or the saved import metadata with `replayed: true`. It does not validate modules/images, create a reservation or write anything, and it remains available while image inspection is busy or destination campaign capacity is full. `null` means no committed result is visible yet; an in-flight request may still finish. Current host authorization and GM access to an existing target are always required. This endpoint discovers browser imports using the stable ID; independent API request UUIDs retain their existing explicit retry contract.
 
 ### Import a reviewed campaign
 
@@ -335,7 +345,7 @@ const body = {
   plan,
   expectedPlanSha256: ownershipReview.planSha256,
   resourcePolicy: "fresh-campaign-and-resource-identifiers",
-  requestId: crypto.randomUUID(),
+  requestId: requestStatus.requestId, // From POST /api/campaign-imports/status with raw file text.
   confirm: "create-new-campaign",
 };
 // Retain this exact body until the result is known; reuse it after a lost response.
@@ -352,7 +362,7 @@ A new import returns **201**, `status: "imported"`, `replayed: false`, the new `
 
 An exact retry with the **same request ID, file and normalized plan** returns **200**, `replayed: true`, and the original result, including after restart, backup/restore or container replacement. Reusing the ID with different choices/file returns 409; removing the target or host's GM membership also returns 409 without recreating it or restoring grants. Current host authorization is always required. Keep the original request body after a timeout; using a new ID can create another campaign. The server retains at most **1,000** import results (each at most 256 KiB); at capacity it rejects new requests while existing retries remain available. There is no receipt-pruning API yet. Results are server operational metadata, included in whole-instance backups but excluded from campaign exports.
 
-Preflight/review/prepare continue to return `importReady: false` because they authorize no writes. Import succeeds only through the confirmed endpoint. There is no campaign overwrite, automatic package download, migration, action replay or browser creation/retry controls yet. Existing live permissions/version checks still determine whether an imported undo edge is usable.
+Preflight/review/prepare continue to return `importReady: false` because they authorize no writes. Import succeeds only through the confirmed endpoint. There is no campaign overwrite, automatic package download, migration, action replay or standalone transfer CLI. Existing live permissions/version checks still determine whether an imported undo edge is usable.
 
 
 ### Module references during preflight

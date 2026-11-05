@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -114,6 +115,23 @@ export async function registerCampaignPreflightRoutes(
             nextCursor: people.length > 100 ? people[99]!.id : null,
           });
         });
+      },
+    );
+    api.post(
+      "/api/campaign-imports/status",
+      {
+        bodyLimit: MAX_CAMPAIGN_EXPORT_BYTES,
+        onRequest: async (request) => {
+          host(request);
+        },
+      },
+      async (request) => {
+        const serialized = body(request),
+          archiveSha256 = createHash("sha256").update(serialized).digest("hex");
+        return options.imports.status(
+          archiveSha256,
+          sessionToken(request.headers.cookie),
+        );
       },
     );
     api.post(
