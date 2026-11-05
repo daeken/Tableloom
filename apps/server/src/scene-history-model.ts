@@ -5,6 +5,7 @@ import {
   drawingSchema,
   translationSchema,
   tokenRadiusSchema,
+  sceneTextContentSchema,
 } from "@tableloom/core";
 const originalGeometrySchema = z.union([
   z
@@ -54,6 +55,18 @@ const resizeChangeSchema = z.union([
     ),
 ]);
 export const payloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal("text-update"),
+      objectType: z.literal("drawing"),
+      before: sceneTextContentSchema,
+      after: sceneTextContentSchema,
+    })
+    .strict()
+    .refine(
+      (p) => p.before.text !== p.after.text || p.before.color !== p.after.color,
+      "Text history must contain a change.",
+    ),
   z
     .object({
       kind: z.literal("resize-many"),
@@ -244,12 +257,14 @@ export function entryOf(row: unknown): Entry {
     (payload.kind !== "move" &&
       payload.kind !== "resize" &&
       payload.kind !== "token-resize" &&
+      payload.kind !== "text-update" &&
       payload.object.id !== targets[0]!.objectId)
   )
     throw new Error("Scene history target is inconsistent.");
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "text-update" ||
   entry.payload.kind === "resize-many" ||
   entry.payload.kind === "token-resize" ||
   entry.payload.kind === "resize" ||

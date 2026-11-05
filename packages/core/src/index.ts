@@ -3,7 +3,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -21,6 +21,9 @@ export const sceneTextSchema = z
     "Use plain text and line breaks.",
   )
   .refine((text) => text.split("\n").length <= 20, "Use at most 20 lines.");
+export const sceneTextContentSchema = z
+  .object({ text: sceneTextSchema, color: colorSchema })
+  .strict();
 const drawingDataSchema = z.object({
   id: z.uuid(),
   kind: z.enum(["stroke", "rectangle", "text"]),
@@ -345,6 +348,15 @@ export const resizeBoundsSchema = z
 export type ResizeBounds = z.infer<typeof resizeBoundsSchema>;
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("drawing.text.update"),
+      drawingId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      changes: sceneTextContentSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

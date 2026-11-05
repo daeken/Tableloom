@@ -1906,3 +1906,12 @@ p {
 .tool-text {
   cursor: text;
 }
+.text-placement-dialog input[type="color"] {
+  height: 42px;
+  padding: 4px;
+  cursor: pointer;
+}
+.text-placement-dialog > label {
+  display: block;
+  margin: 8px 0 6px;
+}

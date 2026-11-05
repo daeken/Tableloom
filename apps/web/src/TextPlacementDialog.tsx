@@ -58,7 +58,7 @@ export function TextPlacementDialog({
       />
       <p>
         Plain text, with line breaks. Move and resize the saved label with
-        Select. Editing saved wording is coming next.
+        Select, then choose Edit label to change its wording or color.
       </p>
       {!valid && text && (
         <p className="form-error">

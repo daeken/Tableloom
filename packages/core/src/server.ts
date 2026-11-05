@@ -107,6 +107,13 @@ export function applyCommand(
       }
       break;
     }
+    case "drawing.text.update": {
+      const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
+      drawing.text = command.changes.text;
+      drawing.color = command.changes.color;
+      drawing.version += 1;
+      break;
+    }
     case "token.resize": {
       const token = next.tokens.find((t) => t.id === command.tokenId)!;
       token.radius = command.radius;

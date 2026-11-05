@@ -1466,3 +1466,193 @@ test("text labels synchronize as owned drawing objects with exact retries, stale
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("saved text edits are owned, sender-bound, atomic, restart-safe and expose only the requesting editor's cursor", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "tableloom-text-edit-live-")),
+    path = join(directory, "table.sqlite");
+  let app = await createApp({ databasePath: path, hostKey: KEY });
+  const db = new DatabaseSync(path),
+    store = new TableStore(db),
+    sockets: TestWebSocket[] = [];
+  const post = (route: string, payload: Record<string, unknown>, cookie = "") =>
+      app.inject({
+        method: "POST",
+        url: `/api/access/${route}`,
+        headers: { cookie, origin: "http://localhost" },
+        payload,
+      }),
+    cookieOf = (r: { headers: Record<string, unknown> }) =>
+      String(r.headers["set-cookie"]).split(";")[0]!;
+  try {
+    let url = await app.listen({ port: 0, host: "127.0.0.1" });
+    const gm = cookieOf(await post("setup", { key: KEY, name: "GM" }));
+    const invite = async (name: string) =>
+      cookieOf(
+        await post("join", {
+          name,
+          code: (await post("invitations", {}, gm)).json().token,
+        }),
+      );
+    const player = await invite("Editor"),
+      other = await invite("Other");
+    let p = await connect(url, player),
+      g = await connect(url, gm),
+      q = await connect(url, other);
+    sockets.push(p.ws, g.ws, q.ws);
+    const id = randomUUID(),
+      original = "North gate\nCourtyard",
+      points = [
+        { x: 60, y: 90 },
+        { x: 220, y: 154 },
+      ];
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "drawing.add",
+          drawing: {
+            id,
+            kind: "text",
+            text: original,
+            color: "#405f4d",
+            points,
+          },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => q.latest().state.drawings.length === 1);
+    const edit = {
+      id: randomUUID(),
+      type: "drawing.text.update",
+      drawingId: id,
+      expectedVersion: 1,
+      changes: { text: "<b>East gate</b>\n鍵", color: "#ab1234" },
+    };
+    assert.equal((await q.send(edit)).type, "error");
+    assert.equal(store.load().drawings[0]!.version, 1);
+    assert.equal((await p.send(edit)).type, "ack");
+    await until(
+      () =>
+        g.latest().state.drawings[0]?.version === 2 &&
+        q.latest().state.drawings[0]?.version === 2,
+    );
+    assert.deepEqual(g.latest().state.drawings[0]!.points, points);
+    assert.equal(q.latest().state.drawings[0]!.text, edit.changes.text);
+    const edge = p.latest().history.undo!;
+    assert.equal(edge.action, "edit");
+    assert.equal(g.latest().history.undo, null);
+    assert.equal(q.latest().history.undo, null);
+    assert.ok(
+      !JSON.stringify([...g.messages, ...q.messages]).includes(edge.id),
+    );
+    const saved = store.load();
+    assert.equal((await p.send(edit)).type, "ack");
+    assert.deepEqual(store.load(), saved);
+    assert.equal(
+      (
+        await p.send({
+          ...edit,
+          changes: { ...edit.changes, text: "Changed retry" },
+        })
+      ).type,
+      "error",
+    );
+    assert.deepEqual(store.load(), saved);
+    // Malformed schema input cannot consume a receipt or mutate saved text/history.
+    const invalidId = randomUUID(),
+      start = p.messages.length;
+    p.ws.send(
+      JSON.stringify({
+        ...edit,
+        id: invalidId,
+        expectedVersion: 2,
+        changes: { text: " ", color: "#ab1234" },
+      }),
+    );
+    await until(() => p.messages.slice(start).some((m) => m.type === "error"));
+    assert.equal(store.hasCommand(invalidId), false);
+    assert.deepEqual(store.load(), saved);
+    const next = {
+      ...edit,
+      id: randomUUID(),
+      expectedVersion: 2,
+      changes: { text: "Reviewed wording\nSouth gate", color: "#123456" },
+    };
+    db.exec(
+      "CREATE TRIGGER reject_text_edit_binding BEFORE INSERT ON command_bindings BEGIN SELECT RAISE(ABORT,'fixture edit binding'); END",
+    );
+    assert.equal((await p.send(next)).type, "error");
+    assert.deepEqual(store.load(), saved);
+    assert.equal(store.hasCommand(next.id), false);
+    assert.equal(p.latest().history.undo!.id, edge.id);
+    db.exec("DROP TRIGGER reject_text_edit_binding");
+    assert.equal((await p.send(next)).type, "ack");
+    await until(() => p.latest().state.drawings[0]?.version === 3);
+    const inverse = p.latest().history.undo!;
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.undo",
+          historyId: inverse.id,
+          expectedVersion: inverse.version,
+        })
+      ).type,
+      "ack",
+    );
+    assert.equal(store.load().drawings[0]!.text, edit.changes.text);
+    assert.equal(store.load().drawings[0]!.color, edit.changes.color);
+    const redo = p.latest().history.redo!;
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    app = await createApp({ databasePath: path, hostKey: KEY });
+    url = await app.listen({ port: 0, host: "127.0.0.1" });
+    p = await connect(url, player);
+    g = await connect(url, gm);
+    q = await connect(url, other);
+    sockets.push(p.ws, g.ws, q.ws);
+    assert.equal(p.latest().history.redo!.id, redo.id);
+    assert.equal(p.latest().state.drawings[0]!.text, edit.changes.text);
+    assert.equal(
+      (
+        await p.send({
+          id: randomUUID(),
+          type: "scene.redo",
+          historyId: redo.id,
+          expectedVersion: redo.version,
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => g.latest().state.drawings[0]?.version === 5);
+    assert.equal(store.load().drawings[0]!.text, next.changes.text);
+    assert.equal(store.load().drawings[0]!.color, next.changes.color);
+    assert.equal(
+      (
+        await g.send({
+          id: randomUUID(),
+          type: "objects.move",
+          objects: [{ objectId: id, expectedVersion: 5 }],
+          delta: { x: 30, y: 0 },
+        })
+      ).type,
+      "ack",
+    );
+    await until(() => p.latest().state.drawings[0]?.version === 6);
+    assert.equal(p.latest().history.undo!.available, false);
+    assert.equal(
+      (await p.send({ ...next, id: randomUUID(), expectedVersion: 5 })).type,
+      "error",
+    );
+    assert.equal(store.load().drawings[0]!.version, 6);
+    // Repeating a committed command after restart still acknowledges without reapplying.
+    assert.equal((await p.send(next)).type, "ack");
+    assert.equal(store.load().drawings[0]!.version, 6);
+  } finally {
+    sockets.forEach((s) => s.terminate());
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

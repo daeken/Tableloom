@@ -302,10 +302,260 @@ test("campaign 3/history 8 upgrade existing scenes/inverses exactly and roll bac
           assert.equal(
             f.db.prepare("SELECT version FROM scene_history_version").get()!
               .version,
-            9,
+            10,
           );
         }
       }
+    } finally {
+      f.db.close();
+    }
+  }
+});
+
+test("saved text/color edits keep geometry and owner, reject stale/foreign/nontext/no-op inputs, and join exact causal undo chains", () => {
+  const f = fixture();
+  try {
+    const id = f.add(),
+      original = f.tables.load().drawings[0]!;
+    const edit = (
+      text: string,
+      color: string,
+      expectedVersion = f.tables.load().drawings.find((d) => d.id === id)!
+        .version,
+    ) =>
+      f.run({
+        type: "drawing.text.update",
+        drawingId: id,
+        expectedVersion,
+        changes: { text, color },
+      });
+    edit("  Courtyard\n<b>鍵</b>  ", "#ab1234");
+    const edited = f.tables.load().drawings[0]!;
+    assert.equal(edited.text, "  Courtyard\n<b>鍵</b>  ");
+    assert.equal(edited.color, "#ab1234");
+    assert.equal(edited.version, 2);
+    assert.equal(edited.ownerId, original.ownerId);
+    assert.deepEqual(edited.points, original.points);
+    assert.equal(f.history.status(f.player.member).undo!.action, "edit");
+    const before = f.tables.load(),
+      cursor = f.history.status(f.player.member);
+    for (const changes of [
+      { text: "", color: edited.color },
+      { text: "x".repeat(501), color: edited.color },
+      { text: "x", color: "nope" },
+      { text: "x\t", color: edited.color },
+      { text: Array(21).fill("x").join("\n"), color: edited.color },
+      { text: edited.text!, color: edited.color },
+    ]) {
+      assert.throws(() =>
+        f.run({
+          type: "drawing.text.update",
+          drawingId: id,
+          expectedVersion: 2,
+          changes,
+        }),
+      );
+      assert.deepEqual(f.tables.load(), before);
+      assert.deepEqual(f.history.status(f.player.member), cursor);
+    }
+    assert.throws(() => edit("Stale", "#123456", 1));
+    const other = f.access.redeemInvitation(
+      f.access.createInvitation(f.gm.token).token,
+      "Other",
+    ).member;
+    assert.throws(() =>
+      f.run(
+        {
+          type: "drawing.text.update",
+          drawingId: id,
+          expectedVersion: 2,
+          changes: { text: "Stolen", color: edited.color },
+        },
+        other,
+      ),
+    );
+    const rectangle = randomUUID();
+    f.run({
+      type: "drawing.add",
+      drawing: {
+        id: rectangle,
+        kind: "rectangle",
+        points: original.points,
+        color: original.color,
+      },
+    });
+    assert.throws(() =>
+      f.run({
+        type: "drawing.text.update",
+        drawingId: rectangle,
+        expectedVersion: 1,
+        changes: { text: "Wrong kind", color: original.color },
+      }),
+    );
+    assert.throws(() =>
+      f.run({
+        type: "drawing.text.update",
+        drawingId: randomUUID(),
+        expectedVersion: 1,
+        changes: { text: "Absent", color: original.color },
+      }),
+    );
+    for (const changes of [
+      { text: "ok", color: original.color, ownerId: other.id },
+      { text: "ok", color: original.color, points: original.points },
+    ])
+      assert.throws(() =>
+        commandSchema.parse({
+          id: randomUUID(),
+          type: "drawing.text.update",
+          drawingId: id,
+          expectedVersion: 2,
+          changes,
+        }),
+      );
+    // Color-only and wording-only edits both preserve the same exact box.
+    edit(edited.text!, "#123456");
+    edit("Final label", "#123456");
+    f.run({
+      type: "objects.move",
+      objects: [{ objectId: id, expectedVersion: 4 }],
+      delta: { x: 0.1, y: 0.2 },
+    });
+    f.run({ type: "object.delete", objectId: id, expectedVersion: 5 });
+    for (let i = 0; i < 6; i++) f.action("scene.undo");
+    const restored = f.tables.load().drawings.find((d) => d.id === id)!;
+    assert.equal(restored.text, original.text);
+    assert.equal(restored.color, original.color);
+    assert.deepEqual(restored.points, original.points);
+    for (let i = 0; i < 6; i++) f.action("scene.redo");
+    assert.ok(!f.tables.load().drawings.some((d) => d.id === id));
+    f.action("scene.undo");
+    assert.equal(
+      f.tables.load().drawings.find((d) => d.id === id)!.text,
+      "Final label",
+    );
+    const saved = f.tables.load(),
+      status = f.history.status(f.player.member);
+    f.db.exec(
+      "CREATE TRIGGER reject_text_edit_receipt BEFORE INSERT ON campaign_receipts BEGIN SELECT RAISE(ABORT,'fixture edit rollback'); END",
+    );
+    assert.throws(() => edit("Rollback", "#654321"), /fixture edit rollback/);
+    assert.deepEqual(f.tables.load(), saved);
+    assert.deepEqual(f.history.status(f.player.member), status);
+    f.db.exec("DROP TRIGGER reject_text_edit_receipt");
+    assert.deepEqual(
+      new SceneHistoryStore(f.db, f.tables).status(f.player.member),
+      status,
+    );
+    // A later GM edit is real intervening work, blocking the player's prior edge.
+    f.run(
+      {
+        type: "drawing.text.update",
+        drawingId: id,
+        expectedVersion: saved.drawings.find((d) => d.id === id)!.version,
+        changes: { text: "GM revision", color: "#abcdef" },
+      },
+      f.gm.member,
+    );
+    assert.equal(f.history.status(f.player.member).undo!.available, false);
+    assert.throws(() => f.action("scene.undo"));
+    f.action("scene.undo", f.gm.member);
+    assert.equal(
+      f.tables.load().drawings.find((d) => d.id === id)!.text,
+      "Final label",
+    );
+    // Transfer also prevents old owned edit cursors from becoming authority.
+    const now = f.tables.load().drawings.find((d) => d.id === id)!;
+    f.run(
+      {
+        type: "object.assign",
+        objectId: id,
+        expectedVersion: now.version,
+        expectedOwnerId: f.player.member.id,
+        ownerId: other.id,
+      },
+      f.gm.member,
+    );
+    assert.throws(() => edit("Former owner", "#123456"));
+  } finally {
+    f.db.close();
+  }
+});
+
+test("history 9 to 10 retains text snapshots/links byte-exact, rejects future edit payloads, and rolls back marker failures", () => {
+  for (const mode of ["none", "marker", "future"] as const) {
+    const f = fixture();
+    try {
+      const id = f.add();
+      f.run({
+        type: "objects.move",
+        objects: [{ objectId: id, expectedVersion: 1 }],
+        delta: { x: 0.25, y: 1.5 },
+      });
+      const state = f.tables.load(),
+        status = f.history.status(f.player.member),
+        rows = f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all();
+      f.db.exec("UPDATE scene_history_version SET version=9");
+      if (mode === "marker")
+        f.db.exec(
+          "CREATE TRIGGER reject_edit_upgrade BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture edit upgrade'); END",
+        );
+      if (mode === "future")
+        f.db
+          .prepare(
+            "UPDATE scene_history_entries SET payload_json=? WHERE sequence=2",
+          )
+          .run(
+            JSON.stringify({
+              kind: "text-update",
+              objectType: "drawing",
+              before: { text: "Old", color: "#123456" },
+              after: { text: "Future", color: "#654321" },
+            }),
+          );
+      const expected = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+      if (mode !== "none") {
+        assert.throws(() => new SceneHistoryStore(f.db, f.tables));
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          9,
+        );
+        assert.deepEqual(
+          f.db
+            .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+            .all(),
+          expected,
+        );
+        assert.deepEqual(f.tables.load(), state);
+        if (mode === "marker") f.db.exec("DROP TRIGGER reject_edit_upgrade");
+        else
+          f.db
+            .prepare(
+              "UPDATE scene_history_entries SET payload_json=? WHERE sequence=2",
+            )
+            .run(rows[1]!.payload_json as string);
+      }
+      const history = new SceneHistoryStore(f.db, f.tables);
+      assert.equal(
+        f.db.prepare("SELECT version FROM scene_history_version").get()!
+          .version,
+        10,
+      );
+      assert.deepEqual(
+        f.db
+          .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+          .all(),
+        rows,
+      );
+      assert.deepEqual(history.status(f.player.member), status);
+      assert.deepEqual(f.tables.load(), state);
+      f.action("scene.undo");
+      assert.equal(f.tables.load().drawings[0]!.text, "North gate\nCourtyard");
     } finally {
       f.db.close();
     }

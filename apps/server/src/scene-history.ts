@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 8;
+          ?.version === 10;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -141,11 +141,14 @@ export class SceneHistoryStore {
                   ? "position" in object
                   : "points" in object),
             )) &&
+          (payload.kind !== "text-update" ||
+            ("kind" in object && object.kind === "text")) &&
           canEditObject(member, object) &&
           object.version === target.expectedVersion
         );
       });
     if (
+      payload.kind === "text-update" ||
       payload.kind === "move" ||
       payload.kind === "move-many" ||
       payload.kind === "resize-many" ||
@@ -195,13 +198,16 @@ export class SceneHistoryStore {
           objectId: target.objectId,
           objectCount: entry.targets.length,
           action:
-            payload.kind === "token-resize" || payload.kind === "resize-many"
-              ? "resize"
-              : payload.kind === "delete-many"
-                ? "delete"
-                : payload.kind === "move-many" || payload.kind === "translate"
-                  ? "move"
-                  : payload.kind,
+            payload.kind === "text-update"
+              ? "edit"
+              : payload.kind === "token-resize" ||
+                  payload.kind === "resize-many"
+                ? "resize"
+                : payload.kind === "delete-many"
+                  ? "delete"
+                  : payload.kind === "move-many" || payload.kind === "translate"
+                    ? "move"
+                    : payload.kind,
           objectType: payload.objectType,
           name:
             payload.kind === "resize-many"
@@ -269,6 +275,7 @@ export class SceneHistoryStore {
         "token.add",
         "drawing.add",
         "drawing.resize",
+        "drawing.text.update",
         "token.resize",
         "objects.resize",
         "token.move",
@@ -297,7 +304,27 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "objects.resize") {
+      if (command.type === "drawing.text.update") {
+        ids = [command.drawingId];
+        const from = before.drawings.find((d) => d.id === command.drawingId),
+          to = after.drawings.find((d) => d.id === command.drawingId);
+        if (
+          !from ||
+          !to ||
+          from.kind !== "text" ||
+          to.kind !== "text" ||
+          to.version !== from.version + 1 ||
+          from.ownerId !== to.ownerId ||
+          JSON.stringify(from.points) !== JSON.stringify(to.points)
+        )
+          throw new Error("Invalid text edit transition.");
+        payload = payloadSchema.parse({
+          kind: "text-update",
+          objectType: "drawing",
+          before: { text: from.text, color: from.color },
+          after: { text: to.text, color: to.color },
+        });
+      } else if (command.type === "objects.resize") {
         ids = command.objects.map((o) => o.objectId);
         const changes = ids.map((objectId) => {
           const from = objectOf(before, objectId),
@@ -561,7 +588,19 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "resize-many") {
+      if (payload.kind === "text-update") {
+        next = applyCommand(
+          state,
+          {
+            id: command.id,
+            type: "drawing.text.update",
+            drawingId: target.objectId,
+            expectedVersion: target.expectedVersion,
+            changes: undo ? payload.before : payload.after,
+          },
+          member,
+        );
+      } else if (payload.kind === "resize-many") {
         next = structuredClone(state);
         for (const change of payload.changes) {
           const geometry = undo ? change.before : change.after;

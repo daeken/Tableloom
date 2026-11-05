@@ -992,10 +992,67 @@ try {
         },
       }),
     );
+    let textEdited = await textRedo;
     assert.equal(
-      (await textRedo).state.drawings.find((d) => d.id === textId)!.text,
+      textEdited.state.drawings.find((d) => d.id === textId)!.text,
       "Courtyard\nNorth gate",
     );
+    const editText = snapshot(
+      live,
+      (m) =>
+        m.state.drawings.find((d) => d.id === textId)?.text ===
+        "Courtyard\nEast gate",
+    );
+    live.send(
+      JSON.stringify({
+        context: textEdited.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.text.update",
+          drawingId: textId,
+          expectedVersion: textEdited.state.drawings.find(
+            (d) => d.id === textId,
+          )!.version,
+          changes: { text: "Courtyard\nEast gate", color: "#ab1234" },
+        },
+      }),
+    );
+    textEdited = await editText;
+    assert.equal(
+      textEdited.state.drawings.find((d) => d.id === textId)!.color,
+      "#ab1234",
+    );
+    assert.equal(textEdited.history.undo!.action, "edit");
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const expected =
+        type === "scene.undo"
+          ? "Courtyard\nNorth gate"
+          : "Courtyard\nEast gate";
+      const result = snapshot(
+        live,
+        (m) => m.state.drawings.find((d) => d.id === textId)?.text === expected,
+      );
+      const edge =
+        type === "scene.undo"
+          ? textEdited.history.undo!
+          : textEdited.history.redo!;
+      live.send(
+        JSON.stringify({
+          context: textEdited.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      textEdited = await result;
+      assert.equal(
+        textEdited.state.drawings.find((d) => d.id === textId)!.color,
+        type === "scene.undo" ? "#405f4d" : "#ab1234",
+      );
+    }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(
@@ -1219,5 +1276,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

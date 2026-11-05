@@ -5,6 +5,7 @@ import {
   translationSchema,
   pointSchema,
   tokenRadiusSchema,
+  sceneTextContentSchema,
 } from "./index.js";
 import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -67,6 +68,21 @@ export function authorizeCommand(
           return object;
         });
       resizedObjects(objects, command.scale);
+      return;
+    }
+    case "drawing.text.update": {
+      const drawing = state.drawings.find((d) => d.id === command.drawingId);
+      if (!drawing || drawing.kind !== "text")
+        throw new Error("That text label is unavailable.");
+      if (!canEditObject(member, drawing))
+        throw new Error("Only the owner or GM can edit this label.");
+      if (drawing.version !== command.expectedVersion)
+        throw new Error(
+          "This label changed. Review its saved text before editing again.",
+        );
+      const changes = sceneTextContentSchema.parse(command.changes);
+      if (changes.text === drawing.text && changes.color === drawing.color)
+        throw new Error("Change the wording or color before saving.");
       return;
     }
     case "token.resize": {

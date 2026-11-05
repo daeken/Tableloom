@@ -1,4 +1,5 @@
 import type { BackgroundView } from "@tableloom/core/scene-map";
+import { EditTextDialog } from "./EditTextDialog.js";
 import { TextPlacementDialog } from "./TextPlacementDialog.js";
 import { ResizeSelectionDialog } from "./ResizeSelectionDialog.js";
 import { ResizeTokenDialog } from "./ResizeTokenDialog.js";
@@ -134,6 +135,7 @@ export function Tabletop({
   const [resizeSelection, setResizeSelection] = useState<SceneObject[] | null>(
     null,
   );
+  const [editText, setEditText] = useState<Drawing | null>(null);
   const [resizeToken, setResizeToken] = useState<Token | null>(null);
   const [selectionError, setSelectionError] = useState("");
   const [deleteReview, setDeleteReview] = useState<DeletionReviewItem[] | null>(
@@ -777,6 +779,19 @@ export function Tabletop({
                 Resize token…
               </button>
             )}
+          {selectedObjects.length === 1 &&
+            "kind" in selectedObjects[0]! &&
+            selectedObjects[0].kind === "text" && (
+              <button
+                disabled={!enabled || pending}
+                onClick={() => {
+                  setGesture(null);
+                  setEditText(selectedObjects[0] as Drawing);
+                }}
+              >
+                Edit label…
+              </button>
+            )}
           {selectedObjects.length > 1 && (
             <button
               disabled={!enabled || pending}
@@ -817,6 +832,17 @@ export function Tabletop({
           pending={pending}
           send={send}
           close={() => setResizeSelection(null)}
+        />
+      )}
+      {editText && (
+        <EditTextDialog
+          drawing={editText}
+          state={state}
+          member={member}
+          enabled={enabled}
+          pending={pending}
+          send={send}
+          close={() => setEditText(null)}
         />
       )}
       {resizeToken && (
