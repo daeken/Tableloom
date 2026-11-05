@@ -31,7 +31,7 @@ npm run build
 npm start           # http://127.0.0.1:3001
 ```
 
-Docker packaging is included; [container setup and verification](docs/user-guide.md#docker-packaging) currently awaits a working Docker engine/Compose on the development machine.
+The Docker image and named-volume persistence are verified in Linux CI; see [container setup and verification](docs/user-guide.md#docker-packaging).
 
 Built-in [backup and recovery commands](docs/user-guide.md#backup-and-recovery) capture the SQLite database, images and private host key, and restore only into a new directory.
 
@@ -94,10 +94,10 @@ This is the **single source of truth for goals and remaining work**. Work top to
 
 ### Make self-hosting dependable
 
-- [ ] **Needs Docker engine + Compose/build plugins:** verify the added multi-stage image, persistent volume and non-root runtime with `npm run container:check`.
+- [x] Verify the multi-stage Docker image, non-root runtime and persistent volume across container recreation in Linux CI.
 - [x] Add consistent database/asset backup and restore, with tested recovery into new directories.
-- [ ] **Next:** verify the added CI for clean install, strict checks, tests, builds and recovery; first hosted run is pending.
-- [ ] Document reverse proxy/HTTPS, upgrades, trusted-module installation and campaign export/import.
+- [x] Add CI for clean install, strict checks, tests, builds, backup recovery and container persistence.
+- [ ] **Next:** document reverse proxy/HTTPS, upgrades, trusted-module installation and campaign export/import.
 - [ ] Playtest a complete campaign session with a real group and fix workflow friction.
 - [ ] **After playtest feedback:** add note history/trash and richer document content.
 

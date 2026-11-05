@@ -90,9 +90,9 @@ Save or discard the homebrew draft before choosing another entry, making a copy 
 
 ## Docker packaging
 
-The repository includes a multi-stage `Dockerfile` and `compose.yaml`. **Container verification is pending:** this development machine has a Docker CLI but no running engine or installed Compose/build plugins. Compose syntax and a fresh source-free production install have been checked; actual Linux image building, volume ownership, non-root operation and container replacement still need `npm run container:check` on a working local Docker setup. The README task stays unchecked until that succeeds.
+The repository includes a multi-stage `Dockerfile` and `compose.yaml`. [Linux CI](https://github.com/daeken/Tableloom/actions/runs/42044000646) verified the image build, UID 1000, read-only application filesystem, generated key permissions, HTTP/WebSocket behavior and named-volume persistence across container replacement on Ubuntu 24.04/Linux amd64. The development Mac still has no local engine/plugins; this does not claim Apple Silicon or Windows container verification.
 
-With Docker Engine and Compose/buildx available, the intended local startup is:
+With Docker Engine and Compose/buildx available, local startup is:
 
 ```sh
 docker compose up --build -d
@@ -109,9 +109,9 @@ On first use, read the generated private key on your server to set up the host:
 docker compose exec -T tableloom cat /app/data/host-key
 ```
 
-The key is not baked into the image, passed through default Compose configuration or printed in application logs. Optional `TABLELOOM_HOST_KEY` injection requires your own Compose override/environment mapping; supplying it bypasses generated-key loading. Bind mounts also require administrator-prepared write ownership for UID/GID 1000 and a private key file; the application does not start as root to repair ownership. The default named-volume initialization/ownership remains part of the pending engine verification.
+The key is not baked into the image, passed through default Compose configuration or printed in application logs. Optional `TABLELOOM_HOST_KEY` injection requires your own Compose override/environment mapping; supplying it bypasses generated-key loading. Bind mounts also require administrator-prepared write ownership for UID/GID 1000 and a private key file; the application does not start as root to repair ownership. Default named-volume initialization and application write access passed the Linux CI check.
 
-`docker compose stop` shuts down the service, and ordinary `docker compose down` retains its named volume. Rebuild/recreate with `docker compose up --build -d` to reuse that data. Do not remove the volume during an upgrade. Backup/restore commands are available below; automatic downgrade and container-specific recovery verification remain pending. Keep the data volume and host key safe. The container health probe reads `/api/health` through loopback and checks the protocol version; it does not log credentials or mutate data, and it is not a complete database-integrity check.
+`docker compose stop` shuts down the service, and ordinary `docker compose down` retains its named volume. Rebuild/recreate with `docker compose up --build -d` to reuse that data. Do not remove the volume during an upgrade. Backup/restore commands are available below; automatic downgrade and separate backup/recovery-mount CLI verification inside Docker remain pending. Keep the data volume and host key safe. The container health probe reads `/api/health` through loopback and checks the protocol version; it does not log credentials or mutate data, and it is not a complete database-integrity check.
 
 For development verification:
 
@@ -143,4 +143,4 @@ Only verify/recover archives you trust. Verification does not load modules, migr
 
 The commands use exclusive creation, private incomplete markers and flushed files/directories. Failed operations remove only their newly created files; if cleanup cannot finish, a marker remains and the server refuses that directory. Archives are also refused as live `DATA_DIR` values, preventing accidental writes to a backup. A process kill can leave an incomplete directory; use a different destination and inspect the incomplete one before cleaning it up. There is no overwrite/force mode, automatic retention, scheduling, encryption, compression or in-app download endpoint. The commands do not expose backups or recovery keys to campaign players.
 
-The compiled commands are also included in the Docker image as `node apps/server/dist/backup-cli.js backup|verify|restore`. Actual container/mount recovery is still unverified while the local Docker engine is unavailable. Supply separate appropriately owned backup/recovery mounts and explicit paths when testing that workflow; the standard container check remains open in README.
+The compiled commands are also included in the Docker image as `node apps/server/dist/backup-cli.js backup|verify|restore`. Container recreation against the named data volume passed Linux CI. Backup/restore through separately mounted archive/recovery directories has not yet been exercised inside Docker; supply appropriately owned mounts and explicit paths when testing that workflow.
