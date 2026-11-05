@@ -15,12 +15,13 @@
   "scripts": {
     "dev": "concurrently -k -n server,web 'npm run dev -w @tableloom/server' 'npm run dev -w @tableloom/web'",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test packages/core/src/*.test.ts apps/server/src/*.test.ts apps/web/src/*.test.ts",
+    "test": "node --import tsx --test packages/core/src/*.test.ts apps/server/src/*.test.ts apps/web/src/*.test.ts scripts/*.test.ts",
     "build": "npm run build -w @tableloom/web && npm run build -w @tableloom/server",
-    "check": "npm run typecheck && npm test && npm run build && npm run smoke",
+    "check": "npm run typecheck && npm test && npm run build && npm run bundle:report && npm run smoke",
     "smoke": "node --import tsx scripts/smoke.ts",
     "format": "prettier --write .",
-    "start": "node apps/server/dist/index.js"
+    "start": "node apps/server/dist/index.js",
+    "bundle:report": "node --import tsx scripts/bundle-report.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.10",

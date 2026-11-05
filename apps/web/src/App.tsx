@@ -11,7 +11,7 @@ import { TablePresence } from "./TablePresence.js";
 import { GridSettingsDialog } from "./GridSettingsDialog.js";
 import { SceneMapDialog } from "./SceneMapDialog.js";
 import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   ArrowUpRight,
@@ -31,7 +31,7 @@ import { SystemPanel as BikesPanel } from "@tableloom/kids-on-bikes/client";
 import { SystemPanel as BroomsPanel } from "@tableloom/kids-on-brooms/client";
 import { parseDice } from "@tableloom/core";
 import type { RollVisibility } from "@tableloom/core";
-import { Tabletop } from "./Tabletop.js";
+import { BattlefieldBoundary } from "./BattlefieldBoundary.js";
 import type { Tool } from "./Tabletop.js";
 import { useTable } from "./useTable.js";
 import { useAccess, accessRequest } from "./useAccess.js";
@@ -54,6 +54,9 @@ const panels = {
   "kids-on-bikes": BikesPanel,
   "kids-on-brooms": BroomsPanel,
 };
+const Tabletop = lazy(() =>
+  import("./Tabletop.js").then((module) => ({ default: module.Tabletop })),
+);
 
 export function App() {
   const { access, error: accessError, refresh, accept } = useAccess();
@@ -518,54 +521,64 @@ export function App() {
             send={send}
           />
           <CommandStatus deliveries={table.deliveries} />
-          <div className="canvas-frame">
-            {state && table.grid ? (
-              <Tabletop
-                key={
-                  table.context
-                    ? `${viewerKey}:${contextKey(table.context)}`
-                    : viewerKey
-                }
-                member={member}
-                state={state}
-                cursors={table.cursors}
-                onlineMembers={table.onlineMembers}
-                shareCursor={table.shareCursor}
-                background={table.background}
-                grid={table.grid}
-                campaignId={member?.tableId ?? ""}
-                sceneId={table.context?.sceneId ?? ""}
+          <BattlefieldBoundary>
+            <div className="canvas-frame">
+              {state && table.grid ? (
+                <Suspense
+                  fallback={
+                    <div className="table-loading" role="status">
+                      Unfolding the table…
+                    </div>
+                  }
+                >
+                  <Tabletop
+                    key={
+                      table.context
+                        ? `${viewerKey}:${contextKey(table.context)}`
+                        : viewerKey
+                    }
+                    member={member}
+                    state={state}
+                    cursors={table.cursors}
+                    onlineMembers={table.onlineMembers}
+                    shareCursor={table.shareCursor}
+                    background={table.background}
+                    grid={table.grid}
+                    campaignId={member?.tableId ?? ""}
+                    sceneId={table.context?.sceneId ?? ""}
+                    tool={tool}
+                    setTool={setTool}
+                    history={table.history}
+                    color={color}
+                    tokenName={tokenName}
+                    enabled={connected}
+                    pending={sceneEditPending}
+                    send={send}
+                  />
+                </Suspense>
+              ) : (
+                <div className="table-loading">Setting a place for you…</div>
+              )}
+              <DrawingToolbar
                 tool={tool}
                 setTool={setTool}
-                history={table.history}
                 color={color}
-                tokenName={tokenName}
-                enabled={connected}
-                pending={sceneEditPending}
-                send={send}
+                setColor={setColor}
               />
-            ) : (
-              <div className="table-loading">Setting a place for you…</div>
-            )}
-            <DrawingToolbar
-              tool={tool}
-              setTool={setTool}
-              color={color}
-              setColor={setColor}
-            />
-            {tool === "token" && (
-              <div className="token-options">
-                <label htmlFor="token-name">Token name</label>
-                <input
-                  id="token-name"
-                  maxLength={32}
-                  value={tokenName}
-                  onChange={(e) => setTokenName(e.target.value)}
-                />
-                <span>Click the table to place</span>
-              </div>
-            )}
-          </div>
+              {tool === "token" && (
+                <div className="token-options">
+                  <label htmlFor="token-name">Token name</label>
+                  <input
+                    id="token-name"
+                    maxLength={32}
+                    value={tokenName}
+                    onChange={(e) => setTokenName(e.target.value)}
+                  />
+                  <span>Click the table to place</span>
+                </div>
+              )}
+            </div>
+          </BattlefieldBoundary>
           <footer className="table-footer">
             <span>
               <span className="keyboard-hint">↖</span>

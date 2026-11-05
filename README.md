@@ -69,7 +69,8 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Isolate sign-in as an accessible page with mode/error focus and authenticated handoff.
 - [x] Make the drawing toolbar keyboard navigable with readable color labels.
 - [x] Fix long campaign-name reflow and check narrow/short viewport layouts.
-- [ ] **Next:** measure canvas redraw/snapshot performance and split the initial frontend bundle.
+- [x] Split initial frontend JavaScript and add reproducible bundle-size reporting.
+- [ ] **Next:** measure canvas redraw/snapshot performance.
 
 ### Make game modules playable
 

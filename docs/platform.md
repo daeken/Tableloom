@@ -32,6 +32,25 @@ This avoids a native package build for self-hosters; normalized campaign/documen
 
 Modules are trusted installed code, not a sandbox. Each has shared, client, and server entry points and an independent version. Content packs provide stable definition IDs; owned instances carry their own mutable state. Published game data will be added from user-provided sources with edition/page references. Shared Kids-system code should be extracted only after the actual implementations demonstrate common behavior.
 
+## Frontend loading and bundle measurements
+
+The battlefield/PixiJS module is loaded with React `lazy` only when an authenticated scene/grid is ready. Sign-in and the surrounding campaign, dice, Notes and Chat UI remain in the initial application. The canvas area shows a polite loading state while the renderer loads. Existing context/viewer keys still reset the tabletop, and saved commands/permissions are unchanged. See the [React lazy/Suspense contract](https://react.dev/reference/react/lazy).
+
+A battlefield-scoped [error boundary](https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary) replaces the canvas frame and its tools if loading/rendering fails. Other panels stay usable, including saving a note. Recovery offers **Reload page**, with a reminder to save panel drafts first. Failed lazy imports stay cached for that page, so this does not silently retry/replay actions or automatically reload. A full reload after assets return restores the renderer and persisted state; unsaved in-memory drafts follow the existing reload behavior.
+
+The production build emits a [Vite manifest](https://vite.dev/guide/backend-integration). After building, run `npm run bundle:report` for JSON raw/per-file-gzip estimates of initial, deferred and total JavaScript. The initial set follows every static import from every entry, deduplicates shared/cyclic chunks and excludes dynamic-only imports; totals include all generated JavaScript files. Manifest shape and initial static-import references, initial-file existence and build-directory asset paths are validated. `npm run check` includes the report; this is measurement, without an enforced size budget. CSS/HTML and runtime memory/CPU are outside the report, and gzip figures do not mean the host/proxy has compression enabled.
+
+Measured production JavaScript on 2026-11-05:
+
+| Scope | Before | Deferred-renderer build |
+| --- | ---: | ---: |
+| Initial raw bytes | 804,385 | 436,853 |
+| Initial gzip estimate | 242,918 | 130,612 |
+| Total raw bytes | 1,078,590 | 1,079,245 |
+| Total gzip estimate | 319,963 | 320,250 |
+
+Initial raw JavaScript fell **45.7%**; total code remains about the same and backend-specific renderer chunks still load as needed. Local server request logs verified that only the entry script was requested before authentication, with renderer/backend files fetched afterward. The browser tool did not expose resource timing; no network-latency, redraw or snapshot-speed claim is inferred from these byte measurements. Canvas redraw/snapshot profiling remains in README.
+
 ## Canvas decision — 2026-11-04
 
 **Keep PixiJS as the live battlefield renderer.** Build the queued drawing/selection tools around Tableloom's validated, owned, versioned scene objects and server commands. Excalidraw is a credible optional map-preparation editor for later asset work; it is not being embedded into the live table in this increment. This preserves the intended quick whiteboard experience as a product goal, rather than treating the current two drawing tools as finished.

@@ -28,6 +28,10 @@ npm run build
 npm start           # frontend + API on http://127.0.0.1:3001
 ```
 
+The battlefield loads when a signed-in scene is ready. If it cannot load, the other panels remain available; save panel drafts before choosing **Reload page**. Production hosting must serve the entire generated frontend folder, including all hashed JavaScript assets.
+
+After a build, `npm run bundle:report` reports initial/deferred JavaScript sizes. `npm run check` includes this report; gzip sizes are estimates and require host/proxy compression to affect transfer sizes.
+
 Configuration: `PORT` (default `3001`), `HOST` (default `127.0.0.1`), `DATA_DIR` (default `./data`), optional `TABLELOOM_HOST_KEY` (32–512 characters, otherwise a random key is generated in a private `host-key` file), and optional `PUBLIC_ORIGIN` (the browser-facing HTTP(S) origin, without a path). For an HTTPS reverse proxy, set `PUBLIC_ORIGIN=https://your-table.example`; this enforces the configured origin and enables Secure session cookies without trusting forwarded headers. Development defaults to same-origin HTTP on loopback.
 
 Only authenticated members can fetch or connect to the table. Everyone can draw, create tokens, and roll dice. Players can move, resize, and delete their own tokens and drawings (including text labels); the GM can edit every object and change the game system. The server assigns ownership to the creator; creation commands reject caller-supplied ownership. Older objects without a recorded owner stay under GM control until assigned. The GM can select **Manage ownership** below the cast list, choose a token/drawing/note and a current member, then review and confirm the transfer. Removed members cannot receive ownership. Assigning an object to the GM keeps it under GM control.

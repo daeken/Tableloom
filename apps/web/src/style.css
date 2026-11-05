@@ -2796,6 +2796,19 @@ textarea::placeholder {
 .side-panel[hidden] {
   display: none;
 }
+.battlefield-load-error {
+  padding: 24px;
+  overflow: auto;
+  background: #fffef8;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.battlefield-load-error button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--control-border);
+}
 .panel-tabs button:focus-visible,
 .side-panel:focus-visible {
   outline-offset: -5px;
