@@ -340,6 +340,14 @@ At phone widths, a selected object shows a collapsed **Actions…** disclosure b
 
 Synthetic browser checks cover **320, 390, 701, 768 and 1,280 CSS-pixel widths**, keyboard dialog/skip navigation and retained local drafts. This is an initial layout/navigation increment, not a complete accessibility or touchscreen certification. Real-device touch/pen verification, pinch behavior, fully keyboard-driven geometry editing, assistive-technology audits, physical mobile keyboards and real-device touch testing remain queued. The battlefield still reserves its surface for drawing/dragging, so scroll the page using surrounding content or use the skip links to reach panels.
 
+## Access page and focus handoff
+
+Until a validated access response contains a member, the app renders only the access form inside a named **Table access** `main` landmark. Campaign panels, battlefield controls and the header are absent from the rendered page and accessibility tree. This uses the [W3C main-landmark pattern](https://www.w3.org/WAI/ARIA/apg/patterns/landmarks/examples/main.html); the access flow is a standalone page with normal browser navigation.
+
+Loading focuses the heading and announces status/connection errors. Setup/join focuses the name field; switching to host recovery focuses the key field. Returning to joining preserves the local nickname draft. A failed request clears the credential, links the alert text to its field and returns focus there. Successful setup, joining or recovery focuses the Battlefield main landmark; sign-out returns to the access page. Later authenticated campaign/role updates do not repeat this initial focus handoff. Existing authentication endpoints, validation, credentials and permissions are unchanged.
+
+The card uses natural document height and scrolling with no fixed overlay or height cap. A short/narrow viewport can reach the whole form without horizontal overflow. Keyboard/accessibility-tree and resized-viewport checks verify this flow; actual screen-reader/mobile-keyboard testing remains outstanding.
+
 ## Panel tab navigation
 
 The Dice & rolls, Your game, Notes and Chat controls expose a named **Table panels** tablist. Each tab has an explicit selected state and a stable relationship to its named tabpanel. Inactive panels are hidden from rendering, keyboard navigation and the accessibility tree. One tab is a Tab stop; Tab enters the active named panel, and Shift-Tab returns to its selected tab.

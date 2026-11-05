@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowUpRight, Layers2 } from "lucide-react";
 import { accessStatusSchema } from "@tableloom/core/access";
@@ -21,7 +21,16 @@ export function AccessGate({
   const [recover, setRecover] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const heading = useRef<HTMLHeadingElement>(null),
+    nameInput = useRef<HTMLInputElement>(null),
+    credentialInput = useRef<HTMLInputElement>(null);
   const mode = access?.setupRequired ? "setup" : recover ? "recover" : "join";
+  const ready = Boolean(access);
+  useEffect(() => {
+    if (!ready) heading.current?.focus();
+    else if (mode === "recover") credentialInput.current?.focus();
+    else nameInput.current?.focus();
+  }, [mode, ready]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -39,18 +48,19 @@ export function AccessGate({
     } catch (err) {
       setCredential("");
       setError(err instanceof Error ? err.message : "Unable to sign in.");
+      credentialInput.current?.focus();
     } finally {
       setBusy(false);
     }
   }
   return (
-    <div className="join-backdrop">
+    <main className="access-page" aria-label="Table access">
       <form className="join-card" onSubmit={submit} aria-label="Table access">
         <span className="brand-mark">
           <Layers2 size={27} />
         </span>
         <span className="eyebrow">WELCOME TO TABLELOOM</span>
-        <h1>
+        <h1 ref={heading} tabIndex={-1}>
           {!access ? (
             "Finding your table…"
           ) : mode === "setup" ? (
@@ -75,7 +85,9 @@ export function AccessGate({
         </h1>
         {!access ? (
           <>
-            <p>{connectionError || "Checking your seat at the table."}</p>
+            <p role={connectionError ? "alert" : "status"}>
+              {connectionError || "Checking your seat at the table."}
+            </p>
             {connectionError && (
               <button
                 type="button"
@@ -100,7 +112,7 @@ export function AccessGate({
                 <label htmlFor="access-name">What should we call you?</label>
                 <input
                   id="access-name"
-                  autoFocus
+                  ref={nameInput}
                   maxLength={32}
                   required
                   value={name}
@@ -115,10 +127,12 @@ export function AccessGate({
             </label>
             <input
               id="access-code"
+              ref={credentialInput}
               type="password"
               required
               maxLength={512}
               autoComplete="off"
+              aria-describedby={error ? "access-error" : undefined}
               value={credential}
               onChange={(e) => setCredential(e.target.value)}
               placeholder={
@@ -126,7 +140,7 @@ export function AccessGate({
               }
             />
             {error && (
-              <p className="inline-error" role="alert">
+              <p id="access-error" className="inline-error" role="alert">
                 {error}
               </p>
             )}
@@ -161,6 +175,6 @@ export function AccessGate({
           </>
         )}
       </form>
-    </div>
+    </main>
   );
 }

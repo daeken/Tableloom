@@ -884,15 +884,17 @@ p {
 .error-toast button {
   display: flex;
 }
-.join-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  background: #1d2a23bb;
-  backdrop-filter: blur(7px);
+.access-page {
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: 24px 12px;
+  background: #1e2b23;
+}
+.access-page > .join-card {
+  margin: 0;
+  max-height: none;
+  overflow: visible;
 }
 .join-card {
   width: 390px;

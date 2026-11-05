@@ -80,6 +80,19 @@ export function App() {
   const viewerKey = member
     ? `${member.id}:${member.tableId}:${member.role}`
     : null;
+  const accessPageVisible = useRef(true);
+  useEffect(() => {
+    if (!member) {
+      accessPageVisible.current = true;
+      return;
+    }
+    if (accessPageVisible.current) {
+      accessPageVisible.current = false;
+      document
+        .getElementById("battlefield-main")
+        ?.focus({ preventScroll: true });
+    }
+  }, [viewerKey]);
   const compact = useCompactLayout();
   const [controlsOpen, setControlsOpen] = useState(false);
   const controlsTrigger = useRef<HTMLButtonElement>(null);
@@ -382,6 +395,18 @@ export function App() {
       </div>
     </aside>
   );
+
+  if (!member) {
+    return (
+      <AccessGate
+        key={access?.setupRequired ? "setup" : "join"}
+        access={access}
+        connectionError={accessError}
+        refresh={refresh}
+        accept={accept}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -797,15 +822,6 @@ export function App() {
             <X size={16} />
           </button>
         </div>
-      )}
-      {!member && (
-        <AccessGate
-          key={access?.setupRequired ? "setup" : "join"}
-          access={access}
-          connectionError={accessError}
-          refresh={refresh}
-          accept={accept}
-        />
       )}
       {campaignOpen && member && (
         <CampaignDialog
