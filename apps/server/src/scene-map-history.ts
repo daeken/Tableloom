@@ -10,7 +10,7 @@ import { StoreError } from "./store.js";
 
 type Map = z.infer<typeof backgroundMapSchema> | null;
 export type MapRecord = { version: number; map: Map; cursor: number };
-const entrySchema = z
+export const backgroundHistoryEntrySchema = z
   .object({
     id: z.uuid(),
     seq: z.number().int().positive(),
@@ -19,6 +19,7 @@ const entrySchema = z
     after: backgroundMapSchema.nullable(),
   })
   .strict();
+const entrySchema = backgroundHistoryEntrySchema;
 // Image keys are access capabilities, never restored from an older snapshot.
 function sameMap(a: Map, b: Map) {
   const value = (m: Map) =>

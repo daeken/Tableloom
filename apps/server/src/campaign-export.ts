@@ -167,7 +167,7 @@ export const campaignExportTables = {
     })
     .strict(),
 };
-const storageVersions = {
+export const storageVersions = {
   campaign_storage_version: 8,
   command_binding_version: 1,
   object_identity_version: 1,
@@ -187,7 +187,7 @@ export const campaignExportRequestSchema = z
     include: z.literal("all-campaign-content-including-private"),
   })
   .strict();
-const memberDescriptor = z
+export const memberDescriptor = z
   .object({
     id: uuid,
     name: z.string().min(1).max(32),

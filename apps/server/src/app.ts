@@ -25,6 +25,7 @@ import type { ServerMessage } from "@tableloom/core";
 import { applyCommand, projectTable } from "@tableloom/core/server";
 import { StoreError, TableStore } from "./store.js";
 import { registerCampaignRoutes } from "./campaign-http.js";
+import { registerCampaignPreflightRoutes } from "./campaign-preflight-http.js";
 import { installedModules } from "./modules.js";
 import { OutboundChannel } from "./outbound.js";
 import { SceneHistoryStore } from "./scene-history.js";
@@ -316,6 +317,13 @@ export async function createApp(options: {
     setSession: accessHttp.setSession,
     disconnectInvalid,
     refreshCampaign,
+  });
+  await registerCampaignPreflightRoutes(app, {
+    database,
+    access,
+    catalog,
+    contentCatalog,
+    systems,
   });
   registerChatRoutes(app, access, chat);
   registerDocumentRoutes(app, access, documents);

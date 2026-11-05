@@ -42,6 +42,7 @@ async function verifyCampaignExport(
     response.headers.get("content-disposition") ?? "",
     /^attachment;/,
   );
+  const serialized = await response.text();
   const archive = z
     .object({
       format: z.literal("tableloom-campaign-export"),
@@ -57,7 +58,7 @@ async function verifyCampaignExport(
         ),
       }),
     })
-    .parse(await response.json());
+    .parse(JSON.parse(serialized));
   const exported = archive.records.module_documents.find(
     (row) => row.id === document.id,
   );
@@ -68,6 +69,40 @@ async function verifyCampaignExport(
   const image = archive.records.campaign_assets[0]!;
   assert.equal(hash(Buffer.from(image.bytes, "base64")), assetHash);
   assert.equal(image.sha256, assetHash);
+  const preflight = await fetch(url + "/api/campaign-imports/preflight", {
+    method: "POST",
+    signal: AbortSignal.timeout(5000),
+    headers: {
+      Origin: url,
+      Cookie: cookie,
+      "Content-Type": "application/json",
+    },
+    body: serialized,
+  });
+  assert.equal(preflight.status, 200);
+  assert.equal(preflight.headers.get("cache-control"), "no-store");
+  const report = z
+    .object({
+      status: z.literal("preflight-only"),
+      importReady: z.literal(false),
+      archiveSha256: z.string(),
+      blockers: z.array(z.string()),
+      ownership: z.object({
+        policy: z.literal("explicit-mapping-required"),
+        subjects: z.array(z.object({ sourceId: z.uuid() })),
+      }),
+    })
+    .parse(await preflight.json());
+  assert.deepEqual(report.blockers, []);
+  assert.equal(
+    report.archiveSha256,
+    createHash("sha256").update(serialized).digest("hex"),
+  );
+  assert.ok(
+    report.ownership.subjects.some(
+      (subject) => subject.sourceId === document.ownerId,
+    ),
+  );
 }
 export async function verifyRuntimeHttp(url: string) {
   const health = await request(url, "/api/health");
