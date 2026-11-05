@@ -7,6 +7,7 @@ import {
   selectTokens,
 } from "./token-selection.js";
 const token = (x: number, y: number, version = 1): Token => ({
+  radius: 24,
   id: crypto.randomUUID(),
   name: "Scout",
   position: { x, y },

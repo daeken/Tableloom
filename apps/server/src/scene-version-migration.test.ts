@@ -133,6 +133,7 @@ function downgradeFixture(db: DatabaseSync) {
     const data = JSON.parse(String(row.state_json));
     for (const object of [...data.tokens, ...data.drawings])
       delete object.version;
+    for (const token of data.tokens) delete token.radius;
     db.prepare(
       "UPDATE scene_records SET state_json = ? WHERE campaign_id = ? AND id = ?",
     ).run(JSON.stringify(data), row.campaign_id!, row.id!);
@@ -177,7 +178,7 @@ test("campaign storage 1 upgrades every active/offstage/other-campaign object at
     );
     assert.equal(
       db.prepare("SELECT version FROM campaign_storage_version").get()?.version,
-      2,
+      3,
     );
     for (const row of db.prepare("SELECT state_json FROM scene_records").all())
       for (const object of JSON.parse(String(row.state_json)).tokens)
@@ -241,7 +242,7 @@ test("failed version upgrades preserve all rows and marker; malformed hidden sce
       offstage.id,
     );
     const upgraded = new TableStore(db);
-    assert.equal(upgraded.load().schemaVersion, 5);
+    assert.equal(upgraded.load().schemaVersion, 6);
     const active = upgraded.getCampaign().activeSceneId;
     const activeRow = db
       .prepare(
@@ -256,7 +257,7 @@ test("failed version upgrades preserve all rows and marker; malformed hidden sce
     assert.throws(() => new TableStore(db).load());
     assert.equal(
       db.prepare("SELECT version FROM campaign_storage_version").get()?.version,
-      2,
+      3,
     );
     db.exec("UPDATE campaign_storage_version SET version=99");
     assert.throws(() => new TableStore(db));
@@ -289,5 +290,114 @@ test("empty and orphaned legacy scene storage cannot advance its schema marker",
     } finally {
       db.close();
     }
+  }
+});
+
+function downgradeSizeFixture(db: DatabaseSync) {
+  for (const row of db
+    .prepare("SELECT id,state_json FROM campaign_records")
+    .all()) {
+    const data = JSON.parse(String(row.state_json));
+    data.schemaVersion = 5;
+    db.prepare("UPDATE campaign_records SET state_json=? WHERE id=?").run(
+      JSON.stringify(data),
+      row.id!,
+    );
+  }
+  for (const row of db
+    .prepare("SELECT campaign_id,id,state_json FROM scene_records")
+    .all()) {
+    const data = JSON.parse(String(row.state_json));
+    for (const token of data.tokens) delete token.radius;
+    db.prepare(
+      "UPDATE scene_records SET state_json=? WHERE campaign_id=? AND id=?",
+    ).run(JSON.stringify(data), row.campaign_id!, row.id!);
+  }
+  db.exec("UPDATE campaign_storage_version SET version=2");
+}
+
+test("campaign storage 2 upgrades all token sizes including offstage and other campaigns, retaining versions, private data, metadata, access and receipts", () => {
+  const f = fixture();
+  try {
+    const state = f.store.load();
+    state.revision += 1;
+    state.tokens[0]!.version = 19;
+    f.store.save(state, crypto.randomUUID());
+    const expected = capture(f.db),
+      tables = [
+        "campaign_receipts",
+        "command_bindings",
+        "access_users",
+        "access_memberships",
+        "access_sessions",
+        "module_documents",
+        "roll_archive",
+      ],
+      preserved = tables.map((table) =>
+        f.db.prepare(`SELECT * FROM ${table}`).all(),
+      );
+    downgradeSizeFixture(f.db);
+    const upgraded = new TableStore(f.db);
+    assert.deepEqual(capture(f.db), expected);
+    assert.equal(upgraded.load().tokens[0]!.version, 19);
+    assert.equal(upgraded.load().tokens[0]!.radius, 24);
+    for (const row of f.db
+      .prepare("SELECT state_json FROM scene_records")
+      .all())
+      for (const token of JSON.parse(String(row.state_json)).tokens)
+        assert.equal(token.radius, 24);
+    tables.forEach((table, index) =>
+      assert.deepEqual(
+        f.db.prepare(`SELECT * FROM ${table}`).all(),
+        preserved[index],
+      ),
+    );
+    new TableStore(f.db);
+    assert.deepEqual(capture(f.db), expected);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("token-size migration marker failure and invalid hidden geometry roll back every row; current missing sizes never reseed", () => {
+  const f = fixture();
+  try {
+    downgradeSizeFixture(f.db);
+    const before = capture(f.db);
+    f.db.exec(
+      "CREATE TRIGGER reject_size_marker BEFORE UPDATE ON campaign_storage_version BEGIN SELECT RAISE(ABORT,'fixture size marker'); END;",
+    );
+    assert.throws(() => new TableStore(f.db), /fixture size marker/);
+    assert.deepEqual(capture(f.db), before);
+    f.db.exec("DROP TRIGGER reject_size_marker");
+    const row = f.db
+        .prepare("SELECT state_json FROM scene_records WHERE id=?")
+        .get(f.offstage.id)!,
+      data = JSON.parse(String(row.state_json));
+    data.tokens[0].position.y = "invalid";
+    f.db
+      .prepare("UPDATE scene_records SET state_json=? WHERE id=?")
+      .run(JSON.stringify(data), f.offstage.id);
+    const invalid = capture(f.db);
+    assert.throws(() => new TableStore(f.db));
+    assert.deepEqual(capture(f.db), invalid);
+    f.db
+      .prepare("UPDATE scene_records SET state_json=? WHERE id=?")
+      .run(row.state_json!, f.offstage.id);
+    const upgraded = new TableStore(f.db);
+    const active = upgraded.getCampaign().activeSceneId,
+      activeRow = f.db
+        .prepare("SELECT state_json FROM scene_records WHERE id=?")
+        .get(active)!,
+      incomplete = JSON.parse(String(activeRow.state_json));
+    delete incomplete.tokens[0].radius;
+    f.db
+      .prepare("UPDATE scene_records SET state_json=? WHERE id=?")
+      .run(JSON.stringify(incomplete), active);
+    const current = capture(f.db);
+    assert.throws(() => new TableStore(f.db).load());
+    assert.deepEqual(capture(f.db), current);
+  } finally {
+    f.db.close();
   }
 });

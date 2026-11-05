@@ -3,6 +3,7 @@ import {
   objectMoveTargetsSchema,
   translationSchema,
   pointSchema,
+  tokenRadiusSchema,
 } from "./index.js";
 import { resizedDrawingPoints } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -46,6 +47,17 @@ export function authorizeCommand(
   member: Member,
 ): void {
   switch (command.type) {
+    case "token.resize": {
+      const token = state.tokens.find((t) => t.id === command.tokenId);
+      if (!token) throw new Error("That token no longer exists.");
+      if (!canEditObject(member, token))
+        throw new Error("Only the owner or GM can resize this token.");
+      if (token.version !== command.expectedVersion)
+        throw new Error("This token changed. Review it before resizing again.");
+      if (tokenRadiusSchema.parse(command.radius) === token.radius)
+        throw new Error("Change the token size before saving.");
+      return;
+    }
     case "drawing.resize": {
       const drawing = state.drawings.find((d) => d.id === command.drawingId);
       if (!drawing) throw new Error("That drawing no longer exists.");

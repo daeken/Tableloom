@@ -599,6 +599,7 @@ test("full scenes block restoration without consuming history, and rejected crea
         tokens: Array.from({ length: 200 }, () => ({
           id: randomUUID(),
           name: "Filler",
+          radius: 24,
           position: { x: 0, y: 0 },
           color: "#405f4d",
           ownerId: f.gm.member.id,
@@ -1452,6 +1453,7 @@ test("restoration requires aggregate token and drawing capacity and never restor
         tokens: Array.from({ length: 199 }, () => ({
           id: randomUUID(),
           name: "Filler",
+          radius: 24,
           position: { x: 0, y: 0 },
           color: "#405f4d",
           ownerId: f.gm.member.id,
@@ -1846,5 +1848,116 @@ test("resize rejects stale, unauthorized, missing, degenerate, unchanged and mal
     );
   } finally {
     f.db.close();
+  }
+});
+
+test("token resize exact size survives complete create/move/group-delete/restore causal cycles and remote changes block old size history", () => {
+  const f = fixture();
+  try {
+    const id = f.add();
+    f.move(id, 0.1);
+    f.run({
+      type: "token.resize",
+      tokenId: id,
+      expectedVersion: 2,
+      radius: 75.125,
+    });
+    assert.equal(f.history.status(f.player.member).undo!.action, "resize");
+    f.run({
+      type: "objects.delete",
+      objects: [{ objectId: id, expectedVersion: 3 }],
+    });
+    assert.equal(f.action("scene.undo").tokens[0]!.radius, 75.125);
+    assert.equal(f.action("scene.undo").tokens[0]!.radius, 24);
+    assert.equal(f.action("scene.undo").tokens[0]!.position.x, 0);
+    assert.equal(f.action("scene.undo").tokens.length, 0);
+    f.action("scene.redo");
+    f.action("scene.redo");
+    assert.equal(f.action("scene.redo").tokens[0]!.radius, 75.125);
+    f.action("scene.redo");
+    f.action("scene.undo");
+    assert.equal(f.tables.load().tokens[0]!.version, 13);
+    f.run(
+      { type: "token.resize", tokenId: id, expectedVersion: 13, radius: 100 },
+      f.gm.member,
+    );
+    assert.equal(f.history.status(f.player.member).undo!.available, false);
+    assert.throws(() => f.action("scene.undo"), /changed|unavailable/);
+    assert.equal(f.tables.load().tokens[0]!.radius, 100);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("schema-6 token snapshots gain fixed legacy radius atomically, including group restoration; failed markers leave every inverse untouched", () => {
+  for (const fail of [false, true]) {
+    const f = fixture();
+    try {
+      const a = f.add(),
+        b = f.add();
+      f.run({
+        type: "objects.delete",
+        objects: [a, b].map((objectId) => ({ objectId, expectedVersion: 1 })),
+      });
+      const status = f.history.status(f.player.member);
+      for (const row of f.db
+        .prepare("SELECT id,payload_json FROM scene_history_entries")
+        .all()) {
+        const payload = JSON.parse(String(row.payload_json));
+        if (payload.kind === "create" || payload.kind === "delete")
+          delete payload.object.radius;
+        if (payload.kind === "delete-many")
+          for (const saved of payload.objects) delete saved.object.radius;
+        f.db
+          .prepare("UPDATE scene_history_entries SET payload_json=? WHERE id=?")
+          .run(JSON.stringify(payload), row.id!);
+      }
+      f.db.exec("UPDATE scene_history_version SET version=6");
+      const rows = f.db
+        .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+        .all();
+      if (fail) {
+        f.db.exec(
+          "CREATE TRIGGER reject_size_history BEFORE UPDATE ON scene_history_version BEGIN SELECT RAISE(ABORT,'fixture size history'); END;",
+        );
+        assert.throws(
+          () => new SceneHistoryStore(f.db, f.tables),
+          /fixture size history/,
+        );
+        assert.deepEqual(
+          f.db
+            .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
+            .all(),
+          rows,
+        );
+        assert.equal(
+          f.db.prepare("SELECT version FROM scene_history_version").get()!
+            .version,
+          6,
+        );
+        f.db.exec("DROP TRIGGER reject_size_history");
+      }
+      const history = new SceneHistoryStore(f.db, f.tables);
+      assert.deepEqual(history.status(f.player.member), status);
+      assert.equal(
+        f.db.prepare("SELECT version FROM scene_history_version").get()!
+          .version,
+        7,
+      );
+      const restored = f.action("scene.undo");
+      assert.deepEqual(
+        restored.tokens.map((token) => token.radius),
+        [24, 24],
+      );
+      assert.deepEqual(
+        restored.tokens.map((token) => token.version),
+        [3, 3],
+      );
+      f.action("scene.undo");
+      f.action("scene.undo");
+      assert.equal(f.tables.load().tokens.length, 0);
+    } finally {
+      f.db.close();
+    }
   }
 });

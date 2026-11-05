@@ -774,6 +774,80 @@ try {
         type === "scene.undo" ? resizedPoints : finalPoints,
       );
     }
+    const sizeToken = randomUUID(),
+      sizeAddId = randomUUID(),
+      sizeAddAck = acknowledgement(live, sizeAddId),
+      sizeAddView = snapshot(live, (message) =>
+        message.state.tokens.some((t) => t.id === sizeToken),
+      );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: sizeAddId,
+          type: "token.add",
+          token: {
+            id: sizeToken,
+            name: "Large scout",
+            color: "#405f4d",
+            position: { x: 90, y: 150 },
+          },
+        },
+      }),
+    );
+    await sizeAddAck;
+    await sizeAddView;
+    const sizeId = randomUUID(),
+      sizeAck = acknowledgement(live, sizeId),
+      sizeView = snapshot(live, (message) =>
+        message.state.tokens.some((t) => t.id === sizeToken && t.version === 2),
+      );
+    live.send(
+      JSON.stringify({
+        context: current.context,
+        command: {
+          id: sizeId,
+          type: "token.resize",
+          tokenId: sizeToken,
+          expectedVersion: 1,
+          radius: 75.125,
+        },
+      }),
+    );
+    await sizeAck;
+    let sizeState = await sizeView;
+    assert.equal(
+      sizeState.state.tokens.find((t) => t.id === sizeToken)!.radius,
+      75.125,
+    );
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const edge = sizeState.history[type === "scene.undo" ? "undo" : "redo"]!,
+        id = randomUUID(),
+        ack = acknowledgement(live, id),
+        view = snapshot(live, (message) =>
+          message.state.tokens.some(
+            (t) =>
+              t.id === sizeToken &&
+              t.version === (type === "scene.undo" ? 3 : 4),
+          ),
+        );
+      live.send(
+        JSON.stringify({
+          context: current.context,
+          command: {
+            id,
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      await ack;
+      sizeState = await view;
+      const sized = sizeState.state.tokens.find((t) => t.id === sizeToken)!;
+      assert.equal(sized.radius, type === "scene.undo" ? 24 : 75.125);
+      assert.deepEqual(sized.position, { x: 90, y: 150 });
+    }
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -814,5 +888,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/resize history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size history, roll archive/cleanup, and clean shutdown.",
 );

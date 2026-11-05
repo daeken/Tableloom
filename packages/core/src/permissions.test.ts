@@ -76,7 +76,7 @@ test("owner/other-player/GM permission matrix covers token movement and both obj
   const d = drawing();
   const state: TableState = {
     ...createTable(),
-    tokens: [{ ...t, version: 1, ownerId: alice.id }],
+    tokens: [{ ...t, radius: 24, version: 1, ownerId: alice.id }],
     drawings: [{ ...d, version: 1, ownerId: alice.id }],
   };
   const commands: Command[] = [
@@ -153,7 +153,7 @@ test("legacy objects are GM-controlled and unavailable targets do not change sta
   const d = drawing();
   const state: TableState = {
     ...createTable(),
-    tokens: [{ ...t, version: 1, ownerId: null }],
+    tokens: [{ ...t, radius: 24, version: 1, ownerId: null }],
     drawings: [{ ...d, version: 1, ownerId: null }],
   };
   for (const actor of [alice, bob]) {
@@ -269,11 +269,11 @@ test("version 1 migration preserves data/revision and defaults to GM control wit
   Reflect.deleteProperty(legacy, "notes");
   const result = restoreTable(legacy);
   assert.equal(result.migrated, true);
-  assert.equal(result.state.schemaVersion, 5);
+  assert.equal(result.state.schemaVersion, 6);
   assert.equal(result.state.revision, 42);
   assert.deepEqual(
     result.state.tokens,
-    legacy.tokens.map((t) => ({ ...t, ownerId: null, version: 1 })),
+    legacy.tokens.map((t) => ({ ...t, radius: 24, ownerId: null, version: 1 })),
   );
   assert.deepEqual(
     result.state.drawings,

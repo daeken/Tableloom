@@ -273,6 +273,7 @@ test("campaign metadata, scene state, system pins, and receipts commit together 
         {
           id: randomUUID(),
           name: "Marker",
+          radius: 24,
           position: { x: 0, y: 0 },
           color: "#405f4d",
           ownerId: gm.id,
@@ -340,7 +341,7 @@ test("unknown, incomplete, mismatched, or downgraded persistence fails closed wi
       db.prepare("SELECT version FROM campaign_storage_version").get()?.version,
       99,
     );
-    db.exec("UPDATE campaign_storage_version SET version = 2");
+    db.exec("UPDATE campaign_storage_version SET version = 3");
     db.prepare("UPDATE campaign_records SET json = ?").run(
       JSON.stringify({ ...metadata, activeSceneId: randomUUID() }),
     );

@@ -1,3 +1,4 @@
+import { ResizeTokenDialog } from "./ResizeTokenDialog.js";
 import { drawingBounds, resizedDrawingPoints } from "@tableloom/core/geometry";
 import {
   canResize,
@@ -24,6 +25,7 @@ import type {
   CommandInput,
   DrawingInput,
   Drawing,
+  Token,
   Point,
   TableView,
 } from "@tableloom/core";
@@ -32,6 +34,7 @@ import { translateTokens } from "./token-selection.js";
 import {
   translateObject,
   hitDrawing,
+  hitToken,
   objectBounds,
   objectsInBox,
   selectObjects,
@@ -116,6 +119,7 @@ export function Tabletop({
     update();
     return () => observer.disconnect();
   }, []);
+  const [resizeToken, setResizeToken] = useState<Token | null>(null);
   const [selectionError, setSelectionError] = useState("");
   const [deleteReview, setDeleteReview] = useState<DeletionReviewItem[] | null>(
     null,
@@ -269,17 +273,25 @@ export function Tabletop({
       const token = preview && "position" in preview ? preview : original;
       const { x, y } = token.position;
       const graphic = new Graphics();
-      graphic.circle(x + 2, y + 4, 24).fill({ color: "#242e29", alpha: 0.18 });
-      if (selected.includes(token.id))
-        graphic.circle(x, y, 30).stroke({ color: "#405f4d", width: 2 });
       graphic
-        .circle(x, y, 24)
+        .circle(x + 2, y + 4, token.radius)
+        .fill({ color: "#242e29", alpha: 0.18 });
+      if (selected.includes(token.id))
+        graphic
+          .circle(x, y, token.radius + 6)
+          .stroke({ color: "#405f4d", width: 2 });
+      graphic
+        .circle(x, y, token.radius)
         .fill(token.color)
         .stroke({ color: "#fffaf0", width: 3 });
       world.addChild(graphic);
       const initial = new Text({
         text: token.name.slice(0, 1).toUpperCase(),
-        style: { fontFamily: "Georgia", fontSize: 23, fill: "#ffffff" },
+        style: {
+          fontFamily: "Georgia",
+          fontSize: Math.max(10, Math.min(64, token.radius * 0.96)),
+          fill: "#ffffff",
+        },
       });
       initial.anchor.set(0.5);
       initial.position.set(x, y - 1);
@@ -294,7 +306,7 @@ export function Tabletop({
         },
       });
       label.anchor.set(0.5, 0);
-      label.position.set(x, y + 32);
+      label.position.set(x, y + token.radius + 8);
       world.addChild(label);
     }
     const resizable =
@@ -404,9 +416,7 @@ export function Tabletop({
         }
       }
     }
-    const token = [...state.tokens]
-      .reverse()
-      .find((t) => Math.hypot(p.x - t.position.x, p.y - t.position.y) <= 28);
+    const token = [...state.tokens].reverse().find((t) => hitToken(t, p));
     const drawing =
       (tool === "select" || tool === "erase") && !token
         ? [...state.drawings]
@@ -681,6 +691,18 @@ export function Tabletop({
             "points" in selectedObjects[0]! &&
             canResize(selectedObjects[0]) &&
             tool === "select" && <small>Drag a corner to resize</small>}
+          {selectedObjects.length === 1 &&
+            "position" in selectedObjects[0]! && (
+              <button
+                disabled={!enabled || pending}
+                onClick={() => {
+                  setGesture(null);
+                  setResizeToken(selectedObjects[0] as Token);
+                }}
+              >
+                Resize token…
+              </button>
+            )}
           <button
             onClick={() => {
               setSelected([]);
@@ -700,6 +722,17 @@ export function Tabletop({
             Delete selection…
           </button>
         </div>
+      )}
+      {resizeToken && (
+        <ResizeTokenDialog
+          token={resizeToken}
+          state={state}
+          member={member}
+          enabled={enabled}
+          pending={pending}
+          send={send}
+          close={() => setResizeToken(null)}
+        />
       )}
       {deleteReview && (
         <DeleteSelectionDialog

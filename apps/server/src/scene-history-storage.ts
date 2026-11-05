@@ -1,8 +1,54 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { pointSchema } from "@tableloom/core";
+import {
+  pointSchema,
+  tokenSchema,
+  DEFAULT_TOKEN_RADIUS,
+} from "@tableloom/core";
 import { ObjectIdentities } from "./object-identities.js";
-import { entryOf, payloadSchema } from "./scene-history-model.js";
+import { entryOf, payloadSchema, rowSchema } from "./scene-history-model.js";
+
+// Old builds rendered every token at radius 24, including tokens stored only in inverses.
+function sizedLegacyPayload(serialized: string): string {
+  const payload = z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(serialized));
+  let changed = false;
+  const size = (value: unknown) => {
+    const token = tokenSchema
+      .omit({ radius: true })
+      .extend({ radius: z.literal(DEFAULT_TOKEN_RADIUS).optional() })
+      .strict()
+      .parse(value);
+    if (token.radius === undefined) {
+      changed = true;
+      return { ...token, radius: DEFAULT_TOKEN_RADIUS };
+    }
+    return value;
+  };
+  if (
+    (payload.kind === "create" || payload.kind === "delete") &&
+    payload.objectType === "token"
+  )
+    payload.object = size(payload.object);
+  if (payload.kind === "delete-many")
+    payload.objects = z
+      .array(
+        z
+          .object({
+            objectType: z.enum(["token", "drawing"]),
+            object: z.unknown(),
+          })
+          .strict(),
+      )
+      .parse(payload.objects)
+      .map((saved) =>
+        saved.objectType === "token"
+          ? { ...saved, object: size(saved.object) }
+          : saved,
+      );
+  return changed ? JSON.stringify(payload) : serialized;
+}
 
 /** Called inside the same transaction as the history service initialization. */
 export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
@@ -25,6 +71,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
           z.literal(4),
           z.literal(5),
           z.literal(6),
+          z.literal(7),
         ])
         .parse(
           db
@@ -39,15 +86,22 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
       exists("scene_move_history")
     )
       throw new Error("Scene history storage is incomplete or inconsistent.");
-    if (version < 6) {
+    if (version < 7) {
       const entries = db
           .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
           .all()
-          .map(entryOf),
+          .map((raw) => {
+            const row = rowSchema.parse(raw);
+            return entryOf({
+              ...row,
+              payload_json: sizedLegacyPayload(row.payload_json),
+            });
+          }),
         byId = new Map(entries.map((entry) => [entry.id, entry]));
       for (const entry of entries) {
         if (
-          entry.payload.kind === "resize" ||
+          entry.payload.kind === "token-resize" ||
+          (version < 6 && entry.payload.kind === "resize") ||
           (version < 5 && entry.payload.kind === "delete-many") ||
           (version === 3 && entry.payload.kind === "translate")
         )
@@ -74,7 +128,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
           .length
       )
         throw new Error("Scene history references unavailable data.");
-      db.exec("UPDATE scene_history_version SET version=6 WHERE id=1");
+      for (const entry of entries)
+        db.prepare(
+          "UPDATE scene_history_entries SET payload_json=? WHERE id=?",
+        ).run(entry.payload_json, entry.id);
+      db.exec("UPDATE scene_history_version SET version=7 WHERE id=1");
     }
     return identities;
   }
@@ -144,15 +202,18 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
           };
         }
         const row = v2.parse(raw),
-          payload = payloadSchema.parse(JSON.parse(row.payload_json));
+          payload = payloadSchema.parse(
+            JSON.parse(sizedLegacyPayload(row.payload_json)),
+          );
         if (
+          payload.kind === "token-resize" ||
           payload.kind === "resize" ||
           payload.kind === "move-many" ||
           payload.kind === "translate" ||
           payload.kind === "delete-many"
         )
           throw new Error("Unexpected group history in old storage.");
-        return row;
+        return { ...row, payload_json: sizedLegacyPayload(row.payload_json) };
       });
     const byId = new Map(rows.map((row) => [row.id, row]));
     identities.rememberMany(
@@ -201,11 +262,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
     )
       throw new Error("Scene history references unavailable data.");
     db.exec(
-      `DROP TABLE ${source}; UPDATE scene_history_version SET version=6 WHERE id=1;`,
+      `DROP TABLE ${source}; UPDATE scene_history_version SET version=7 WHERE id=1;`,
     );
   } else
     db.exec(
-      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,6);",
+      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,7);",
     );
   return identities;
 }

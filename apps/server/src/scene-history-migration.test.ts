@@ -115,7 +115,7 @@ function legacy() {
   return { db, tables, access, host, bindings, first, context, a, b };
 }
 
-test("move-history 1 to scene-history 6 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
+test("move-history 1 to scene-history 7 preserves IDs, cursors, links, active/offstage rows, receipts, private state and access", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -125,7 +125,7 @@ test("move-history 1 to scene-history 6 preserves IDs, cursors, links, active/of
     const history = new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      6,
+      7,
     );
     assert.equal(
       f.db
@@ -233,7 +233,7 @@ test("history migration SQL failure rolls back the table replacement, copied row
     new SceneHistoryStore(f.db, f.tables);
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      6,
+      7,
     );
   } finally {
     f.db.close();
@@ -316,7 +316,7 @@ function toVersionTwo(f: ReturnType<typeof legacy>) {
   return { status, rows };
 }
 
-test("scene history 2 to 6 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
+test("scene history 2 to 7 preserves existing payloads, reservations and per-object causal targets without inventing group edits", () => {
   const f = legacy();
   try {
     const before = f.tables.load(),
@@ -341,7 +341,7 @@ test("scene history 2 to 6 preserves existing payloads, reservations and per-obj
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      6,
+      7,
     );
     assert.equal(
       f.db
@@ -430,7 +430,7 @@ function versionThree(f: ReturnType<typeof legacy>) {
   return status;
 }
 
-test("scene history 3 to 6 preserves token groups, expired predecessor links, saved state and reservation IDs", () => {
+test("scene history 3 to 7 preserves token groups, expired predecessor links, saved state and reservation IDs", () => {
   const f = legacy();
   try {
     const status = versionThree(f),
@@ -469,7 +469,7 @@ test("scene history 3 to 6 preserves token groups, expired predecessor links, sa
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      6,
+      7,
     );
   } finally {
     f.db.close();
@@ -525,7 +525,7 @@ test("failed schema-3 marker writes and malformed causal links leave the old his
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          6,
+          7,
         );
       }
     } finally {
@@ -572,7 +572,7 @@ function versionFour(f: ReturnType<typeof legacy>) {
   return status;
 }
 
-test("scene history 4 to 6 preserves exact mixed originals, cursors, state and reserved identities", () => {
+test("scene history 4 to 7 preserves exact mixed originals, cursors, state and reserved identities", () => {
   const f = legacy();
   try {
     const status = versionFour(f),
@@ -600,7 +600,7 @@ test("scene history 4 to 6 preserves exact mixed originals, cursors, state and r
     );
     assert.equal(
       f.db.prepare("SELECT version FROM scene_history_version").get()!.version,
-      6,
+      7,
     );
     transaction(f.db, () => {
       const edge = history.status(f.host.member).undo!,
@@ -666,7 +666,7 @@ test("failed schema-4 marker writes and invalid original geometry leave the old 
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          6,
+          7,
         );
       }
     } finally {
@@ -675,7 +675,7 @@ test("failed schema-4 marker writes and invalid original geometry leave the old 
   }
 });
 
-test("schema-5 group history upgrades intact to 6 and marker failure rolls back; resize payloads cannot masquerade as old data", () => {
+test("schema-5 group history upgrades intact to 7 and marker failure rolls back; resize payloads cannot masquerade as old data", () => {
   for (const failure of ["none", "marker", "future"]) {
     const f = legacy();
     try {
@@ -736,7 +736,7 @@ test("schema-5 group history upgrades intact to 6 and marker failure rolls back;
         assert.equal(
           f.db.prepare("SELECT version FROM scene_history_version").get()!
             .version,
-          6,
+          7,
         );
       }
       assert.deepEqual(

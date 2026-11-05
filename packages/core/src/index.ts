@@ -2,7 +2,7 @@ import { z } from "zod";
 import { systemIdSchema } from "@tableloom/module-sdk";
 import { sceneHistorySchema } from "./scene-history.js";
 import { commandContextSchema } from "./campaigns.js";
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 export const pointSchema = z.object({
   x: z.number().finite().min(-10000).max(10000),
@@ -23,7 +23,10 @@ export const drawingInputSchema = drawingSchema
   .omit({ ownerId: true, version: true })
   .strict();
 export type DrawingInput = z.infer<typeof drawingInputSchema>;
+export const DEFAULT_TOKEN_RADIUS = 24;
+export const tokenRadiusSchema = z.number().finite().min(4).max(300);
 export const tokenSchema = z.object({
+  radius: tokenRadiusSchema,
   id: z.uuid(),
   name: z.string().trim().min(1).max(32),
   position: pointSchema,
@@ -33,7 +36,7 @@ export const tokenSchema = z.object({
 });
 export type Token = z.infer<typeof tokenSchema>;
 export const tokenInputSchema = tokenSchema
-  .omit({ ownerId: true, version: true })
+  .omit({ ownerId: true, version: true, radius: true })
   .strict();
 
 export const diceResultSchema = z.object({
@@ -77,7 +80,7 @@ export const noteSchema = noteInputSchema.extend({
 export type Note = z.infer<typeof noteSchema>;
 
 const tableDataSchema = z.object({
-  schemaVersion: z.literal(5),
+  schemaVersion: z.literal(6),
   revision: z.number().int().nonnegative(),
   systemId: systemIdSchema,
   drawings: z.array(drawingSchema).max(2000),
@@ -123,7 +126,7 @@ export const tableViewSchema = tableDataSchema.omit({ revision: true }).extend({
 });
 export type TableView = z.infer<typeof tableViewSchema>;
 export const createTable = (): TableState => ({
-  schemaVersion: 5,
+  schemaVersion: 6,
   revision: 0,
   systemId: "cyberpunk-red",
   drawings: [],
@@ -133,7 +136,15 @@ export const createTable = (): TableState => ({
 });
 
 const legacyDrawingSchema = drawingSchema.omit({ version: true }).strict();
-const legacyTokenSchema = tokenSchema.omit({ version: true }).strict();
+const legacyTokenSchema = tokenSchema
+  .omit({ version: true, radius: true })
+  .strict();
+const version5TableSchema = tableDataSchema
+  .extend({
+    schemaVersion: z.literal(5),
+    tokens: z.array(tokenSchema.omit({ radius: true }).strict()).max(200),
+  })
+  .strict();
 const version4TableSchema = tableDataSchema
   .extend({
     schemaVersion: z.literal(4),
@@ -162,6 +173,19 @@ export function restoreTable(value: unknown): {
 } {
   const current = tableSchema.safeParse(value);
   if (current.success) return { state: current.data, migrated: false };
+  const sized = version5TableSchema.safeParse(value);
+  if (sized.success)
+    return {
+      migrated: true,
+      state: tableSchema.parse({
+        ...sized.data,
+        schemaVersion: 6,
+        tokens: sized.data.tokens.map((token) => ({
+          ...token,
+          radius: DEFAULT_TOKEN_RADIUS,
+        })),
+      }),
+    };
   const legacy = z
     .union([
       version1TableSchema,
@@ -172,7 +196,7 @@ export function restoreTable(value: unknown): {
     .parse(value);
   const state = tableSchema.parse({
     ...legacy,
-    schemaVersion: 5,
+    schemaVersion: 6,
     notes: legacy.schemaVersion === 4 ? legacy.notes : [],
     drawings: legacy.drawings.map((drawing) => ({
       ...drawing,
@@ -181,6 +205,7 @@ export function restoreTable(value: unknown): {
     })),
     tokens: legacy.tokens.map((token) => ({
       ...token,
+      radius: DEFAULT_TOKEN_RADIUS,
       ownerId: "ownerId" in token ? token.ownerId : null,
       version: 1,
     })),
@@ -255,6 +280,15 @@ export const resizeBoundsSchema = z
 export type ResizeBounds = z.infer<typeof resizeBoundsSchema>;
 const envelope = { id: z.uuid() };
 export const commandSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      ...envelope,
+      type: z.literal("token.resize"),
+      tokenId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      radius: tokenRadiusSchema,
+    })
+    .strict(),
   z
     .object({
       ...envelope,

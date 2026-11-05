@@ -26,7 +26,7 @@ import { transaction } from "./database.js";
 
 const campaignDataSchema = z
   .object({
-    schemaVersion: z.literal(5),
+    schemaVersion: z.literal(6),
     revision: tableSchema.shape.revision,
     rolls: tableSchema.shape.rolls,
     notes: tableSchema.shape.notes,
@@ -98,7 +98,9 @@ export class TableStore {
       const stored = this.db
         .prepare("SELECT version FROM campaign_storage_version WHERE id = 1")
         .get();
-      z.union([z.literal(1), z.literal(2)]).parse(stored?.version);
+      z.union([z.literal(1), z.literal(2), z.literal(3)]).parse(
+        stored?.version,
+      );
       if (
         ["campaign_records", "scene_records", "campaign_receipts"].some(
           (name) => !this.hasTable(name),
@@ -110,6 +112,7 @@ export class TableStore {
           "Legacy and campaign storage coexist. Restore a consistent backup before starting.",
         );
       if (stored?.version === 1) this.upgradeObjectVersions();
+      else if (stored?.version === 2) this.upgradeTokenSizes();
       return;
     }
     if (
@@ -173,7 +176,7 @@ export class TableStore {
     }
     this.db
       .prepare(
-        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 2)",
+        "INSERT INTO campaign_storage_version(id, version) VALUES (1, 3)",
       )
       .run();
   }
@@ -189,7 +192,9 @@ export class TableStore {
       .object({
         tokens: z
           .array(
-            tableSchema.shape.tokens.element.omit({ version: true }).strict(),
+            tableSchema.shape.tokens.element
+              .omit({ version: true, radius: true })
+              .strict(),
           )
           .max(200),
         drawings: z
@@ -237,14 +242,73 @@ export class TableStore {
         .prepare("UPDATE campaign_records SET state_json = ? WHERE id = ?")
         .run(
           JSON.stringify(
-            campaignDataSchema.parse({ ...data, schemaVersion: 5 }),
+            campaignDataSchema.parse({ ...data, schemaVersion: 6 }),
           ),
           id,
         );
     }
     this.db.exec(
-      "UPDATE campaign_storage_version SET version = 2 WHERE id = 1",
+      "UPDATE campaign_storage_version SET version = 3 WHERE id = 1",
     );
+  }
+
+  private upgradeTokenSizes() {
+    const oldCampaign = campaignDataSchema.extend({
+        schemaVersion: z.literal(5),
+      }),
+      oldScene = sceneDataSchema.extend({
+        tokens: z
+          .array(
+            tableSchema.shape.tokens.element.omit({ radius: true }).strict(),
+          )
+          .max(200),
+      });
+    if (this.db.prepare("PRAGMA foreign_key_check(scene_records)").all().length)
+      throw new Error("Campaign scene storage is inconsistent.");
+    for (const row of this.db
+      .prepare("SELECT id,state_json FROM campaign_records")
+      .all()) {
+      const id = z.uuid().parse(row.id),
+        campaign = this.getCampaign(id),
+        data = oldCampaign.parse(json(row.state_json)),
+        scenes = this.db
+          .prepare(
+            "SELECT id,state_json FROM scene_records WHERE campaign_id=?",
+          )
+          .all(id);
+      if (!scenes.some((scene) => scene.id === campaign.activeSceneId))
+        throw new Error("Campaign storage is incomplete.");
+      for (const scene of scenes) {
+        const state = restoreTable({
+          ...data,
+          ...oldScene.parse(json(scene.state_json)),
+          systemId: campaign.system.id,
+        }).state;
+        this.db
+          .prepare(
+            "UPDATE scene_records SET state_json=? WHERE campaign_id=? AND id=?",
+          )
+          .run(
+            JSON.stringify(
+              sceneDataSchema.parse({
+                tokens: state.tokens,
+                drawings: state.drawings,
+              }),
+            ),
+            id,
+            z.uuid().parse(scene.id),
+          );
+      }
+      this.db
+        .prepare("UPDATE campaign_records SET state_json=? WHERE id=?")
+        .run(
+          JSON.stringify(
+            campaignDataSchema.parse({ ...data, schemaVersion: 6 }),
+          ),
+          id,
+        );
+    }
+    this.db.exec("UPDATE campaign_storage_version SET version=3 WHERE id=1");
   }
 
   listCampaigns(): Campaign[] {

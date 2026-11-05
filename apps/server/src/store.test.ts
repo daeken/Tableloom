@@ -57,7 +57,7 @@ test("legacy version 1 table atomically becomes a default campaign/scene without
     store = new TableStore(path);
     const state = store.load();
     assert.equal(state.tokens[0]?.ownerId, null);
-    assert.equal(state.schemaVersion, 5);
+    assert.equal(state.schemaVersion, 6);
     assert.equal(state.revision, 8);
     assert.equal(store.hasCommand(receipt), true);
     assert.deepEqual(store.getCampaign().system, {

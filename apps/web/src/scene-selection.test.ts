@@ -5,10 +5,12 @@ import {
   selectionDelta,
   translateObject,
   hitDrawing,
+  hitToken,
   objectsInBox,
   selectObjects,
 } from "./scene-selection.js";
 const token = (x: number, y: number): Token => ({
+  radius: 24,
   id: crypto.randomUUID(),
   name: "Scout",
   position: { x, y },
@@ -167,5 +169,17 @@ test("deletion review freezes targets and blocks remote versions, ownership chan
       member,
     ),
     true,
+  );
+});
+
+test("token picking follows saved radius while box selection keeps its center anchor", () => {
+  const small = { ...token(100, 100), radius: 4 },
+    large = { ...token(200, 200), radius: 100 };
+  assert.equal(hitToken(small, { x: 108, y: 100 }), true);
+  assert.equal(hitToken(small, { x: 109, y: 100 }), false);
+  assert.equal(hitToken(large, { x: 300, y: 200 }), true);
+  assert.deepEqual(
+    objectsInBox([large], { x: 199, y: 199 }, { x: 201, y: 201 }),
+    [large.id],
   );
 });

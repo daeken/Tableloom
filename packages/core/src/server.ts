@@ -2,6 +2,7 @@ import { resizedDrawingPoints } from "./geometry.js";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import {
   MAX_ROLL_HISTORY,
+  DEFAULT_TOKEN_RADIUS,
   MAX_TOTAL_ROLLS,
   MAX_TABLE_NOTES,
   parseDice,
@@ -86,6 +87,12 @@ export function applyCommand(
   }
   const next = structuredClone(state);
   switch (command.type) {
+    case "token.resize": {
+      const token = next.tokens.find((t) => t.id === command.tokenId)!;
+      token.radius = command.radius;
+      token.version += 1;
+      break;
+    }
     case "drawing.resize": {
       const drawing = next.drawings.find((d) => d.id === command.drawingId)!;
       drawing.points = resizedDrawingPoints(drawing, command.bounds);
@@ -161,7 +168,12 @@ export function applyCommand(
         next.notes.some((n) => n.id === command.token.id)
       )
         throw new Error("An object with this ID already exists.");
-      next.tokens.push({ ...command.token, ownerId: actor.id, version: 1 });
+      next.tokens.push({
+        ...command.token,
+        radius: DEFAULT_TOKEN_RADIUS,
+        ownerId: actor.id,
+        version: 1,
+      });
       break;
     case "token.move": {
       const token = next.tokens.find((t) => t.id === command.tokenId);

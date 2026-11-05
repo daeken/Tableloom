@@ -20,6 +20,7 @@ const gm = member("GM", "gm"),
 function fixture() {
   const state = createTable();
   state.tokens.push({
+    radius: 24,
     id: randomUUID(),
     name: "Scout",
     position: { x: 0, y: 0 },

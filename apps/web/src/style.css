@@ -1674,3 +1674,9 @@ p {
   margin: 0;
   accent-color: #405f4d;
 }
+
+.selection-delete-actions .token-size-confirm {
+  background: #405f4d;
+  border-color: #405f4d;
+  color: #fffaf0;
+}

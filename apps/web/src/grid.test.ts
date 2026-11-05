@@ -10,6 +10,7 @@ import {
 } from "./grid.js";
 import { translateObject } from "./scene-selection.js";
 const token = (x: number, y: number): Token => ({
+  radius: 24,
   id: crypto.randomUUID(),
   name: "Scout",
   position: { x, y },

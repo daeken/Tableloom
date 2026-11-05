@@ -219,7 +219,7 @@ test("version 3 migration preserves private rolls and initializes an empty notes
   const legacy = { ...rolled, schemaVersion: 3 };
   Reflect.deleteProperty(legacy, "notes");
   const result = restoreTable(legacy);
-  assert.equal(result.state.schemaVersion, 5);
+  assert.equal(result.state.schemaVersion, 6);
   assert.equal(result.state.revision, rolled.revision);
   assert.deepEqual(result.state.notes, []);
   assert.deepEqual(result.state.rolls, rolled.rolls);

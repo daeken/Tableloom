@@ -42,7 +42,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 6;
+          ?.version === 7;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -140,6 +140,7 @@ export class SceneHistoryStore {
     if (
       payload.kind === "move" ||
       payload.kind === "move-many" ||
+      payload.kind === "token-resize" ||
       payload.kind === "resize" ||
       payload.kind === "translate"
     )
@@ -185,11 +186,13 @@ export class SceneHistoryStore {
           objectId: target.objectId,
           objectCount: entry.targets.length,
           action:
-            payload.kind === "delete-many"
-              ? "delete"
-              : payload.kind === "move-many" || payload.kind === "translate"
-                ? "move"
-                : payload.kind,
+            payload.kind === "token-resize"
+              ? "resize"
+              : payload.kind === "delete-many"
+                ? "delete"
+                : payload.kind === "move-many" || payload.kind === "translate"
+                  ? "move"
+                  : payload.kind,
           objectType: payload.objectType,
           name:
             payload.kind === "delete-many"
@@ -211,7 +214,8 @@ export class SceneHistoryStore {
                     ? "Drawing"
                     : ((objectOf(state, target.objectId) as Token | undefined)
                         ?.name ??
-                      (payload.kind === "move"
+                      (payload.kind === "move" ||
+                      payload.kind === "token-resize"
                         ? "Token"
                         : payload.object.name)),
           available: this.available(entry, state, member),
@@ -254,6 +258,7 @@ export class SceneHistoryStore {
         "token.add",
         "drawing.add",
         "drawing.resize",
+        "token.resize",
         "token.move",
         "tokens.move",
         "objects.move",
@@ -280,7 +285,24 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "drawing.resize") {
+      if (command.type === "token.resize") {
+        ids = [command.tokenId];
+        const from = before.tokens.find((t) => t.id === command.tokenId)!,
+          to = after.tokens.find((t) => t.id === command.tokenId)!;
+        if (
+          !from ||
+          !to ||
+          to.version !== from.version + 1 ||
+          from.ownerId !== to.ownerId
+        )
+          throw new Error("Invalid token resize transition.");
+        payload = {
+          kind: "token-resize",
+          objectType: "token",
+          before: from.radius,
+          after: to.radius,
+        };
+      } else if (command.type === "drawing.resize") {
         ids = [command.drawingId];
         const from = before.drawings.find((d) => d.id === command.drawingId),
           to = after.drawings.find((d) => d.id === command.drawingId);
@@ -490,7 +512,19 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "resize") {
+      if (payload.kind === "token-resize") {
+        next = applyCommand(
+          state,
+          {
+            id: command.id,
+            type: "token.resize",
+            tokenId: target.objectId,
+            expectedVersion: target.expectedVersion,
+            radius: undo ? payload.before : payload.after,
+          },
+          member,
+        );
+      } else if (payload.kind === "resize") {
         next = structuredClone(state);
         const drawing = next.drawings.find((d) => d.id === target.objectId)!;
         drawing.points = structuredClone(undo ? payload.before : payload.after);

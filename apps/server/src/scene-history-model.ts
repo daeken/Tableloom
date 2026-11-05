@@ -4,6 +4,7 @@ import {
   tokenSchema,
   drawingSchema,
   translationSchema,
+  tokenRadiusSchema,
 } from "@tableloom/core";
 const originalGeometrySchema = z.union([
   z
@@ -28,6 +29,14 @@ const deletedObjectSchema = z.union([
     .strict(),
 ]);
 export const payloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal("token-resize"),
+      objectType: z.literal("token"),
+      before: tokenRadiusSchema,
+      after: tokenRadiusSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("resize"),
@@ -186,12 +195,14 @@ export function entryOf(row: unknown): Entry {
     targets.length !== 1 ||
     (payload.kind !== "move" &&
       payload.kind !== "resize" &&
+      payload.kind !== "token-resize" &&
       payload.object.id !== targets[0]!.objectId)
   )
     throw new Error("Scene history target is inconsistent.");
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "token-resize" ||
   entry.payload.kind === "resize" ||
   entry.payload.kind === "translate" ||
   entry.payload.kind === "move" ||

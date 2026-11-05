@@ -166,3 +166,14 @@ export function deletionReviewCurrent(
     );
   });
 }
+
+/** Token centers remain the movement/box-selection anchor; hit testing follows saved size. */
+export function hitToken(
+  token: Pick<Token, "position" | "radius">,
+  point: Point,
+): boolean {
+  return (
+    Math.hypot(point.x - token.position.x, point.y - token.position.y) <=
+    token.radius + 4
+  );
+}
