@@ -6,6 +6,7 @@ import {
   tableSchema,
   sceneTextSnapshot,
   shapeSnapshot,
+  drawingOrderMatches,
 } from "@tableloom/core";
 import type { Command, TableState, Token } from "@tableloom/core";
 import { applyCommand } from "@tableloom/core/server";
@@ -47,7 +48,7 @@ export class SceneHistoryStore {
       const current =
         existing &&
         db.prepare("SELECT version FROM scene_history_version WHERE id=1").get()
-          ?.version === 12;
+          ?.version === 13;
       const identities = initializeSceneHistory(db);
       if (!current) {
         for (const row of db
@@ -113,6 +114,14 @@ export class SceneHistoryStore {
   }
   private available(entry: Entry, state: TableState, member: Member): boolean {
     const payload = entry.payload;
+    if (
+      payload.kind === "reorder" &&
+      !drawingOrderMatches(
+        state.drawings.map((d) => d.id),
+        entry.state === "done" ? payload.after : payload.before,
+      )
+    )
+      return false;
     if (expectsPresent(entry))
       return entry.targets.every((target) => {
         const object = objectOf(state, target.objectId);
@@ -155,6 +164,7 @@ export class SceneHistoryStore {
         );
       });
     if (
+      payload.kind === "reorder" ||
       payload.kind === "shape-update" ||
       payload.kind === "text-update" ||
       payload.kind === "move" ||
@@ -285,6 +295,7 @@ export class SceneHistoryStore {
         "drawing.resize",
         "drawing.text.update",
         "drawing.style.update",
+        "drawing.reorder",
         "token.resize",
         "objects.resize",
         "token.move",
@@ -313,7 +324,25 @@ export class SceneHistoryStore {
           throw new Error("Invalid move history transition.");
         return { objectId: id, before: from.position, after: to.position };
       };
-      if (command.type === "drawing.style.update") {
+      if (command.type === "drawing.reorder") {
+        ids = [command.drawingId];
+        const from = before.drawings.find((d) => d.id === command.drawingId),
+          to = after.drawings.find((d) => d.id === command.drawingId);
+        if (
+          !from ||
+          !to ||
+          to.version !== from.version + 1 ||
+          JSON.stringify({ ...from, version: to.version }) !==
+            JSON.stringify(to)
+        )
+          throw new Error("Invalid drawing order transition.");
+        payload = {
+          kind: "reorder",
+          objectType: "drawing",
+          before: before.drawings.map((d) => d.id),
+          after: after.drawings.map((d) => d.id),
+        };
+      } else if (command.type === "drawing.style.update") {
         ids = [command.drawingId];
         const from = before.drawings.find((d) => d.id === command.drawingId),
           to = after.drawings.find((d) => d.id === command.drawingId);
@@ -617,7 +646,15 @@ export class SceneHistoryStore {
       const payload = entry.payload,
         target = entry.targets[0]!;
       let next: TableState;
-      if (payload.kind === "shape-update") {
+      if (payload.kind === "reorder") {
+        const order = undo ? payload.before : payload.after;
+        next = structuredClone(state);
+        const objects = new Map(next.drawings.map((d) => [d.id, d]));
+        next.drawings = order.map((id) => objects.get(id)!);
+        next.drawings.find((d) => d.id === target.objectId)!.version += 1;
+        next.revision += 1;
+        next = tableSchema.parse(next);
+      } else if (payload.kind === "shape-update") {
         next = structuredClone(state);
         const drawing = next.drawings.find((d) => d.id === target.objectId)!,
           saved = undo ? payload.before : payload.after;

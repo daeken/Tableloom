@@ -1,3 +1,4 @@
+import { DrawingOrderDialog } from "./DrawingOrderDialog.js";
 import { ShapeStyleDialog } from "./ShapeStyleDialog.js";
 import { shapeStyleOf } from "@tableloom/core";
 import type { BackgroundView } from "@tableloom/core/scene-map";
@@ -137,6 +138,9 @@ export function Tabletop({
   const [resizeSelection, setResizeSelection] = useState<SceneObject[] | null>(
     null,
   );
+  const [drawingOrder, setDrawingOrder] = useState<{
+    initial: Drawing | null;
+  } | null>(null);
   const [editShape, setEditShape] = useState<Drawing | null>(null);
   const [editText, setEditText] = useState<Drawing | null>(null);
   const [resizeToken, setResizeToken] = useState<Token | null>(null);
@@ -218,6 +222,10 @@ export function Tabletop({
     }
     grid.stroke({ color: "#c7c6b9", width: 1, alpha: 0.5 });
     world.addChild(grid);
+    const drawingLayer = new Container({ label: "Drawings" }),
+      tokenLayer = new Container({ label: "Tokens" }),
+      selectionLayer = new Container({ label: "Selection" });
+    world.addChild(drawingLayer, tokenLayer, selectionLayer);
     const previews = new Map<string, SceneObject>();
     if (gesture?.kind === "move") {
       const delta = dragDelta(
@@ -273,7 +281,7 @@ export function Tabletop({
           (box.right - box.left) / Math.max(1, label.width),
           (box.bottom - box.top) / Math.max(1, label.height),
         );
-        world.addChild(label);
+        drawingLayer.addChild(label);
       } else if (drawing.kind === "rectangle") {
         graphic.roundRect(
           Math.min(first.x, last.x),
@@ -296,7 +304,7 @@ export function Tabletop({
           cap: "round",
           join: "round",
         });
-      world.addChild(graphic);
+      drawingLayer.addChild(graphic);
       if (selected.includes(drawing.id)) {
         const box = objectBounds(drawing),
           padding = 6 / view.scale;
@@ -308,7 +316,7 @@ export function Tabletop({
             Math.max(1, box.bottom - box.top) + 2 * padding,
           )
           .stroke({ color: "#405f4d", width: 1.5 / view.scale });
-        world.addChild(outline);
+        selectionLayer.addChild(outline);
       }
     }
     for (const original of state.tokens) {
@@ -320,14 +328,16 @@ export function Tabletop({
         .circle(x + 2, y + 4, token.radius)
         .fill({ color: "#242e29", alpha: 0.18 });
       if (selected.includes(token.id))
-        graphic
-          .circle(x, y, token.radius + 6)
-          .stroke({ color: "#405f4d", width: 2 });
+        selectionLayer.addChild(
+          new Graphics()
+            .circle(x, y, token.radius + 6)
+            .stroke({ color: "#405f4d", width: 2 }),
+        );
       graphic
         .circle(x, y, token.radius)
         .fill(token.color)
         .stroke({ color: "#fffaf0", width: 3 });
-      world.addChild(graphic);
+      tokenLayer.addChild(graphic);
       const initial = new Text({
         text: token.name.slice(0, 1).toUpperCase(),
         style: {
@@ -338,7 +348,7 @@ export function Tabletop({
       });
       initial.anchor.set(0.5);
       initial.position.set(x, y - 1);
-      world.addChild(initial);
+      tokenLayer.addChild(initial);
       const label = new Text({
         text: token.name,
         style: {
@@ -350,7 +360,7 @@ export function Tabletop({
       });
       label.anchor.set(0.5, 0);
       label.position.set(x, y + token.radius + 8);
-      world.addChild(label);
+      tokenLayer.addChild(label);
     }
     const resizable =
       tool === "select" && selected.length === 1 && !pending && enabled
@@ -366,7 +376,7 @@ export function Tabletop({
         size = 9 / view.scale;
       for (const corner of corners) {
         const p = cornerPoint(box, corner);
-        world.addChild(
+        selectionLayer.addChild(
           new Graphics()
             .rect(p.x - size / 2, p.y - size / 2, size, size)
             .fill("#fffaf0")
@@ -385,7 +395,7 @@ export function Tabletop({
       rectangle
         .fill({ color: "#405f4d", alpha: 0.08 })
         .stroke({ color: "#405f4d", width: 1 / view.scale });
-      world.addChild(rectangle);
+      selectionLayer.addChild(rectangle);
     }
   }, [
     ready,
@@ -761,6 +771,19 @@ export function Tabletop({
         />{" "}
         Snap to grid
       </label>
+      {selected.length === 0 && (
+        <button
+          className="drawing-order-open"
+          disabled={!enabled || pending || !state.drawings.length}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => {
+            setGesture(null);
+            setDrawingOrder({ initial: null });
+          }}
+        >
+          Drawing order…
+        </button>
+      )}
       {(selected.length > 0 || selectionError) && (
         <div
           className="selection-controls"
@@ -812,6 +835,17 @@ export function Tabletop({
                 Style shape…
               </button>
             )}
+          {selectedObjects.length === 1 && "points" in selectedObjects[0]! && (
+            <button
+              disabled={!enabled || pending}
+              onClick={() => {
+                setGesture(null);
+                setDrawingOrder({ initial: selectedObjects[0] as Drawing });
+              }}
+            >
+              Arrange drawing…
+            </button>
+          )}
           {selectedObjects.length > 1 && (
             <button
               disabled={!enabled || pending}
@@ -852,6 +886,22 @@ export function Tabletop({
           pending={pending}
           send={send}
           close={() => setResizeSelection(null)}
+        />
+      )}
+      {drawingOrder && (
+        <DrawingOrderDialog
+          initial={drawingOrder.initial}
+          state={state}
+          member={member}
+          enabled={enabled}
+          pending={pending}
+          close={() => setDrawingOrder(null)}
+          send={(command) => {
+            const queued = send(command);
+            if (queued && command.type === "drawing.reorder")
+              setSelected([command.drawingId]);
+            return queued;
+          }}
         />
       )}
       {editShape && (

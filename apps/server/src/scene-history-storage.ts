@@ -129,6 +129,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
           z.literal(10),
           z.literal(11),
           z.literal(12),
+          z.literal(13),
         ])
         .parse(
           db
@@ -143,7 +144,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
       exists("scene_move_history")
     )
       throw new Error("Scene history storage is incomplete or inconsistent.");
-    if (version < 12) {
+    if (version < 13) {
       const entries = db
           .prepare("SELECT * FROM scene_history_entries ORDER BY sequence")
           .all()
@@ -158,11 +159,12 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
       for (const entry of entries) {
         const payload = entry.payload;
         if (
+          version < 12 &&
           (payload.kind === "create" || payload.kind === "delete") &&
           payload.objectType === "drawing"
         )
           preShapeDrawingSchema.parse(payload.object);
-        if (payload.kind === "delete-many")
+        if (version < 12 && payload.kind === "delete-many")
           for (const saved of payload.objects)
             if (saved.objectType === "drawing")
               preShapeDrawingSchema.parse(saved.object);
@@ -177,7 +179,8 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
             if (saved.objectType === "drawing")
               preTextDrawingSchema.parse(saved.object);
         if (
-          entry.payload.kind === "shape-update" ||
+          entry.payload.kind === "reorder" ||
+          (version < 12 && entry.payload.kind === "shape-update") ||
           (version < 10 && entry.payload.kind === "text-update") ||
           (version < 8 && entry.payload.kind === "resize-many") ||
           (version < 7 && entry.payload.kind === "token-resize") ||
@@ -212,7 +215,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
         db.prepare(
           "UPDATE scene_history_entries SET payload_json=? WHERE id=?",
         ).run(entry.payload_json, entry.id);
-      db.exec("UPDATE scene_history_version SET version=12 WHERE id=1");
+      db.exec("UPDATE scene_history_version SET version=13 WHERE id=1");
     }
     return identities;
   }
@@ -286,6 +289,7 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
             JSON.parse(sizedLegacyPayload(row.payload_json)),
           );
         if (
+          payload.kind === "reorder" ||
           payload.kind === "shape-update" ||
           payload.kind === "text-update" ||
           payload.kind === "resize-many" ||
@@ -350,11 +354,11 @@ export function initializeSceneHistory(db: DatabaseSync): ObjectIdentities {
     )
       throw new Error("Scene history references unavailable data.");
     db.exec(
-      `DROP TABLE ${source}; UPDATE scene_history_version SET version=12 WHERE id=1;`,
+      `DROP TABLE ${source}; UPDATE scene_history_version SET version=13 WHERE id=1;`,
     );
   } else
     db.exec(
-      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,12);",
+      "CREATE TABLE scene_history_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL); INSERT INTO scene_history_version VALUES(1,13);",
     );
   return identities;
 }

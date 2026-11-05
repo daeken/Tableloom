@@ -1144,6 +1144,57 @@ try {
       ]);
       assert.equal(shape.color, type === "scene.undo" ? "#405f4d" : "#b45f4e");
     }
+    const originalDrawingOrder = shapeState.state.drawings.map((d) => d.id),
+      arranged = snapshot(live, (m) => m.state.drawings[0]?.id === shapeId);
+    live.send(
+      JSON.stringify({
+        context: shapeState.context,
+        command: {
+          id: randomUUID(),
+          type: "drawing.reorder",
+          drawingId: shapeId,
+          expectedVersion: shapeState.state.drawings.find(
+            (d) => d.id === shapeId,
+          )!.version,
+          expectedOrder: originalDrawingOrder,
+          direction: "back",
+        },
+      }),
+    );
+    shapeState = await arranged;
+    assert.equal(shapeState.history.undo!.action, "reorder");
+    for (const type of ["scene.undo", "scene.redo"] as const) {
+      const expected =
+          type === "scene.undo"
+            ? originalDrawingOrder
+            : [shapeId, ...originalDrawingOrder.filter((id) => id !== shapeId)],
+        result = snapshot(
+          live,
+          (m) =>
+            JSON.stringify(m.state.drawings.map((d) => d.id)) ===
+            JSON.stringify(expected),
+        ),
+        edge =
+          type === "scene.undo"
+            ? shapeState.history.undo!
+            : shapeState.history.redo!;
+      live.send(
+        JSON.stringify({
+          context: shapeState.context,
+          command: {
+            id: randomUUID(),
+            type,
+            historyId: edge.id,
+            expectedVersion: edge.version,
+          },
+        }),
+      );
+      shapeState = await result;
+      assert.deepEqual(
+        shapeState.state.drawings.find((d) => d.id === shapeId)!.shapeStyle,
+        { lineWidth: 12, fill: { color: "#627d9c", opacity: 0.35 } },
+      );
+    }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
       png = advancedMapFixture(),
       assetResponse = await fetch(
@@ -1367,5 +1418,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing front/back order and exact history, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

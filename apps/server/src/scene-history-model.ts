@@ -8,6 +8,8 @@ import {
   sceneTextSnapshotSchema,
   sameTextStyle,
   shapeSnapshotSchema,
+  drawingOrderSchema,
+  drawingOrderMatches,
 } from "@tableloom/core";
 const originalGeometrySchema = z.union([
   z
@@ -57,6 +59,22 @@ const resizeChangeSchema = z.union([
     ),
 ]);
 export const payloadSchema = z.union([
+  z
+    .object({
+      kind: z.literal("reorder"),
+      objectType: z.literal("drawing"),
+      before: drawingOrderSchema,
+      after: drawingOrderSchema,
+    })
+    .strict()
+    .refine((p) => {
+      const after = new Set(p.after);
+      return (
+        p.before.length === p.after.length &&
+        p.before.every((id) => after.has(id)) &&
+        !drawingOrderMatches(p.before, p.after)
+      );
+    }, "Order history must preserve the drawing set and change its order."),
   z
     .object({
       kind: z.literal("shape-update"),
@@ -205,7 +223,19 @@ export function entryOf(row: unknown): Entry {
   const entry = rowSchema.parse(row),
     payload = payloadSchema.parse(JSON.parse(entry.payload_json)),
     targets = targetsSchema.parse(JSON.parse(entry.targets_json));
-  if (payload.kind === "resize-many") {
+  if (payload.kind === "reorder") {
+    const id = targets[0]?.objectId;
+    if (
+      targets.length !== 1 ||
+      !id ||
+      !payload.before.includes(id) ||
+      !drawingOrderMatches(
+        payload.before.filter((other) => other !== id),
+        payload.after.filter((other) => other !== id),
+      )
+    )
+      throw new Error("Drawing order history must move only its target.");
+  } else if (payload.kind === "resize-many") {
     if (
       payload.changes.length !== targets.length ||
       new Set(payload.changes.map((c) => c.objectId)).size !== targets.length ||
@@ -282,6 +312,7 @@ export function entryOf(row: unknown): Entry {
   return { ...entry, payload, targets };
 }
 export const expectsPresent = (entry: Entry) =>
+  entry.payload.kind === "reorder" ||
   entry.payload.kind === "shape-update" ||
   entry.payload.kind === "text-update" ||
   entry.payload.kind === "resize-many" ||

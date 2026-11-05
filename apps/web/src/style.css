@@ -1991,3 +1991,59 @@ p {
   background: #fffef8;
   margin: 12px 0;
 }
+.drawing-order-open {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 4;
+  padding: 8px 11px;
+  font-size: 11px;
+  background: #fffef8;
+  border: 1px solid #d4dacb;
+}
+.drawing-order-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding-left: 24px;
+}
+.drawing-order-list li {
+  padding: 3px 0;
+}
+.drawing-order-list button {
+  text-align: left;
+  padding: 7px;
+  width: 100%;
+  border: 1px solid #d4dacb;
+  background: #fffef8;
+  overflow-wrap: anywhere;
+}
+.drawing-order-color {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+.drawing-order-pages,
+.drawing-order-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.drawing-order-pages button,
+.drawing-order-actions button,
+.drawing-order-choose {
+  border: 1px solid #d4dacb;
+  background: #fffef8;
+  padding: 8px 12px;
+}
+.drawing-order-pages span {
+  font-size: 11px;
+}
+.drawing-order-target {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}

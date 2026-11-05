@@ -108,6 +108,7 @@ export function App() {
         "drawing.resize",
         "drawing.text.update",
         "drawing.style.update",
+        "drawing.reorder",
         "token.resize",
         "objects.resize",
         "token.move",

@@ -10,6 +10,7 @@ import {
   shapeContentSchema,
   shapeStyleOf,
   sameShapeStyle,
+  drawingOrderMatches,
 } from "./index.js";
 import { resizedDrawingPoints, resizedObjects } from "./geometry.js";
 import type { Member } from "./access.js";
@@ -72,6 +73,33 @@ export function authorizeCommand(
           return object;
         });
       resizedObjects(objects, command.scale);
+      return;
+    }
+    case "drawing.reorder": {
+      const drawing = state.drawings.find((d) => d.id === command.drawingId);
+      if (!drawing) throw new Error("That drawing is unavailable.");
+      if (!canEditObject(member, drawing))
+        throw new Error("Only the owner or GM can arrange this drawing.");
+      if (drawing.version !== command.expectedVersion)
+        throw new Error(
+          "This drawing changed. Review it before arranging again.",
+        );
+      if (
+        !drawingOrderMatches(
+          state.drawings.map((d) => d.id),
+          command.expectedOrder,
+        )
+      )
+        throw new Error(
+          "Drawing order changed. Review the current stack before arranging again.",
+        );
+      if (
+        (command.direction === "front"
+          ? state.drawings.at(-1)
+          : state.drawings[0]
+        )?.id === drawing.id
+      )
+        throw new Error("This drawing is already at that end of the layer.");
       return;
     }
     case "drawing.style.update": {
