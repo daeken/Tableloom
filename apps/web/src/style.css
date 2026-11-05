@@ -2929,3 +2929,32 @@ textarea::placeholder {
   width: 24px;
   min-height: 24px;
 }
+.content-pack-choice {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+.content-pack-choice input[type="checkbox"] {
+  width: 24px;
+  flex: 0 0 24px;
+}
+.homebrew-editor,
+.homebrew-source,
+.homebrew-reset {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.homebrew-source {
+  display: grid;
+  gap: 10px;
+}
+.content-pack-choice span {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}

@@ -18,6 +18,7 @@ export interface BrowserContent {
   parseInstance: (data: unknown) => DocumentData;
   renderDefinition: (data: DocumentData) => ReactNode;
   renderInstance: (props: InstanceEditorProps<DocumentData>) => ReactNode;
+  renderHomebrew?: (props: InstanceEditorProps<DocumentData>) => ReactNode;
 }
 /** Schemas and controls only: never import pack definitions or factories in the browser. */
 export function defineBrowserContent<Definition, Instance>(options: {
@@ -28,12 +29,14 @@ export function defineBrowserContent<Definition, Instance>(options: {
   instanceSchema: z.ZodType<Instance>;
   Definition: ComponentType<{ data: Definition }>;
   Instance: ComponentType<InstanceEditorProps<Instance>>;
+  Homebrew?: ComponentType<InstanceEditorProps<Definition>>;
 }): BrowserContent {
   contentIdSchema.parse(options.id);
   contentVersionSchema.parse(options.version);
   z.number().int().positive().parse(options.schemaVersion);
   const Definition = options.Definition,
-    Instance = options.Instance;
+    Instance = options.Instance,
+    Homebrew = options.Homebrew;
   return {
     id: options.id,
     version: options.version,
@@ -52,6 +55,21 @@ export function defineBrowserContent<Definition, Instance>(options: {
         onChange={(value) => onChange(documentData(value))}
       />
     ),
+    ...(Homebrew
+      ? {
+          renderHomebrew: ({
+            data,
+            onChange,
+            readOnly,
+          }: InstanceEditorProps<DocumentData>) => (
+            <Homebrew
+              data={options.definitionSchema.parse(data)}
+              readOnly={readOnly}
+              onChange={(value) => onChange(documentData(value))}
+            />
+          ),
+        }
+      : {}),
   };
 }
 

@@ -2,7 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ContentClient, contentDirty, contentStale } from "./content-client.js";
+import {
+  ContentClient,
+  contentDirty,
+  contentStale,
+  homebrewDirty,
+  homebrewStale,
+} from "./content-client.js";
 import type { ContentState } from "./content-client.js";
 import { DocumentRequestError } from "./document-client.js";
 import type { OwnedContentInstance } from "@tableloom/core/instances";
@@ -53,7 +59,7 @@ const metadata = () => {
   void source;
   return meta;
 };
-function fixture() {
+function fixture(role: "gm" | "player" = "player") {
   let view: ContentState,
     stored = structuredClone(instance),
     catalog = structuredClone(definition),
@@ -61,7 +67,7 @@ function fixture() {
     patch: ((value: unknown) => unknown) | null = null;
   const requests: { path: string; body: unknown }[] = [];
   const client = new ContentClient(
-    member,
+    { ...member, role },
     module,
     async (path, _signal, body) => {
       requests.push({ path, body });
@@ -73,6 +79,26 @@ function fixture() {
         void sources;
         void originSources;
         result = { definitions: [meta], next: null };
+      } else if (path.endsWith("/override")) {
+        const replacement = body as {
+          name: string;
+          visibility: "gm" | "public";
+          data: ContentView["data"];
+          sources: ContentView["sources"];
+        };
+        catalog = {
+          ...catalog,
+          name: replacement.name,
+          visibility: replacement.visibility,
+          data: replacement.data,
+          sources: replacement.sources,
+          revision: catalog.revision + 1,
+          overridden: true,
+        };
+        result = catalog;
+      } else if (path.endsWith("/reset")) {
+        catalog = { ...definition, revision: catalog.revision + 1 };
+        result = catalog;
       } else if (path.includes("/content/")) result = catalog;
       else if (path.includes("/instances?"))
         result = { instances: [metadata()], next: null };
@@ -317,5 +343,137 @@ test("content pagination preserves drafts, validates module fields and gates sta
     assert.ok(f.view().uncertain);
   } finally {
     f.client.stop();
+  }
+});
+
+test("GM homebrew drafts save typed replacements and sources, preserve copies, and reset through explicit versioned requests", async () => {
+  const f = fixture("gm");
+  try {
+    await f.client.refresh();
+    await f.client.openDefinition(definition.reference);
+    await f.client.openInstance(instance.id);
+    f.client.editHomebrew();
+    assert.equal(await f.client.create(), true);
+    assert.equal(f.view().homebrew, null);
+    f.client.editHomebrew();
+    f.client.changeHomebrew(
+      {
+        name: "Homebrew",
+        data: { text: "Replacement" },
+        sources: [{ title: "Synthetic", edition: "test", page: "case 1" }],
+      },
+      "preview-paper@0.0.0:blank",
+      0,
+    );
+    assert.ok(homebrewDirty(f.view()));
+    assert.equal(await f.client.create(), false);
+    f.client.change({ name: "Blocked copy edit" }, instance.id, 1);
+    assert.equal(f.view().draft!.name, instance.name);
+    assert.equal(await f.client.saveHomebrew(), true);
+    assert.equal(f.view().definition!.revision, 1);
+    assert.equal(f.view().definition!.overridden, true);
+    assert.deepEqual(f.view().instance, instance);
+    assert.equal(f.view().homebrew, null);
+    assert.equal(await f.client.resetHomebrew("wrong", 1), false);
+    assert.equal(
+      await f.client.resetHomebrew("preview-paper@0.0.0:blank", 1),
+      true,
+    );
+    assert.equal(f.view().definition!.revision, 2);
+    assert.equal(f.view().definition!.overridden, false);
+    assert.deepEqual(f.view().instance, instance);
+  } finally {
+    f.client.stop();
+  }
+});
+test("homebrew rejects non-GM and stale callbacks, retains conflicting/lost drafts and requires review before private publication", async () => {
+  const player = fixture();
+  try {
+    await player.client.refresh();
+    await player.client.openDefinition(definition.reference);
+    player.client.editHomebrew();
+    assert.equal(player.view().homebrew, null);
+    assert.equal(await player.client.saveHomebrew(), false);
+  } finally {
+    player.client.stop();
+  }
+  const f = fixture("gm");
+  try {
+    f.catalog({ ...definition, visibility: "gm" });
+    await f.client.refresh();
+    await f.client.openDefinition(definition.reference);
+    f.client.editHomebrew();
+    f.client.changeHomebrew(
+      { visibility: "public", data: { text: "Reviewed replacement" } },
+      "preview-paper@0.0.0:blank",
+      0,
+    );
+    assert.equal(await f.client.saveHomebrew(), false);
+    f.client.reviewHomebrewSharing(true);
+    f.client.changeHomebrew(
+      { name: "Final name" },
+      "preview-paper@0.0.0:blank",
+      0,
+    );
+    assert.equal(f.view().homebrew!.shareReviewed, false);
+    f.client.reviewHomebrewSharing(true);
+    assert.equal(await f.client.saveHomebrew(), true);
+    f.client.editHomebrew();
+    f.client.changeHomebrew({ name: "Kept" }, "preview-paper@0.0.0:blank", 1);
+    f.catalog({ ...f.view().definition!, name: "Remote", revision: 2 });
+    await f.client.refresh();
+    assert.ok(homebrewStale(f.view()));
+    assert.equal(f.view().homebrew!.name, "Kept");
+    assert.equal(await f.client.saveHomebrew(), false);
+    f.client.changeHomebrew(
+      { name: "Old callback" },
+      "preview-paper@0.0.0:blank",
+      1,
+    );
+    assert.equal(f.view().homebrew!.name, "Kept");
+    f.client.discardHomebrew();
+    f.client.editHomebrew();
+    f.client.changeHomebrew({ name: "Lost" }, "preview-paper@0.0.0:blank", 2);
+    f.fail(new Error("lost response"));
+    assert.equal(await f.client.saveHomebrew(), false);
+    assert.equal(f.view().homebrew!.name, "Lost");
+    assert.ok(f.view().uncertain);
+  } finally {
+    f.client.stop();
+  }
+});
+test("homebrew rejects incomplete sources, malformed confirmations and stale reset controls without losing the draft", async () => {
+  for (const fields of [
+    { revision: 50 },
+    { kind: "wrong-kind" },
+    { name: "Wrong name" },
+    { overridden: false },
+    { sources: [{ title: "Wrong", edition: "test", page: "1" }] },
+  ]) {
+    const f = fixture("gm");
+    try {
+      await f.client.refresh();
+      await f.client.openDefinition(definition.reference);
+      f.client.editHomebrew();
+      f.client.changeHomebrew(
+        { name: "Draft", sources: [{ title: "", edition: "", page: "" }] },
+        "preview-paper@0.0.0:blank",
+        0,
+      );
+      const n = f.requests.length;
+      assert.equal(await f.client.saveHomebrew(), false);
+      assert.equal(f.requests.length, n);
+      f.client.changeHomebrew({ sources: [] }, "preview-paper@0.0.0:blank", 0);
+      f.patch((value) => ({ ...(value as object), ...fields }));
+      assert.equal(await f.client.saveHomebrew(), false);
+      assert.ok(f.view().uncertain);
+      assert.equal(f.view().homebrew!.name, "Draft");
+      assert.equal(
+        await f.client.resetHomebrew("preview-paper@0.0.0:blank", 0),
+        false,
+      );
+    } finally {
+      f.client.stop();
+    }
   }
 });

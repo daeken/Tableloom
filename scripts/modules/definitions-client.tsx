@@ -160,6 +160,50 @@ function KitEditor({
     </div>
   );
 }
+function PaperHomebrew({
+  data,
+  onChange,
+  readOnly,
+}: InstanceEditorProps<z.infer<typeof paperDefinition>>) {
+  const id = useId();
+  return (
+    <div className="example-fields">
+      <label htmlFor={id}>Paper text</label>
+      <textarea
+        id={id}
+        readOnly={readOnly}
+        value={data.text}
+        maxLength={500}
+        onChange={(e) => onChange({ text: e.target.value })}
+      />
+    </div>
+  );
+}
+function KitHomebrew({
+  data,
+  onChange,
+  readOnly,
+}: InstanceEditorProps<z.infer<typeof kitDefinition>>) {
+  return (
+    <div className="example-fields">
+      {data.parts.map((part, i) => (
+        <label key={i}>
+          Kit part {i + 1}
+          <input
+            readOnly={readOnly}
+            maxLength={60}
+            value={part}
+            onChange={(e) =>
+              onChange({
+                parts: data.parts.map((p, n) => (n === i ? e.target.value : p)),
+              })
+            }
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
 const paperBrowser = defineBrowserContent({
   ...previewContentPins.dossier,
   schemaVersion: 1,
@@ -167,6 +211,7 @@ const paperBrowser = defineBrowserContent({
   instanceSchema: paperInstance,
   Definition: ({ data }) => <p>{data.text}</p>,
   Instance: PaperEditor,
+  Homebrew: PaperHomebrew,
 });
 const kitBrowser = defineBrowserContent({
   ...previewContentPins.checklist,
@@ -181,6 +226,7 @@ const kitBrowser = defineBrowserContent({
     </ul>
   ),
   Instance: KitEditor,
+  Homebrew: KitHomebrew,
 });
 export const previewBrowsers = {
   dossier: defineBrowserSystem(dossier, DossierSheet, [paperBrowser]),

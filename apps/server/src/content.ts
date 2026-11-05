@@ -12,6 +12,7 @@ import {
   contentOverrideSchema,
   contentResetSchema,
   contentReferenceSchema,
+  contentPacksViewSchema,
 } from "@tableloom/core/content";
 import type { ContentReference } from "@tableloom/core/content";
 import { StoreError, TableStore } from "./store.js";
@@ -169,6 +170,24 @@ export class CampaignContentStore {
     return transaction(this.db, () =>
       this.view(this.member(actor), contentReferenceSchema.parse(reference)),
     );
+  }
+  packs(actor: Member) {
+    return transaction(this.db, () => {
+      const member = this.member(actor);
+      if (member.role !== "gm")
+        throw new StoreError("Only the GM can manage content packs.", 403);
+      const campaign = this.campaigns.getCampaign(member.tableId);
+      return contentPacksViewSchema.parse({
+        campaign: { ...campaign, role: member.role },
+        packs: this.catalog
+          .metadata()
+          .filter(
+            (pack) =>
+              pack.systemId === campaign.system.id &&
+              pack.systemVersion === campaign.system.version,
+          ),
+      });
+    });
   }
   list(actor: Member, input: { after?: string; limit?: number } = {}) {
     const query = z

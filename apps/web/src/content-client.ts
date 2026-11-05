@@ -3,6 +3,7 @@ import {
   contentKey,
   contentViewSchema,
   contentPageSchema,
+  contentOverrideSchema,
 } from "@tableloom/core/content";
 import type { ContentView } from "@tableloom/core/content";
 import {
@@ -27,6 +28,14 @@ export interface ContentDraft {
   visibility: "gm" | "public";
   data: DocumentData;
 }
+export interface HomebrewDraft {
+  revision: number;
+  name: string;
+  visibility: "gm" | "public";
+  data: DocumentData;
+  sources: ContentView["sources"];
+  shareReviewed: boolean;
+}
 export interface ContentState {
   definitions: ReturnType<typeof contentPageSchema.parse>["definitions"];
   catalogNext: string | null;
@@ -35,6 +44,7 @@ export interface ContentState {
   next: string | null;
   cursor: string | null;
   definition: ContentView | null;
+  homebrew: HomebrewDraft | null;
   instance: OwnedContentInstance | null;
   draft: ContentDraft | null;
   busy: boolean;
@@ -50,6 +60,7 @@ export const emptyContentState = (): ContentState => ({
   next: null,
   cursor: null,
   definition: null,
+  homebrew: null,
   instance: null,
   draft: null,
   busy: false,
@@ -75,6 +86,30 @@ export const contentStale = (state: ContentState) =>
     state.instance &&
     state.draft &&
     state.instance.version !== state.draft.version,
+  );
+const homebrewOf = (definition: ContentView): HomebrewDraft => ({
+  revision: definition.revision,
+  name: definition.name,
+  visibility: definition.visibility,
+  data: definition.data,
+  sources: definition.sources,
+  shareReviewed: false,
+});
+export const homebrewDirty = (state: ContentState) =>
+  Boolean(
+    state.definition &&
+    state.homebrew &&
+    JSON.stringify({
+      ...state.homebrew,
+      revision: state.definition.revision,
+      shareReviewed: false,
+    }) !== JSON.stringify(homebrewOf(state.definition)),
+  );
+export const homebrewStale = (state: ContentState) =>
+  Boolean(
+    state.definition &&
+    state.homebrew &&
+    state.definition.revision !== state.homebrew.revision,
   );
 const metadataOf = (instance: OwnedContentInstance) =>
   instanceMetadataSchema.parse(
@@ -200,9 +235,10 @@ export class ContentClient {
     );
   }
   private clean() {
-    if (contentDirty(this.state)) {
+    if (contentDirty(this.state) || homebrewDirty(this.state)) {
       this.update({
-        error: "Save or discard your copy draft before choosing another entry.",
+        error:
+          "Save or discard your copy/homebrew draft before choosing another entry.",
       });
       return false;
     }
@@ -241,7 +277,7 @@ export class ContentClient {
           uncertain: writing,
           ...(denied ? { ...emptyContentState(), busy: true } : {}),
           error: writing
-            ? "Saving was not confirmed. Refresh and check your copies before trying again."
+            ? "Saving was not confirmed. Refresh and check the catalog and copies before trying again."
             : error instanceof DocumentRequestError
               ? error.message
               : "Content could not refresh. Check access and installed module controls.",
@@ -309,6 +345,12 @@ export class ContentClient {
         next: page.next,
         cursor,
         definition,
+        homebrew:
+          definition && this.state.homebrew
+            ? homebrewDirty(this.state) || homebrewStale(this.state)
+              ? this.state.homebrew
+              : homebrewOf(definition)
+            : null,
         instance,
         draft: instance ? (keep ? this.state.draft : draftOf(instance)) : null,
         ready: true,
@@ -323,7 +365,13 @@ export class ContentClient {
         await this.request(this.path(ref), signal),
         ref,
       );
-      if (current()) this.update({ definition, ready: true, uncertain: false });
+      if (current())
+        this.update({
+          definition,
+          homebrew: null,
+          ready: true,
+          uncertain: false,
+        });
     });
   }
   async openInstance(id: string) {
@@ -339,6 +387,7 @@ export class ContentClient {
       if (current())
         this.update({
           instance,
+          homebrew: null,
           draft: draftOf(instance),
           ready: true,
           uncertain: false,
@@ -385,6 +434,7 @@ export class ContentClient {
             metadataOf(instance),
             ...this.state.instances.filter((i) => i.id !== instance.id),
           ].slice(0, 25),
+          homebrew: null,
           ready: true,
           uncertain: false,
         });
@@ -400,6 +450,7 @@ export class ContentClient {
       !this.state.ready ||
       this.state.busy ||
       !this.editable() ||
+      Boolean(this.state.homebrew) ||
       contentStale(this.state) ||
       !this.state.instance ||
       !this.state.draft ||
@@ -436,6 +487,7 @@ export class ContentClient {
       !this.state.ready ||
       this.state.uncertain ||
       !this.editable() ||
+      Boolean(this.state.homebrew) ||
       contentStale(this.state) ||
       !contentDirty(this.state)
     )
@@ -488,6 +540,174 @@ export class ContentClient {
           instances: this.state.instances.map((i) =>
             i.id === instance.id ? metadataOf(instance) : i,
           ),
+          ready: true,
+          uncertain: false,
+        });
+    });
+  }
+  editHomebrew() {
+    const definition = this.state.definition;
+    if (
+      this.member.role !== "gm" ||
+      !definition ||
+      !this.state.ready ||
+      this.state.busy ||
+      contentDirty(this.state) ||
+      homebrewDirty(this.state) ||
+      homebrewStale(this.state) ||
+      !this.adapter(definition.reference)?.renderHomebrew
+    )
+      return;
+    this.update({ homebrew: homebrewOf(definition), error: "" });
+  }
+  changeHomebrew(
+    fields: Partial<
+      Pick<HomebrewDraft, "name" | "visibility" | "data" | "sources">
+    >,
+    key: string,
+    revision: number,
+  ) {
+    const definition = this.state.definition,
+      draft = this.state.homebrew;
+    if (
+      this.member.role !== "gm" ||
+      !this.running ||
+      !this.state.ready ||
+      this.state.busy ||
+      !definition ||
+      !draft ||
+      homebrewStale(this.state) ||
+      key !== contentKey(definition.reference) ||
+      revision !== draft.revision
+    )
+      return;
+    try {
+      const homebrew = { ...draft, ...fields, shareReviewed: false };
+      homebrew.data = this.adapter(definition.reference)!.parseDefinition(
+        homebrew.data,
+      );
+      this.update({ homebrew, error: "" });
+    } catch {
+      this.update({
+        error:
+          "Check the homebrew module fields. This change was not accepted.",
+      });
+    }
+  }
+  reviewHomebrewSharing(reviewed: boolean) {
+    if (
+      this.member.role === "gm" &&
+      this.running &&
+      this.state.ready &&
+      !this.state.busy &&
+      this.state.homebrew &&
+      !homebrewStale(this.state)
+    )
+      this.update({
+        homebrew: { ...this.state.homebrew, shareReviewed: reviewed },
+      });
+  }
+  discardHomebrew() {
+    if (this.member.role === "gm" && this.state.ready && !this.state.busy)
+      this.update({ homebrew: null, error: "" });
+  }
+  async saveHomebrew() {
+    const definition = this.state.definition,
+      draft = this.state.homebrew;
+    if (
+      this.member.role !== "gm" ||
+      !definition ||
+      !draft ||
+      !this.state.ready ||
+      this.state.uncertain ||
+      homebrewStale(this.state) ||
+      !homebrewDirty(this.state) ||
+      contentDirty(this.state)
+    )
+      return false;
+    if (
+      definition.visibility === "gm" &&
+      draft.visibility === "public" &&
+      !draft.shareReviewed
+    ) {
+      this.update({
+        error:
+          "Review the replacement fields and sources before sharing private content.",
+      });
+      return false;
+    }
+    const parsed = contentOverrideSchema.safeParse({
+      expectedRevision: draft.revision,
+      name: draft.name,
+      visibility: draft.visibility,
+      data: draft.data,
+      sources: draft.sources,
+    });
+    if (!parsed.success) {
+      this.update({
+        error:
+          "Complete the homebrew name, fields and source references before saving.",
+      });
+      return false;
+    }
+    return this.operation(true, async (signal, current) => {
+      const result = this.definition(
+        await this.request(
+          `${this.path(definition.reference)}/override`,
+          signal,
+          parsed.data,
+        ),
+        definition.reference,
+      );
+      if (
+        result.revision !== draft.revision + 1 ||
+        !result.overridden ||
+        result.kind !== definition.kind ||
+        result.name !== parsed.data.name ||
+        result.visibility !== draft.visibility ||
+        JSON.stringify(result.sources) !== JSON.stringify(parsed.data.sources)
+      )
+        throw new Error("Unexpected homebrew confirmation.");
+      if (current())
+        this.update({
+          definition: result,
+          homebrew: null,
+          ready: true,
+          uncertain: false,
+        });
+    });
+  }
+  async resetHomebrew(key: string, revision: number) {
+    const definition = this.state.definition;
+    if (
+      this.member.role !== "gm" ||
+      !definition ||
+      key !== contentKey(definition.reference) ||
+      revision !== definition.revision ||
+      !definition.overridden ||
+      !this.state.ready ||
+      this.state.uncertain ||
+      contentDirty(this.state) ||
+      homebrewDirty(this.state)
+    )
+      return false;
+    return this.operation(true, async (signal, current) => {
+      const result = this.definition(
+        await this.request(`${this.path(definition.reference)}/reset`, signal, {
+          expectedRevision: revision,
+        }),
+        definition.reference,
+      );
+      if (
+        result.revision !== revision + 1 ||
+        result.overridden ||
+        result.kind !== definition.kind
+      )
+        throw new Error("Unexpected homebrew reset.");
+      if (current())
+        this.update({
+          definition: result,
+          homebrew: null,
           ready: true,
           uncertain: false,
         });

@@ -7,6 +7,9 @@ import {
   DocumentRequestError,
 } from "../../apps/web/src/document-client.js";
 import type { DocumentView } from "../../apps/web/src/document-client.js";
+import { PackSelectionClient } from "../../apps/web/src/pack-selection-client.js";
+import type { PackSelectionState } from "../../apps/web/src/pack-selection-client.js";
+import { contentKey } from "@tableloom/core/content";
 import { ContentClient } from "../../apps/web/src/content-client.js";
 import type { ContentState } from "../../apps/web/src/content-client.js";
 import { previewKinds } from "./shared.js";
@@ -279,6 +282,52 @@ export async function verifyModulePreview() {
           assert.equal(content.view().definitions.length, 1);
           assert.ok(!JSON.stringify(content.view()).includes(serverCanary));
           const reference = content.view().definitions[0]!.reference;
+          let packView: PackSelectionState;
+          const packClient = new PackSelectionClient(
+            gm.member,
+            previewBrowsers[kind],
+            async (path, signal, body) => {
+              const response = await fetch(url + path, {
+                signal,
+                headers: {
+                  Cookie: gm.cookie,
+                  Origin: url,
+                  ...(body === undefined
+                    ? {}
+                    : { "Content-Type": "application/json" }),
+                },
+                ...(body === undefined
+                  ? {}
+                  : { method: "POST", body: JSON.stringify(body) }),
+              });
+              const json: unknown = await response.json();
+              if (!response.ok)
+                throw new DocumentRequestError(
+                  response.status,
+                  z.object({ error: z.string() }).parse(json).error,
+                );
+              return json;
+            },
+            (state) => {
+              packView = state;
+            },
+          );
+          packClient.start();
+          try {
+            assert.equal(await packClient.load(), true);
+            assert.equal(packView!.current!.packs.length, 1);
+            packClient.toggle(reference.packId, reference.packVersion, false);
+            assert.equal(await packClient.save(), true);
+            assert.equal(await content.client.refresh(), true);
+            assert.equal(content.view().definitions.length, 0);
+            packClient.toggle(reference.packId, reference.packVersion, true);
+            assert.equal(await packClient.save(), true);
+            assert.equal(await content.client.refresh(), true);
+            assert.equal(content.view().definitions.length, 1);
+          } finally {
+            packClient.stop();
+          }
+
           assert.equal(await content.client.openDefinition(reference), true);
           assert.equal(await content.client.create(), true);
           const copy = content.view().instance!;
@@ -298,6 +347,16 @@ export async function verifyModulePreview() {
           );
           assert.equal(await content.client.save(), true);
           const savedCopy = content.view().instance!;
+          packClient.start();
+          try {
+            assert.equal(await packClient.load(), true);
+            packClient.toggle(reference.packId, reference.packVersion, false);
+            assert.equal(await packClient.save(), false); // owned copies protect their exact pack pin
+            assert.equal(packView!.draft!.pins.length, 0);
+          } finally {
+            packClient.stop();
+          }
+
           assert.deepEqual(savedCopy.source, copy.source);
           assert.equal(await other.client.refresh(), true);
           assert.equal(other.view().instances.length, 1);
@@ -309,34 +368,39 @@ export async function verifyModulePreview() {
             (await raw(`${catalogRoot}/private`, owner.cookie)).status,
             404,
           );
-          assert.equal(
-            (
-              await raw(`${catalogRoot}/blank/override`, gm.cookie, {
-                expectedRevision: 0,
+          const gmContent = makeContent(gm);
+          gmContent.client.start();
+          try {
+            assert.equal(await gmContent.client.refresh(), true);
+            assert.equal(
+              await gmContent.client.openDefinition(reference),
+              true,
+            );
+            gmContent.client.editHomebrew();
+            gmContent.client.changeHomebrew(
+              {
                 name: "Synthetic homebrew",
-                visibility: "public",
-                sources: [],
                 data:
                   kind === "dossier"
                     ? { text: "Synthetic replacement" }
                     : { parts: ["Replacement part"] },
-              })
-            ).status,
-            200,
-          );
-          assert.equal(await content.client.create(), false); // stale definition revision
-          assert.equal(await content.client.refresh(), true);
-          assert.deepEqual(content.view().instance, savedCopy);
-          assert.equal(await content.client.create(), true);
-          assert.equal(content.view().instance!.definitionRevision, 1);
-          assert.equal(
-            (
-              await raw(`${catalogRoot}/blank/reset`, gm.cookie, {
-                expectedRevision: 1,
-              })
-            ).status,
-            200,
-          );
+              },
+              contentKey(reference),
+              0,
+            );
+            assert.equal(await gmContent.client.saveHomebrew(), true);
+            assert.equal(await content.client.create(), false); // stale definition revision
+            assert.equal(await content.client.refresh(), true);
+            assert.deepEqual(content.view().instance, savedCopy);
+            assert.equal(await content.client.create(), true);
+            assert.equal(content.view().instance!.definitionRevision, 1);
+            assert.equal(
+              await gmContent.client.resetHomebrew(contentKey(reference), 1),
+              true,
+            );
+          } finally {
+            gmContent.client.stop();
+          }
           assert.equal(await content.client.refresh(), true);
           assert.equal(content.view().instance!.definitionRevision, 1);
         } finally {

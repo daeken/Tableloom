@@ -48,6 +48,25 @@ test("content HTTP scope, pin selection, privacy, GM override/reset and restart 
       await post("access/join", { name: "Player", code }),
     );
     assert.equal((await get(root)).statusCode, 401);
+    const packsPath = `campaigns/${DEFAULT_CAMPAIGN_ID}/content-packs`;
+    assert.equal((await get(packsPath)).statusCode, 401);
+    assert.equal((await get(packsPath, player)).statusCode, 403);
+    const installed = (await get(packsPath, gm)).json();
+    assert.equal(installed.packs.length, 1);
+    assert.equal(installed.packs[0].id, pack.id);
+    assert.equal(installed.packs[0].systemVersion, pack.systemVersion);
+    assert.ok(!JSON.stringify(installed).includes("PRIVATE-CONTENT-CANARY"));
+    assert.ok(!JSON.stringify(installed).includes("GM-ONLY-SOURCE"));
+    assert.equal(
+      (
+        await get(
+          "campaigns/00000000-0000-4000-8000-000000000000/content-packs",
+          gm,
+        )
+      ).statusCode,
+      409,
+    );
+
     assert.deepEqual((await get(root, player)).json(), {
       definitions: [],
       next: null,

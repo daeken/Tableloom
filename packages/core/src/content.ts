@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { campaignMembershipSchema, installedPackSchema } from "./campaigns.js";
 import {
   contentIdSchema,
   contentVersionSchema,
@@ -57,3 +58,9 @@ export const contentResetSchema = z
   .object({ expectedRevision: z.number().int().nonnegative() })
   .strict();
 export type ContentView = z.infer<typeof contentViewSchema>;
+export const contentPacksViewSchema = z
+  .object({
+    campaign: campaignMembershipSchema,
+    packs: z.array(installedPackSchema).max(100),
+  })
+  .strict();

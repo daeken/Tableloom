@@ -40,6 +40,9 @@ export function registerContentRoutes(
   };
   const root = "/api/campaigns/:campaignId/content",
     item = `${root}/:packId/:packVersion/:definitionId`;
+  app.get("/api/campaigns/:campaignId/content-packs", async (request) =>
+    content.packs(actor(request)),
+  );
   app.get(root, async (request) => {
     const member = actor(request),
       query = z
