@@ -1,3 +1,4 @@
+import { AssetLibraryDialog } from "./AssetLibraryDialog.js";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -69,6 +70,7 @@ export function App() {
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sceneOpen, setSceneOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
   const [ownershipOpen, setOwnershipOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState(colors[0]!);
@@ -123,6 +125,7 @@ export function App() {
     setHistoryOpen(false);
     setInviteOpen(false);
     setOwnershipOpen(false);
+    setAssetsOpen(false);
   }, [viewerKey]);
 
   async function logout() {
@@ -252,6 +255,14 @@ export function App() {
               onClick={() => setSceneOpen(true)}
             >
               Manage scenes
+            </button>
+          )}
+          {member?.role === "gm" && (
+            <button
+              className="add-cast manage-scenes"
+              onClick={() => setAssetsOpen(true)}
+            >
+              Map assets
             </button>
           )}
           <div className="rail-section">
@@ -640,6 +651,13 @@ export function App() {
           modules={modules}
           accept={accept}
           close={() => setCampaignOpen(false)}
+        />
+      )}
+      {assetsOpen && member?.role === "gm" && (
+        <AssetLibraryDialog
+          key={viewerKey}
+          campaignId={member.tableId}
+          close={() => setAssetsOpen(false)}
         />
       )}
       {sceneOpen && member?.role === "gm" && table.context && (

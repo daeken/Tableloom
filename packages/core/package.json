@@ -12,6 +12,7 @@
     "./documents": "./src/documents.ts",
     "./permissions": "./src/permissions.ts",
     "./server": "./src/server.ts",
-    "./geometry": "./src/geometry.ts"
+    "./geometry": "./src/geometry.ts",
+    "./assets": "./src/assets.ts"
   }
 }

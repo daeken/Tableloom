@@ -1,3 +1,5 @@
+import { assetSchema, assetPageSchema } from "@tableloom/core/assets";
+import { pngFixture } from "../apps/server/src/png-fixture.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -930,6 +932,47 @@ try {
         type === "scene.undo" ? finalPoints : groupPoints,
       );
     }
+    const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
+      png = pngFixture(),
+      assetResponse = await fetch(
+        `${assetRoot}?name=Private%20smoke%20map.png`,
+        {
+          method: "POST",
+          headers: {
+            Cookie: nextCookie,
+            Origin: url,
+            "Content-Type": "image/png",
+          },
+          body: new Uint8Array(png),
+        },
+      );
+    assert.equal(assetResponse.status, 201);
+    const asset = assetSchema.parse(await assetResponse.json());
+    const assetPage = await fetch(assetRoot, {
+      headers: { Cookie: nextCookie },
+    });
+    assert.equal(
+      assetPageSchema.parse(await assetPage.json()).assets[0]!.id,
+      asset.id,
+    );
+    const privateImage = await fetch(`${assetRoot}/${asset.id}/content`, {
+      headers: { Cookie: nextCookie },
+    });
+    assert.equal(privateImage.status, 200);
+    assert.equal(privateImage.headers.get("cache-control"), "no-store");
+    assert.deepEqual(Buffer.from(await privateImage.arrayBuffer()), png);
+    const unauthenticatedImage = await fetch(
+      `${assetRoot}/${asset.id}/content`,
+    );
+    assert.equal(unauthenticatedImage.status, 401);
+    await unauthenticatedImage.text();
+    const removedAsset = await fetch(`${assetRoot}/${asset.id}/delete`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: "{}",
+    });
+    assert.equal(removedAsset.status, 200);
+    await removedAsset.json();
     const historyRoot = `${url}/api/campaigns/${campaign.id}/rolls`;
     const archived = await fetch(`${historyRoot}/archive`, {
       method: "POST",
@@ -970,5 +1013,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG asset upload/list/download/removal, roll archive/cleanup, and clean shutdown.",
 );

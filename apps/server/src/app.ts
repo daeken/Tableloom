@@ -1,3 +1,5 @@
+import { AssetStore } from "./assets.js";
+import { registerAssetRoutes } from "./assets-http.js";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
@@ -65,6 +67,7 @@ export async function createApp(options: {
   let history: RollHistoryStore;
   let bindings: CommandBindings;
   let sceneHistory: SceneHistoryStore;
+  let assets: AssetStore;
   try {
     store = new TableStore(database);
     access = new AccessStore(database, options.hostKey, now);
@@ -73,6 +76,7 @@ export async function createApp(options: {
     history = new RollHistoryStore(database, store);
     bindings = new CommandBindings(database);
     sceneHistory = new SceneHistoryStore(database, store);
+    assets = new AssetStore(database, now);
   } catch (error) {
     database.close();
     throw error;
@@ -193,6 +197,7 @@ export async function createApp(options: {
     refreshCampaign,
   });
   registerDocumentRoutes(app, access, documents);
+  await registerAssetRoutes(app, access, assets);
   registerRollHistoryRoutes(app, access, history, refreshCampaign);
   app.get("/api/health", async () => ({
     status: "ok",
