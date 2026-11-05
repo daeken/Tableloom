@@ -20,7 +20,7 @@ test("bounded static RGB/RGBA PNGs retain exact image chunks while ancillary tex
   }
 });
 
-test("PNG parser rejects signatures, CRCs, truncation, extra bytes, mode/animation/transparency and chunk-order violations", () => {
+test("PNG parser rejects signatures, CRCs, truncation, extra bytes, mode/animation/invalid-transparency and chunk-order violations", () => {
   const good = pngFixture(),
     crc = Buffer.from(good);
   crc[29] = crc[29]! ^ 1;

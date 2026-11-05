@@ -9,10 +9,12 @@ import { StoreError } from "./store.js";
 const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const invalid = () =>
   new StoreError(
-    "Upload a valid static, non-interlaced 8-bit RGB or RGBA PNG within the image limits.",
+    "Upload a valid static, non-interlaced PNG: RGB/RGBA or grayscale-alpha at 8 bits, grayscale/indexed at 1, 2, 4 or 8 bits, within the image limits.",
     400,
   );
-/** Validate complete structure/checksums and bounded pixel data; discard ancillary metadata. */
+/** Validate bounded image data; keep decoding-critical palette/transparency, discard other metadata.
+ * Mode, palette, transparency and row reconstruction contracts: https://www.w3.org/TR/png-3/ (§7, §9, §11).
+ */
 export function sanitizePng(input: Buffer) {
   if (
     input.length > MAX_ASSET_BYTES ||
@@ -25,10 +27,13 @@ export function sanitizePng(input: Buffer) {
     width = 0,
     height = 0,
     channels = 0,
+    color = 0,
+    depth = 0,
     dataStarted = false,
     dataEnded = false,
     ended = false,
-    palette = false;
+    paletteEntries = 0,
+    transparency = false;
   const kept: Buffer[] = [signature],
     compressed: Buffer[] = [];
   while (offset < input.length) {
@@ -54,23 +59,27 @@ export function sanitizePng(input: Buffer) {
       if (count !== 1 || length !== 13) throw invalid();
       width = body.readUInt32BE(0);
       height = body.readUInt32BE(4);
+      color = body[9]!;
+      depth = body[8]!;
+      const validMode = [0, 3].includes(color)
+        ? [1, 2, 4, 8].includes(depth)
+        : [2, 4, 6].includes(color) && depth === 8;
       if (
         !width ||
         !height ||
         width > MAX_ASSET_DIMENSION ||
         height > MAX_ASSET_DIMENSION ||
         width * height > MAX_ASSET_PIXELS ||
-        body[8] !== 8 ||
-        ![2, 6].includes(body[9]!) ||
+        !validMode ||
         body[10] !== 0 ||
         body[11] !== 0 ||
         body[12] !== 0
       )
         throw invalid();
-      channels = body[9] === 2 ? 3 : 4;
+      channels = color === 2 ? 3 : color === 6 ? 4 : color === 4 ? 2 : 1;
       kept.push(input.subarray(offset, end));
     } else if (kind === "IDAT") {
-      if (dataEnded) throw invalid();
+      if (dataEnded || (color === 3 && !paletteEntries)) throw invalid();
       dataStarted = true;
       compressed.push(body);
       kept.push(input.subarray(offset, end));
@@ -80,16 +89,34 @@ export function sanitizePng(input: Buffer) {
       ended = true;
     } else if (kind === "PLTE") {
       if (
-        palette ||
+        paletteEntries ||
         dataStarted ||
+        transparency ||
+        [0, 4].includes(color) ||
         length === 0 ||
         length > 768 ||
         length % 3 !== 0
       )
         throw invalid();
-      palette = true; // Optional suggested palette is unnecessary for RGB/RGBA decoding.
+      paletteEntries = length / 3;
+      if (color === 3) {
+        if (paletteEntries > 2 ** depth) throw invalid();
+        kept.push(input.subarray(offset, end));
+      } // Optional suggested truecolor palettes can be discarded.
+    } else if (kind === "tRNS") {
+      if (transparency || dataStarted) throw invalid();
+      if (color === 3) {
+        if (!paletteEntries || !length || length > paletteEntries)
+          throw invalid();
+      } else if (color === 0 || color === 2) {
+        if (length !== (color === 0 ? 2 : 6)) throw invalid();
+        for (let sample = 0; sample < length; sample += 2)
+          if (body.readUInt16BE(sample) >= 2 ** depth) throw invalid();
+      } else throw invalid();
+      transparency = true;
+      kept.push(input.subarray(offset, end));
     } else if (
-      ["acTL", "fcTL", "fdAT", "tRNS"].includes(kind) ||
+      ["acTL", "fcTL", "fdAT"].includes(kind) ||
       kind[0] === kind[0]!.toUpperCase()
     )
       throw invalid();
@@ -97,7 +124,7 @@ export function sanitizePng(input: Buffer) {
   }
   if (!ended) throw invalid();
   const packed = Buffer.concat(compressed),
-    stride = width * channels + 1,
+    stride = Math.ceil((width * channels * depth) / 8) + 1,
     expected = stride * height;
   try {
     const raw: unknown = inflateSync(packed, {
@@ -115,8 +142,43 @@ export function sanitizePng(input: Buffer) {
       decoded.engine.bytesWritten !== packed.length
     )
       throw invalid();
-    for (let row = 0; row < height; row++)
-      if (decoded.buffer[row * stride]! > 4) throw invalid();
+    for (let row = 0; row < height; row++) {
+      const start = row * stride,
+        filter = decoded.buffer[start]!;
+      if (filter > 4) throw invalid();
+      if (color !== 3) continue;
+      // Indexed samples must refer to real palette entries, even after filtering.
+      // Reverse in the bounded inflate buffer; original compressed bytes stay intact.
+      for (let byte = 1; byte < stride; byte++) {
+        const left = byte > 1 ? decoded.buffer[start + byte - 1]! : 0,
+          up = row > 0 ? decoded.buffer[start - stride + byte]! : 0,
+          upperLeft =
+            row > 0 && byte > 1
+              ? decoded.buffer[start - stride + byte - 1]!
+              : 0;
+        let predictor = 0;
+        if (filter === 1) predictor = left;
+        else if (filter === 2) predictor = up;
+        else if (filter === 3) predictor = Math.floor((left + up) / 2);
+        else if (filter === 4) {
+          const p = left + up - upperLeft,
+            a = Math.abs(p - left),
+            b = Math.abs(p - up),
+            c = Math.abs(p - upperLeft);
+          predictor = a <= b && a <= c ? left : b <= c ? up : upperLeft;
+        }
+        decoded.buffer[start + byte] =
+          (decoded.buffer[start + byte]! + predictor) & 255;
+      }
+      for (let pixel = 0; pixel < width; pixel++) {
+        const bit = pixel * depth,
+          value =
+            (decoded.buffer[start + 1 + Math.floor(bit / 8)]! >>
+              (8 - depth - (bit % 8))) &
+            ((1 << depth) - 1);
+        if (value >= paletteEntries) throw invalid();
+      }
+    }
   } catch {
     throw invalid();
   }

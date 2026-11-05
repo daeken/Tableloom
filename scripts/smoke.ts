@@ -1,6 +1,6 @@
 import { backgroundStateSchema } from "@tableloom/core/scene-map";
 import { assetSchema, assetPageSchema } from "@tableloom/core/assets";
-import { pngFixture } from "../apps/server/src/png-fixture.js";
+import { indexedMapFixture } from "../apps/server/src/png-fixture.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -934,7 +934,7 @@ try {
       );
     }
     const assetRoot = `${url}/api/campaigns/${campaign.id}/assets`,
-      png = pngFixture(),
+      png = indexedMapFixture(),
       assetResponse = await fetch(
         `${assetRoot}?name=Private%20smoke%20map.png`,
         {
@@ -1127,5 +1127,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private PNG asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, private indexed/transparency PNG asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
 );

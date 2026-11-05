@@ -46,3 +46,26 @@ export function pngFixture(
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
 }
+/** Synthetic packed-index courtyard, with transparent exterior and an implicit opaque final palette entry. */
+export function indexedMapFixture(width = 320, height = 240) {
+  const rowBytes = Math.ceil(width / 4),
+    raw = Buffer.alloc((rowBytes + 1) * height);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) {
+      const inside = x >= 20 && x < width - 20 && y >= 20 && y < height - 20,
+        wall =
+          inside && (x < 24 || x >= width - 24 || y < 24 || y >= height - 24),
+        index = wall ? 2 : inside ? 1 : 0;
+      raw[y * (rowBytes + 1) + 1 + Math.floor(x / 4)]! |=
+        index << (6 - (x % 4) * 2);
+    }
+  return pngFixture(width, height, {
+    color: 3,
+    depth: 2,
+    raw,
+    extra: Buffer.concat([
+      pngChunk("PLTE", Buffer.from([0, 0, 0, 218, 224, 206, 64, 95, 77])),
+      pngChunk("tRNS", Buffer.from([0, 255])),
+    ]),
+  });
+}

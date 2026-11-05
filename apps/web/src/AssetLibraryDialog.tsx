@@ -206,8 +206,9 @@ export function AssetLibraryDialog({
         onChange={(event) => setName(event.target.value)}
       />
       <p className="asset-help">
-        Static RGB/RGBA PNGs, up to 8192 pixels on either side and 16
-        megapixels. Other PNG modes and JPEG support are queued.
+        Static, non-interlaced PNGs: RGB/RGBA, indexed color, or grayscale, with
+        transparency. Up to 8192 pixels on either side and 16 megapixels. JPEG,
+        16-bit and interlaced PNG support are queued.
       </p>
       <div className="selection-delete-actions">
         <button
