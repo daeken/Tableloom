@@ -59,6 +59,10 @@ async function verifyCampaignExport(
         campaign_assets: z.array(
           z.object({ bytes: z.string(), sha256: z.string() }),
         ),
+        scene_backgrounds: z.array(
+          z.object({ history_cursor: z.number().int().positive() }),
+        ),
+        scene_background_history: z.array(z.object({ entry_json: z.string() })),
       }),
     })
     .parse(JSON.parse(serialized));
@@ -72,6 +76,8 @@ async function verifyCampaignExport(
   const image = archive.records.campaign_assets[0]!;
   assert.equal(hash(Buffer.from(image.bytes, "base64")), assetHash);
   assert.equal(image.sha256, assetHash);
+  assert.equal(archive.records.scene_backgrounds.length, 1);
+  assert.equal(archive.records.scene_background_history.length, 1);
   const preflight = await fetch(url + "/api/campaign-imports/preflight", {
     method: "POST",
     signal: AbortSignal.timeout(5000),
@@ -107,6 +113,8 @@ async function verifyCampaignExport(
   assert.deepEqual(report.blockers, []);
   assert.ok(report.pendingValidation.includes("mapped-storage-quotas"));
   assert.ok(!report.pendingValidation.includes("full-storage-quotas"));
+  assert.ok(report.pendingValidation.includes("object-history-causal-graph"));
+  assert.ok(!report.pendingValidation.includes("history-causal-graph"));
   assert.equal(
     report.archiveSha256,
     createHash("sha256").update(serialized).digest("hex"),
@@ -116,6 +124,31 @@ async function verifyCampaignExport(
       (subject) => subject.sourceId === document.ownerId,
     ),
   );
+  const modified = z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(serialized));
+  const records = z
+    .object({ scene_backgrounds: z.array(z.record(z.string(), z.unknown())) })
+    .passthrough()
+    .parse(modified.records);
+  records.scene_backgrounds[0]!.history_cursor = 0;
+  modified.records = records;
+  const denied = await fetch(url + "/api/campaign-imports/preflight", {
+    method: "POST",
+    signal: AbortSignal.timeout(5000),
+    headers: {
+      Origin: url,
+      Cookie: cookie,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(modified),
+  });
+  assert.equal(
+    denied.status,
+    400,
+    "A forged map cursor must fail compiled preflight",
+  );
+  await denied.arrayBuffer();
 }
 export async function verifyRuntimeHttp(url: string) {
   const health = await request(url, "/api/health");
@@ -171,6 +204,24 @@ export async function seedRuntime(url: string, hostKey: string) {
   const bytes = Buffer.from(
     await (await request(url, assetPath, cookie)).arrayBuffer(),
   );
+  const map = await request(
+    url,
+    `/api/campaigns/${member.tableId}/scene-map/set`,
+    cookie,
+    {
+      context: {
+        campaignId: campaign.id,
+        sceneId: campaign.activeSceneId,
+        generation: campaign.version,
+      },
+      expectedVersion: 0,
+      assetId: asset.id,
+      position: { x: 0, y: 0 },
+      width: 160,
+    },
+  );
+  assert.equal(map.status, 200);
+  await map.arrayBuffer();
   await verifyCampaignExport(
     url,
     cookie,

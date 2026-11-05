@@ -3,7 +3,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   backgroundMapSchema,
-  backgroundHistorySchema,
   backgroundHistoryActionSchema,
 } from "@tableloom/core/scene-map";
 import { StoreError } from "./store.js";
@@ -13,31 +12,15 @@ import {
   MAX_MAP_HISTORY_ENTRY_BYTES,
   MAX_CAMPAIGN_MAP_HISTORY_BYTES,
 } from "./storage-limits.js";
+import {
+  backgroundHistoryEntrySchema as entrySchema,
+  inspectSceneMapHistory,
+} from "./scene-map-history-model.js";
+import type { MapRecord } from "./scene-map-history-model.js";
+export { backgroundHistoryEntrySchema } from "./scene-map-history-model.js";
+export type { MapRecord } from "./scene-map-history-model.js";
 
 type Map = z.infer<typeof backgroundMapSchema> | null;
-export type MapRecord = { version: number; map: Map; cursor: number };
-export const backgroundHistoryEntrySchema = z
-  .object({
-    id: z.uuid(),
-    seq: z.number().int().positive(),
-    action: backgroundHistoryActionSchema,
-    before: backgroundMapSchema.nullable(),
-    after: backgroundMapSchema.nullable(),
-  })
-  .strict();
-const entrySchema = backgroundHistoryEntrySchema;
-// Image keys are access capabilities, never restored from an older snapshot.
-function sameMap(a: Map, b: Map) {
-  const value = (m: Map) =>
-    m && {
-      assetId: m.assetId,
-      position: m.position,
-      width: m.width,
-      height: m.height,
-      visibility: m.visibility,
-    };
-  return JSON.stringify(value(a)) === JSON.stringify(value(b));
-}
 export class SceneMapHistory {
   constructor(private readonly db: DatabaseSync) {}
   initialize() {
@@ -128,12 +111,7 @@ export class SceneMapHistory {
         if (Buffer.byteLength(raw, "utf8") > MAX_MAP_HISTORY_ENTRY_BYTES)
           throw new Error("Stored background history entry is too large.");
         const entry = entrySchema.parse(JSON.parse(raw));
-        if (
-          entry.id !== row.id ||
-          entry.seq !== row.seq ||
-          entry.seq > state.version ||
-          sameMap(entry.before, entry.after)
-        )
+        if (entry.id !== row.id || entry.seq !== row.seq)
           throw new Error("Stored background history entry is inconsistent.");
         const refs = this.db
           .prepare(
@@ -152,37 +130,7 @@ export class SceneMapHistory {
           throw new Error("Stored background history references disagree.");
         return entry;
       });
-    if (
-      entries.length > MAX_SCENE_MAP_HISTORY ||
-      (state.cursor !== 0 && !entries.some((e) => e.seq === state.cursor))
-    )
-      throw new Error("Stored background history cursor is inconsistent.");
-    for (let i = 1; i < entries.length; i++)
-      if (!sameMap(entries[i - 1]!.after, entries[i]!.before))
-        throw new Error("Stored background history chain is inconsistent.");
-    const undo = entries.filter((e) => e.seq <= state.cursor).at(-1) ?? null;
-    const redo = entries.find((e) => e.seq > state.cursor) ?? null;
-    if (
-      (undo && !sameMap(state.map, undo.after)) ||
-      (redo && !sameMap(state.map, redo.before))
-    )
-      throw new Error("Stored background history does not match the scene.");
-    const summary = (edge: typeof undo, direction: "before" | "after") =>
-      edge && {
-        id: edge.id,
-        action: edge.action,
-        restores: edge[direction]?.visibility ?? "none",
-      };
-    return {
-      entries,
-      undo,
-      redo,
-      summary: backgroundHistorySchema.parse({
-        undo: summary(undo, "before"),
-        redo: summary(redo, "after"),
-        count: entries.length,
-      }),
-    };
+    return inspectSceneMapHistory(state, entries);
   }
   record(
     campaignId: string,

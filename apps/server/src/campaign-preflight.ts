@@ -22,7 +22,12 @@ import {
   type CampaignTransfer,
 } from "./campaign-transfer-format.js";
 import { entryOf } from "./scene-history-model.js";
-import { backgroundHistoryEntrySchema } from "./scene-map-history.js";
+import {
+  backgroundHistoryEntrySchema,
+  inspectSceneMapHistory,
+  type MapRecord,
+  type MapHistoryEntry,
+} from "./scene-map-history-model.js";
 import { validateCampaignStorageQuotas } from "./campaign-storage-quotas.js";
 
 const same = (a: unknown, b: unknown) =>
@@ -249,6 +254,7 @@ function inspect(
   const backgrounds = new Map(
     records.scene_backgrounds.map((row) => [row.scene_id, row]),
   );
+  const mapStates = new Map<string, MapRecord>();
   for (const row of records.scene_backgrounds) {
     const map = backgroundMapSchema.nullable().parse(JSON.parse(row.map_json));
     if (
@@ -258,6 +264,11 @@ function inspect(
       (map && !assets.has(map.assetId))
     )
       invalid();
+    mapStates.set(row.scene_id, {
+      map,
+      version: row.version,
+      cursor: row.history_cursor,
+    });
   }
   for (const row of records.scene_grids) {
     if (!scenes.has(row.scene_id)) invalid();
@@ -268,6 +279,7 @@ function inspect(
     (row) => `${row.scene_id}/${row.seq}`,
   );
   const mapEntries = new Map<string, Set<string>>();
+  const histories = new Map<string, MapHistoryEntry[]>();
   for (const row of records.scene_background_history) {
     const entry = backgroundHistoryEntrySchema.parse(
         JSON.parse(row.entry_json),
@@ -287,6 +299,9 @@ function inspect(
     );
     if ([...refs].some((id) => !assets.has(id))) invalid();
     mapEntries.set(`${row.scene_id}/${row.id}`, refs);
+    const entries = histories.get(row.scene_id) ?? [];
+    entries.push(entry);
+    histories.set(row.scene_id, entries);
   }
   const actualMapRefs = new Map<string, Set<string>>();
   for (const row of records.scene_background_history_refs) {
@@ -299,6 +314,11 @@ function inspect(
   for (const [key, refs] of mapEntries)
     if (!same([...refs].sort(), [...(actualMapRefs.get(key) ?? [])].sort()))
       invalid();
+  for (const [sceneId, state] of mapStates)
+    inspectSceneMapHistory(
+      state,
+      (histories.get(sceneId) ?? []).sort((a, b) => a.seq - b.seq),
+    );
   unique(records.scene_history_entries, (row) => String(row.sequence));
   for (const row of records.scene_history_entries) {
     if (!scenes.has(row.scene_id)) invalid();
@@ -498,7 +518,7 @@ function inspect(
       ),
     },
     pendingValidation: [
-      "history-causal-graph",
+      "object-history-causal-graph",
       "image-decoding",
       "module-external-references",
       "ownership-plan",
