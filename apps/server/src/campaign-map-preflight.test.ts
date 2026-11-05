@@ -66,7 +66,9 @@ function mapFixture() {
     const report = inspect();
     assert.deepEqual(report.blockers, []);
     assert.equal(report.importReady, false);
-    assert.ok(report.pendingValidation.includes("object-history-causal-graph"));
+    assert.ok(
+      !report.pendingValidation.includes("object-history-causal-graph"),
+    );
     assert.ok(!report.pendingValidation.includes("history-causal-graph"));
     assert.equal(f.db.prepare("SELECT total_changes() AS n").get()!.n, changes);
     assert.equal(f.db.isTransaction, false);

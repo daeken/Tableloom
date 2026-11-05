@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { WebSocket } from "ws";
 import {
   campaignListSchema,
@@ -2011,6 +2012,42 @@ try {
     });
     assert.equal(cleaned.status, 200);
     await cleaned.json();
+    const currentCampaign = await fetch(`${url}/api/campaigns/${campaign.id}`, {
+      headers: { Cookie: nextCookie },
+    });
+    assert.equal(currentCampaign.status, 200);
+    const membership = campaignMembershipSchema.parse(
+      await currentCampaign.json(),
+    );
+    const exported = await fetch(`${url}/api/campaigns/${campaign.id}/export`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: JSON.stringify({
+        expectedVersion: membership.version,
+        include: "all-campaign-content-including-private",
+      }),
+    });
+    assert.equal(exported.status, 200);
+    const preflight = await fetch(`${url}/api/campaign-imports/preflight`, {
+      method: "POST",
+      headers: documentHeaders,
+      body: await exported.text(),
+    });
+    assert.equal(preflight.status, 200);
+    const inspected = z
+      .object({
+        importReady: z.literal(false),
+        blockers: z.array(z.unknown()).max(0),
+        objectHistoryValidation: z.object({
+          entries: z.number().int().positive(),
+        }),
+        pendingValidation: z.array(z.string()),
+      })
+      .parse(await preflight.json());
+    assert.ok(
+      !inspected.pendingValidation.includes("object-history-causal-graph"),
+    );
+    assert.ok(inspected.pendingValidation.includes("mapped-history-graph"));
   } finally {
     live.terminate();
   }
@@ -2028,5 +2065,5 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 console.log(
-  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding and transient context-bound cursor show/hide, persisted audience-filtered campaign chat, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, and clean shutdown.",
+  "Production smoke check passed: built server/assets, authentication, campaigns, module document CRUD, scene activation, acknowledged live dice, versioned scene edits and durable move/create/delete/token-group/mixed/group-deletion/drawing-resize/token-size/group-resize history, owned shared text create/edit/color/style/undo/redo, shape line/fill styling and exact override undo/redo, versioned drawing/token front/back order with exact deletion slots and history, public drawing/token layer placement and exact default restoration, saved shared grid spacing/origin/visibility with independent live snapshots, authenticated named presence with duplicate-tab identity folding and transient context-bound cursor show/hide, persisted audience-filtered campaign chat, private 16-bit/Adam7 PNG and JPEG normalization with asset upload/list/download/removal and private/revealed scene backgrounds with durable map undo/redo and history asset protection, roll archive/cleanup, campaign export/history preflight, and clean shutdown.",
 );

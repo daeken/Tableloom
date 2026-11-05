@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import { PROTOCOL_VERSION, serverMessageSchema } from "@tableloom/core";
+import {
+  PROTOCOL_VERSION,
+  serverMessageSchema,
+  commandSchema,
+} from "@tableloom/core";
+import type { CommandInput } from "@tableloom/core";
+import type { CommandContext } from "@tableloom/core/campaigns";
 import { accessStatusSchema } from "@tableloom/core/access";
 import {
   campaignMembershipSchema,
@@ -103,6 +109,11 @@ async function verifyCampaignExport(
         pixels: z.number().int().positive(),
         pixelLimit: z.number().int().positive(),
       }),
+      objectHistoryValidation: z.object({
+        entries: z.literal(2),
+        retainedLinks: z.literal(1),
+        expiredLinks: z.literal(0),
+      }),
       destination: z.object({
         campaignCapacity: z.object({
           used: z.number().int().positive(),
@@ -119,7 +130,8 @@ async function verifyCampaignExport(
   assert.deepEqual(report.blockers, []);
   assert.ok(report.pendingValidation.includes("mapped-storage-quotas"));
   assert.ok(!report.pendingValidation.includes("full-storage-quotas"));
-  assert.ok(report.pendingValidation.includes("object-history-causal-graph"));
+  assert.ok(!report.pendingValidation.includes("object-history-causal-graph"));
+  assert.ok(report.pendingValidation.includes("mapped-history-graph"));
   assert.ok(!report.pendingValidation.includes("history-causal-graph"));
   assert.ok(!report.pendingValidation.includes("image-decoding"));
   const originalPng = Buffer.from(image.bytes, "base64");
@@ -188,6 +200,78 @@ async function verifyCampaignExport(
     "A hash-consistent invalid PNG must fail compiled preflight",
   );
   assert.match(await invalidImage.text(), /PNG/);
+  const invalidHistoryFile = z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(serialized));
+  const historyRecords = z
+    .object({
+      scene_history_entries: z.array(z.record(z.string(), z.unknown())),
+    })
+    .passthrough()
+    .parse(invalidHistoryFile.records);
+  const first = historyRecords.scene_history_entries[0]!;
+  const targets = z
+    .array(
+      z.object({
+        objectId: z.uuid(),
+        expectedVersion: z.number().int().positive(),
+        previousId: z.uuid().nullable(),
+      }),
+    )
+    .parse(JSON.parse(z.string().parse(first.targets_json)));
+  targets[0]!.previousId = z.uuid().parse(first.id);
+  first.targets_json = JSON.stringify(targets);
+  invalidHistoryFile.records = historyRecords;
+  const invalidHistory = await request(
+    url,
+    "/api/campaign-imports/preflight",
+    cookie,
+    invalidHistoryFile,
+  );
+  assert.equal(
+    invalidHistory.status,
+    400,
+    "A cyclic history link must fail compiled preflight",
+  );
+  await invalidHistory.arrayBuffer();
+}
+async function runtimeCommand(
+  socket: WebSocket,
+  context: CommandContext,
+  input: CommandInput,
+) {
+  const command = commandSchema.parse({ id: randomUUID(), ...input });
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off("message", receive);
+      socket.off("error", failed);
+      socket.off("close", closed);
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error("Runtime command connection failed"));
+    };
+    const closed = () => failed();
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("Runtime command acknowledgement timed out"));
+    }, 5000);
+    const receive = (raw: WebSocket.RawData) => {
+      const message = serverMessageSchema.parse(JSON.parse(raw.toString()));
+      if (message.type === "ack" && message.commandId === command.id) {
+        cleanup();
+        resolve();
+      } else if (message.type === "error" && message.commandId === command.id) {
+        cleanup();
+        reject(new Error("Runtime command rejected"));
+      }
+    };
+    socket.on("message", receive);
+    socket.once("error", failed);
+    socket.once("close", closed);
+    socket.send(JSON.stringify({ context, command }));
+  });
 }
 export async function verifyRuntimeHttp(url: string) {
   const health = await request(url, "/api/health");
@@ -261,20 +345,13 @@ export async function seedRuntime(url: string, hostKey: string) {
   );
   assert.equal(map.status, 200);
   await map.arrayBuffer();
-  await verifyCampaignExport(
-    url,
-    cookie,
-    document,
-    campaign.version,
-    hash(bytes),
-  );
   const socket = new WebSocket(
     url.replace(/^http/, "ws") +
       `/api/live?protocolVersion=${PROTOCOL_VERSION}`,
     { headers: { Cookie: cookie, Origin: url } },
   );
   try {
-    await new Promise<void>((resolve, reject) => {
+    const context = await new Promise<CommandContext>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("Runtime WebSocket timed out")),
         5000,
@@ -285,7 +362,7 @@ export async function seedRuntime(url: string, hostKey: string) {
         );
         if (parsed.success && parsed.data.type === "snapshot") {
           clearTimeout(timer);
-          resolve();
+          resolve(parsed.data.context);
         }
       });
       socket.on("error", (error) => {
@@ -297,9 +374,32 @@ export async function seedRuntime(url: string, hostKey: string) {
         reject(new Error("Runtime WebSocket closed before a snapshot"));
       });
     });
+    const tokenId = randomUUID();
+    await runtimeCommand(socket, context, {
+      type: "token.add",
+      token: {
+        id: tokenId,
+        name: "Runtime history fixture",
+        color: "#405f4d",
+        position: { x: 0, y: 0 },
+      },
+    });
+    await runtimeCommand(socket, context, {
+      type: "token.move",
+      tokenId,
+      expectedVersion: 1,
+      position: { x: 10, y: 5 },
+    });
   } finally {
     socket.terminate();
   }
+  await verifyCampaignExport(
+    url,
+    cookie,
+    document,
+    campaign.version,
+    hash(bytes),
+  );
   return {
     cookie,
     document,

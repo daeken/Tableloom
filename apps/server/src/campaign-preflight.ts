@@ -23,6 +23,10 @@ import {
 } from "./campaign-transfer-format.js";
 import { entryOf } from "./scene-history-model.js";
 import {
+  inspectSceneHistoryGraph,
+  type HistoryObjectLocation,
+} from "./scene-history-graph.js";
+import {
   backgroundHistoryEntrySchema,
   inspectSceneMapHistory,
   type MapRecord,
@@ -261,6 +265,9 @@ function inspect(
   for (const roll of data.rolls) subject(roll.ownerId);
   const scenes = unique(records.scene_records, (row) => row.id),
     objects = unique(data.notes, (note) => note.id);
+  const historyObjects = new Map<string, HistoryObjectLocation>(
+    data.notes.map((note) => [note.id, { kind: "note", sceneId: null }]),
+  );
   if (!scenes.has(campaign.activeSceneId)) invalid();
   const reservations = new Set(
     records.object_id_reservations.map((row) => row.id),
@@ -274,6 +281,10 @@ function inspect(
     for (const object of [...scene.tokens, ...scene.drawings]) {
       if (objects.has(object.id) || !reservations.has(object.id)) invalid();
       objects.add(object.id);
+      historyObjects.set(object.id, {
+        kind: "position" in object ? "token" : "drawing",
+        sceneId: row.id,
+      });
       subject(object.ownerId);
     }
   }
@@ -372,13 +383,19 @@ function inspect(
       (histories.get(sceneId) ?? []).sort((a, b) => a.seq - b.seq),
     );
   unique(records.scene_history_entries, (row) => String(row.sequence));
-  for (const row of records.scene_history_entries) {
-    if (!scenes.has(row.scene_id)) invalid();
-    const entry = entryOf(row);
-    historicalOwners(entry.payload);
-    for (const target of entry.targets)
-      if (!reservations.has(target.objectId)) invalid();
+  function* historyEntries() {
+    for (const row of records.scene_history_entries) {
+      if (!scenes.has(row.scene_id)) invalid();
+      const entry = entryOf(row);
+      historicalOwners(entry.payload);
+      yield entry;
+    }
   }
+  const objectHistoryValidation = inspectSceneHistoryGraph(
+    historyEntries(),
+    reservations,
+    historyObjects,
+  );
   const rolls = new Set(data.rolls.map((roll) => roll.id));
   for (const row of records.roll_archive) {
     const roll = rollSchema.parse(JSON.parse(row.roll_json));
@@ -558,6 +575,7 @@ function inspect(
     resourceCounts: Object.fromEntries(
       Object.entries(records).map(([key, rows]) => [key, rows.length]),
     ),
+    objectHistoryValidation,
     packages: {
       system: { ...campaign.system, status: systemStatus },
       contentPacks: packageChecks,
@@ -570,12 +588,12 @@ function inspect(
       ),
     },
     pendingValidation: [
-      "object-history-causal-graph",
       "image-decoding",
       "module-external-references",
       "ownership-plan",
       "resource-id-plan",
       "mapped-storage-quotas",
+      "mapped-history-graph",
       "atomic-import",
     ],
   };

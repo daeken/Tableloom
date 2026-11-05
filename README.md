@@ -98,7 +98,7 @@ This is the **single source of truth for goals and remaining work**. Work top to
 - [x] Add consistent database/asset backup and restore, with tested recovery into new directories.
 - [x] Add CI for clean install, strict checks, tests, builds, backup recovery and container persistence.
 - [x] Document reverse proxy/HTTPS, upgrades, trusted-module installation and current transfer limits.
-- [ ] **Next:** finish portable campaign export/import with explicit privacy, ownership and package-pin validation. GM-only export and host-only preflight are ready, with source storage limits, map history chains and PNG data checked; full import validation, atomic writes, reviewed ownership/ID mapping and transfer UI remain.
+- [ ] **Next:** finish portable campaign export/import with explicit privacy, ownership and package-pin validation. GM-only export and host-only preflight are ready, with source storage limits, map/object history graphs and PNG data checked; full import validation, atomic writes, reviewed ownership/ID mapping and transfer UI remain.
 - [ ] **Needs a playtest group:** run a complete campaign session and fix workflow friction.
 - [ ] **After playtest feedback:** add note history/trash and richer document content.
 
